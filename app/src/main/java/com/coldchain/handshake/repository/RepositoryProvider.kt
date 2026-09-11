@@ -2,6 +2,10 @@ package com.coldchain.handshake.repository
 
 import android.content.Context
 import com.coldchain.handshake.data.local.DatabaseProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 /**
  * Lightweight thread-safe provider for shared repository singletons.
@@ -20,6 +24,12 @@ object RepositoryProvider {
 
     @Volatile
     private var handoverRepo: HandoverRepository? = null
+
+    @Volatile
+    private var syncService: SyncService? = null
+
+    @Volatile
+    internal var syncScope: CoroutineScope? = null
 
     fun getShipmentRepository(context: Context): ShipmentRepository {
         return shipmentRepo ?: synchronized(this) {
@@ -53,6 +63,27 @@ object RepositoryProvider {
         }
     }
 
+    fun getSyncService(context: Context): SyncService {
+        return syncService ?: synchronized(this) {
+            syncService ?: run {
+                val db = DatabaseProvider.getDatabase(context)
+                val networkMonitor = com.coldchain.handshake.data.network.AndroidNetworkMonitor(context)
+                val remoteDataSource = com.coldchain.handshake.data.remote.SupabaseRemoteDataSource()
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                syncScope = scope
+                SyncServiceImpl(
+                    shipmentDao = db.shipmentDao(),
+                    temperatureEventDao = db.temperatureEventDao(),
+                    alertDao = db.alertDao(),
+                    handoverDao = db.handoverDao(),
+                    remoteDataSource = remoteDataSource,
+                    networkMonitor = networkMonitor,
+                    coroutineScope = scope
+                ).also { syncService = it }
+            }
+        }
+    }
+
     /**
      * Testing / initialization hook to supply mock or fake instances.
      */
@@ -60,25 +91,34 @@ object RepositoryProvider {
         shipmentRepository: ShipmentRepository? = null,
         telemetryRepository: TelemetryRepository? = null,
         alertRepository: AlertRepository? = null,
-        handoverRepository: HandoverRepository? = null
+        handoverRepository: HandoverRepository? = null,
+        syncServiceImpl: SyncService? = null
     ) {
         synchronized(this) {
+            syncScope?.cancel()
+            syncScope = null
             shipmentRepository?.let { shipmentRepo = it }
             telemetryRepository?.let { telemetryRepo = it }
             alertRepository?.let { alertRepo = it }
             handoverRepository?.let { handoverRepo = it }
+            syncServiceImpl?.let { syncService = it }
         }
     }
 
     /**
-     * Reset repository references (useful between tests).
+     * Reset repository references and cancel background network observers (useful between tests).
      */
     fun reset() {
         synchronized(this) {
+            syncScope?.cancel()
+            syncScope = null
             shipmentRepo = null
             telemetryRepo = null
             alertRepo = null
             handoverRepo = null
+            syncService = null
         }
     }
 }
+
+

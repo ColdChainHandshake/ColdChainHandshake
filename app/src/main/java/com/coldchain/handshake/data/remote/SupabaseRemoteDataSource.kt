@@ -12,7 +12,7 @@ import io.github.jan.supabase.postgrest.postgrest
  * Executes idempotent upserts keyed by primary logical IDs,
  * ensuring retried sync operations never duplicate remote records.
  */
-class SupabaseRemoteDataSource(
+open class SupabaseRemoteDataSource(
     private val clientProvider: () -> SupabaseClient = { SupabaseClientProvider.getClient() }
 ) {
 
@@ -29,44 +29,45 @@ class SupabaseRemoteDataSource(
     // Idempotent Remote Writes (Upsert by logical ID)
     // -------------------------------------------------------------------------
 
-    suspend fun upsertShipments(shipments: List<RemoteShipmentDto>): Result<Unit> = runCatching {
+    open suspend fun upsertShipments(shipments: List<RemoteShipmentDto>): Result<Unit> = runCatching {
         if (shipments.isEmpty()) return@runCatching
         client.postgrest.from(TABLE_SHIPMENTS).upsert(shipments, onConflict = "id")
         Unit
     }
 
-    suspend fun upsertShipment(shipment: RemoteShipmentDto): Result<Unit> = runCatching {
+    open suspend fun upsertShipment(shipment: RemoteShipmentDto): Result<Unit> = runCatching {
         client.postgrest.from(TABLE_SHIPMENTS).upsert(shipment, onConflict = "id")
         Unit
     }
 
-    suspend fun upsertTemperatureEvents(events: List<RemoteTemperatureEventDto>): Result<Unit> = runCatching {
+    open suspend fun upsertTemperatureEvents(events: List<RemoteTemperatureEventDto>): Result<Unit> = runCatching {
         if (events.isEmpty()) return@runCatching
         // Idempotent upsert preserves append-only event stream and avoids duplicate rows on retry.
         client.postgrest.from(TABLE_TEMPERATURE_EVENTS).upsert(events, onConflict = "id")
         Unit
     }
 
-    suspend fun upsertTemperatureEvent(event: RemoteTemperatureEventDto): Result<Unit> = runCatching {
+    open suspend fun upsertTemperatureEvent(event: RemoteTemperatureEventDto): Result<Unit> = runCatching {
         client.postgrest.from(TABLE_TEMPERATURE_EVENTS).upsert(event, onConflict = "id")
         Unit
     }
 
-    suspend fun upsertAlerts(alerts: List<RemoteAlertDto>): Result<Unit> = runCatching {
+    open suspend fun upsertAlerts(alerts: List<RemoteAlertDto>): Result<Unit> = runCatching {
         if (alerts.isEmpty()) return@runCatching
         client.postgrest.from(TABLE_ALERTS).upsert(alerts, onConflict = "id")
         Unit
     }
 
-    suspend fun upsertAlert(alert: RemoteAlertDto): Result<Unit> = runCatching {
+    open suspend fun upsertAlert(alert: RemoteAlertDto): Result<Unit> = runCatching {
         client.postgrest.from(TABLE_ALERTS).upsert(alert, onConflict = "id")
         Unit
     }
 
-    suspend fun upsertHandover(handover: RemoteHandoverDto): Result<Unit> = runCatching {
+    open suspend fun upsertHandover(handover: RemoteHandoverDto): Result<Unit> = runCatching {
         client.postgrest.from(TABLE_HANDOVERS).upsert(handover, onConflict = "id")
         Unit
     }
+
 
 
     // -------------------------------------------------------------------------
