@@ -1,0 +1,50 @@
+package com.coldchain.handshake.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import com.coldchain.handshake.data.local.entities.TemperatureEventEntity
+import com.coldchain.handshake.models.SyncStatus
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface TemperatureEventDao {
+
+    /**
+     * Observable stream of all temperature events for a shipment, sorted chronologically.
+     */
+    @Query("SELECT * FROM temperature_events WHERE shipmentId = :shipmentId ORDER BY timestamp ASC")
+    fun getTemperatures(shipmentId: String): Flow<List<TemperatureEventEntity>>
+
+    /**
+     * Direct snapshot read for verification logic.
+     */
+    @Query("SELECT * FROM temperature_events WHERE shipmentId = :shipmentId ORDER BY timestamp ASC")
+    suspend fun getTemperaturesDirect(shipmentId: String): List<TemperatureEventEntity>
+
+    /**
+     * Append-only insert. Ignores duplicates if the ID already exists,
+     * protecting hash-chain and telemetry history from accidental overwrites.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertEvent(event: TemperatureEventEntity): Long
+
+    /**
+     * Retrieve all pending or failed events that need cloud synchronization.
+     */
+    @Query("SELECT * FROM temperature_events WHERE syncStatus != 'SYNCED' ORDER BY timestamp ASC")
+    suspend fun getPendingEvents(): List<TemperatureEventEntity>
+
+    /**
+     * Isolated sync status update.
+     */
+    @Query("UPDATE temperature_events SET syncStatus = :syncStatus WHERE id = :id")
+    suspend fun updateSyncStatus(id: String, syncStatus: SyncStatus)
+
+    /**
+     * Batch isolated sync status update.
+     */
+    @Query("UPDATE temperature_events SET syncStatus = :syncStatus WHERE id IN (:ids)")
+    suspend fun updateSyncStatuses(ids: List<String>, syncStatus: SyncStatus)
+}
