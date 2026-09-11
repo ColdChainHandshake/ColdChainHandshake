@@ -19,7 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DirectionsRun
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCode
@@ -32,10 +33,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coldchain.handshake.models.Shipment
@@ -57,6 +60,7 @@ import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.util.QRCodeGenerator
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -71,6 +75,10 @@ fun DispatchScreen(
     var destination by remember { mutableStateOf("St. Jude Pharmacy") }
     var workerId by remember { mutableStateOf("W-14") }
     var loggerId by remember { mutableStateOf("LOG-902") }
+
+    // Authoritative scanned QR identifier to bind to Shipment.qrCode
+    var boundQrCode by remember { mutableStateOf<String?>(null) }
+    var infoBannerMessage by remember { mutableStateOf<String?>(null) }
 
     var currentShipment by remember { mutableStateOf<Shipment?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -89,17 +97,54 @@ fun DispatchScreen(
         QRScannerDialog(
             onCodeScanned = { scannedCode ->
                 showScannerDialog = false
-                // If scanned QR is a CCH manifest string: CCH:SHIP:ID:ORIGIN:DEST:LOGGER
-                if (scannedCode.startsWith("CCH:SHIP:")) {
-                    val parts = scannedCode.split(":")
-                    if (parts.size >= 6) {
-                        origin = parts[3]
-                        destination = parts[4]
-                        loggerId = parts[5]
+                scope.launch {
+                    // 1. Check if an existing shipment matches this scanned QR code or ID
+                    val allShipments = RepositoryProvider.shipmentRepository.getAllShipments().first()
+                    val matchedShipment = allShipments.firstOrNull {
+                        it.qrCode == scannedCode ||
+                                it.id == scannedCode ||
+                                (scannedCode.startsWith("CCH:SHIP:") && it.id == scannedCode.split(":").getOrNull(2))
                     }
-                } else if (scannedCode.startsWith("LOG-")) {
-                    // Quick logger association scan
-                    loggerId = scannedCode
+
+                    if (matchedShipment != null) {
+                        // Identified existing shipment! Load and associate directly
+                        currentShipment = matchedShipment
+                        boundQrCode = matchedShipment.qrCode
+                        qrBitmap = QRCodeGenerator.generateQR(matchedShipment.qrCode, 400)
+                        RepositoryProvider.temperatureSimulator.attachShipment(matchedShipment)
+                        infoBannerMessage = "Identified existing consignment ${matchedShipment.id} via QR"
+                    } else if (currentShipment != null && currentShipment!!.status == ShipmentStatus.CREATED) {
+                        // Associate scanned QR code directly with existing active shipment
+                        val updatedShipment = if (scannedCode.startsWith("LOG-")) {
+                            currentShipment!!.copy(loggerId = scannedCode)
+                        } else {
+                            currentShipment!!.copy(qrCode = scannedCode)
+                        }
+                        currentShipment = updatedShipment
+                        boundQrCode = updatedShipment.qrCode
+                        qrBitmap = QRCodeGenerator.generateQR(updatedShipment.qrCode, 400)
+                        RepositoryProvider.shipmentRepository.saveShipment(updatedShipment)
+                        RepositoryProvider.temperatureSimulator.attachShipment(updatedShipment)
+                        infoBannerMessage = "Associated QR payload with consignment ${updatedShipment.id}"
+                    } else {
+                        // Configure new shipment with scanned QR payload bound to Shipment.qrCode
+                        boundQrCode = scannedCode
+
+                        if (scannedCode.startsWith("LOG-")) {
+                            loggerId = scannedCode
+                            infoBannerMessage = "Paired Logger $scannedCode via QR scan"
+                        } else if (scannedCode.startsWith("CCH:SHIP:")) {
+                            val parts = scannedCode.split(":")
+                            if (parts.size >= 6) {
+                                origin = parts[3]
+                                destination = parts[4]
+                                loggerId = parts[5]
+                            }
+                            infoBannerMessage = "Bound scanned manifest QR to new consignment"
+                        } else {
+                            infoBannerMessage = "Bound scanned QR identifier to new consignment"
+                        }
+                    }
                 }
             },
             onDismiss = { showScannerDialog = false }
@@ -140,7 +185,51 @@ fun DispatchScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Notification / Status Banner
+        infoBannerMessage?.let { msg ->
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Status",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    IconButton(
+                        onClick = { infoBannerMessage = null },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Manifest Configuration Form (or summary if created)
         if (currentShipment == null) {
@@ -170,7 +259,45 @@ fun DispatchScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Scan QR")
+                            Text("Scan / Identify QR")
+                        }
+                    }
+
+                    // Display bound QR code banner if available
+                    boundQrCode?.let { qr ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = StatusGreen.copy(alpha = 0.12f)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "BOUND QR IDENTIFIER",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = StatusGreen
+                                    )
+                                    Text(
+                                        text = qr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { boundQrCode = null },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(14.dp))
+                                }
+                            }
                         }
                     }
 
@@ -226,6 +353,7 @@ fun DispatchScreen(
                                 destination = "City Central Hospital"
                                 workerId = "W-24"
                                 loggerId = "LOG-505"
+                                boundQrCode = null
                             }
                         ) {
                             Text("Demo Preset")
@@ -234,10 +362,11 @@ fun DispatchScreen(
                         Button(
                             onClick = {
                                 val shipmentId = "SHIP-" + UUID.randomUUID().toString().take(6).uppercase()
-                                val qrPayload = "CCH:SHIP:$shipmentId:$origin:$destination:$loggerId"
+                                // The authoritative qrCode is explicitly associated with the scanned code if present
+                                val authoritativeQr = boundQrCode ?: "CCH:SHIP:$shipmentId:$origin:$destination:$loggerId"
                                 val newShipment = Shipment(
                                     id = shipmentId,
-                                    qrCode = qrPayload,
+                                    qrCode = authoritativeQr,
                                     loggerId = loggerId.trim(),
                                     origin = origin.trim(),
                                     destination = destination.trim(),
@@ -245,11 +374,12 @@ fun DispatchScreen(
                                     status = ShipmentStatus.CREATED
                                 )
                                 currentShipment = newShipment
-                                qrBitmap = QRCodeGenerator.generateQR(qrPayload, 400)
+                                qrBitmap = QRCodeGenerator.generateQR(authoritativeQr, 400)
 
                                 scope.launch {
                                     RepositoryProvider.shipmentRepository.saveShipment(newShipment)
                                     RepositoryProvider.temperatureSimulator.attachShipment(newShipment)
+                                    infoBannerMessage = "Created Consignment $shipmentId with QR associated"
                                 }
                             },
                             enabled = origin.isNotBlank() && destination.isNotBlank() && loggerId.isNotBlank()
@@ -380,10 +510,32 @@ fun DispatchScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
+                            text = "Authoritative QR Identifier:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
                             text = shipment.qrCode,
                             style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        if (shipment.status == ShipmentStatus.CREATED) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = { showScannerDialog = true }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = "Re-scan QR",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Re-scan / Associate QR")
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -398,6 +550,7 @@ fun DispatchScreen(
                                     scope.launch {
                                         RepositoryProvider.shipmentRepository.saveShipment(dispatched)
                                         RepositoryProvider.temperatureSimulator.attachShipment(dispatched)
+                                        infoBannerMessage = "Consignment ${dispatched.id} DISPATCHED and sealed"
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth()
@@ -455,7 +608,6 @@ fun DispatchScreen(
                             }
                         }
                         else -> {
-                            // Already processed or arrived
                             Text(
                                 text = "Consignment lifecycle: ${shipment.status}",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -470,7 +622,9 @@ fun DispatchScreen(
                         onClick = {
                             RepositoryProvider.temperatureSimulator.reset()
                             currentShipment = null
+                            boundQrCode = null
                             qrBitmap = null
+                            infoBannerMessage = "Reset consignment configuration"
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {

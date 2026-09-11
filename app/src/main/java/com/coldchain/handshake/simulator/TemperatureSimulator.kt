@@ -58,6 +58,9 @@ class TemperatureSimulator(
     private val _simulatedTimestamp = MutableStateFlow(System.currentTimeMillis())
     val simulatedTimestamp: StateFlow<Long> = _simulatedTimestamp.asStateFlow()
 
+    private val _lastPersistenceError = MutableStateFlow<String?>(null)
+    val lastPersistenceError: StateFlow<String?> = _lastPersistenceError.asStateFlow()
+
     init {
         // Automatically link with ChaosEngineService if present
         chaosEngineService?.let { service ->
@@ -77,11 +80,12 @@ class TemperatureSimulator(
         _activeShipment.value = shipment
         _simulatedTimestamp.value = startTimestamp
         stepCounter = 0
+        _lastPersistenceError.value = null
     }
 
     fun setHeatSpikeMode(enabled: Boolean) {
+        if (_isHeatSpikeMode.value == enabled) return
         _isHeatSpikeMode.value = enabled
-        // If chaos engine service is attached, also trigger or reset scenario
         chaosEngineService?.let { service ->
             scope.launch {
                 if (enabled) {
@@ -93,11 +97,22 @@ class TemperatureSimulator(
         }
     }
 
+    suspend fun setHeatSpikeModeSync(enabled: Boolean) {
+        if (_isHeatSpikeMode.value == enabled) return
+        _isHeatSpikeMode.value = enabled
+        if (enabled) {
+            chaosEngineService?.injectScenario(ChaosScenarioType.HEAT_SPIKE)
+        } else {
+            chaosEngineService?.resetScenario(ChaosScenarioType.HEAT_SPIKE)
+        }
+    }
+
     /**
      * Executes a single deterministic simulation step:
      * - Advances simulated timestamp by [simulatedStepDurationSeconds] (default 60s).
      * - Generates deterministic reading (normal 4–6°C or heat spike 9–11°C).
      * - Routes event strictly to [TelemetryRepository.saveTemperature].
+     * - Correctly evaluates Result: on failure, persistence error is recorded and null returned.
      */
     suspend fun tickOnce(simulatedStepDurationSeconds: Long = 60L): TemperatureEvent? {
         val shipment = _activeShipment.value ?: return null
@@ -109,9 +124,6 @@ class TemperatureSimulator(
         }
 
         val nextTimestamp = _simulatedTimestamp.value + (simulatedStepDurationSeconds * 1000L)
-        _simulatedTimestamp.value = nextTimestamp
-        _latestTemperature.value = temp
-        stepCounter++
 
         val event = TemperatureEvent(
             id = "TE-${UUID.randomUUID().toString().take(8).uppercase()}",
@@ -124,8 +136,18 @@ class TemperatureSimulator(
             syncStatus = SyncStatus.PENDING
         )
 
-        telemetryRepository.saveTemperature(event)
-        return event
+        val saveResult = telemetryRepository.saveTemperature(event)
+        return if (saveResult.isSuccess) {
+            _simulatedTimestamp.value = nextTimestamp
+            _latestTemperature.value = temp
+            stepCounter++
+            _lastPersistenceError.value = null
+            event
+        } else {
+            val errorMsg = saveResult.exceptionOrNull()?.message ?: "Failed to persist temperature event"
+            _lastPersistenceError.value = errorMsg
+            null
+        }
     }
 
     /**
@@ -152,11 +174,33 @@ class TemperatureSimulator(
         simulationJob = null
     }
 
+    /**
+     * Resets simulator and resets HEAT_SPIKE chaos scenario so it cannot immediately reactivate.
+     */
     fun reset() {
         stopContinuousSimulation()
         _activeShipment.value = null
         _latestTemperature.value = null
         _isHeatSpikeMode.value = false
         stepCounter = 0
+        _lastPersistenceError.value = null
+        chaosEngineService?.let { service ->
+            scope.launch {
+                service.resetScenario(ChaosScenarioType.HEAT_SPIKE)
+            }
+        }
+    }
+
+    /**
+     * Synchronous suspend reset ensuring chaos scenario reset completes before continuing.
+     */
+    suspend fun resetSync() {
+        stopContinuousSimulation()
+        _activeShipment.value = null
+        _latestTemperature.value = null
+        _isHeatSpikeMode.value = false
+        stepCounter = 0
+        _lastPersistenceError.value = null
+        chaosEngineService?.resetScenario(ChaosScenarioType.HEAT_SPIKE)
     }
 }

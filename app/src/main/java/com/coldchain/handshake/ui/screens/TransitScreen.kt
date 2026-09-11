@@ -77,6 +77,7 @@ fun TransitScreen(
     val isRunning by simulator.isRunning.collectAsState()
     val isHeatSpikeMode by simulator.isHeatSpikeMode.collectAsState()
     val simulatedTimestamp by simulator.simulatedTimestamp.collectAsState()
+    val lastPersistenceError by simulator.lastPersistenceError.collectAsState()
 
     val telemetryEvents by (if (activeShipment != null) {
         RepositoryProvider.telemetryRepository.getTemperatures(activeShipment!!.id)
@@ -245,6 +246,41 @@ fun TransitScreen(
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+            }
+
+            lastPersistenceError?.let { err ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = StatusRed.copy(alpha = 0.15f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Persistence Failure",
+                            tint = StatusRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "TELEMETRY PERSISTENCE FAILED",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = StatusRed
+                            )
+                            Text(
+                                text = err,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = StatusRed
+                            )
+                        }
                     }
                 }
             }
