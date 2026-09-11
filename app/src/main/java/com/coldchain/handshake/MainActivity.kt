@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.navigation.AppNavigation
 import com.coldchain.handshake.ui.theme.ColdChainTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        RepositoryProvider.initialize(applicationContext)
         setContent {
             ColdChainTheme {
                 Surface(
