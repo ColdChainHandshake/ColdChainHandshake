@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.serialization'
     id 'kotlin-kapt'
 }
 
@@ -76,6 +77,14 @@ dependencies {
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
+    // Serialization
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0'
+
+    // Supabase & Ktor
+    implementation platform('io.github.jan-tennert.supabase:bom:2.2.3')
+    implementation 'io.github.jan-tennert.supabase:postgrest-kt'
+    implementation 'io.ktor:ktor-client-android:2.3.9'
+
     // Room
     def room_version = "2.6.1"
     implementation "androidx.room:room-runtime:$room_version"
@@ -91,4 +100,5 @@ dependencies {
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
 }
+
 
