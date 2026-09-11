@@ -56,8 +56,32 @@ fun AppNavigation() {
             startDestination = Screen.Dispatch.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Dispatch.route) { DispatchScreen() }
-            composable(Screen.Transit.route) { TransitScreen() }
+            composable(Screen.Dispatch.route) {
+                DispatchScreen(
+                    onNavigateToTransit = {
+                        navController.navigate(Screen.Transit.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
+            composable(Screen.Transit.route) {
+                TransitScreen(
+                    onNavigateToDispatch = {
+                        navController.navigate(Screen.Dispatch.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
             composable(Screen.Alerts.route) { AlertsScreen() }
             composable(Screen.Handover.route) { HandoverScreen() }
             composable(Screen.Chaos.route) { ChaosScreen() }
