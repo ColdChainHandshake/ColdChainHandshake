@@ -1,0 +1,15 @@
+# Android / Gradle generated files
+.gradle/
+**/.gradle/
+build/
+**/build/
+.idea/
+**/.idea/
+
+# Local machine configuration
+local.properties
+
+# Reference repositories are source material only; never track generated output
+reference/**/.gradle/
+reference/**/build/
+reference/**/.idea/
