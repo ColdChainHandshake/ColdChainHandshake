@@ -1,5 +1,6 @@
 package com.coldchain.handshake.data.remote
 
+import com.coldchain.handshake.BuildConfig
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
@@ -20,10 +21,10 @@ object SupabaseClientProvider {
     private var client: SupabaseClient? = null
 
     @Volatile
-    private var currentUrl: String = PLACEHOLDER_URL
+    private var currentUrl: String = BuildConfig.SUPABASE_URL.ifBlank { PLACEHOLDER_URL }
 
     @Volatile
-    private var currentKey: String = PLACEHOLDER_KEY
+    private var currentKey: String = BuildConfig.SUPABASE_ANON_KEY.ifBlank { PLACEHOLDER_KEY }
 
     /**
      * Dynamically initialize with remote project credentials without hardcoding secrets.
@@ -81,13 +82,15 @@ object SupabaseClientProvider {
         }
     }
 
+    fun getTargetUrl(): String = currentUrl
+
     /**
-     * Reset to default placeholder state.
+     * Reset to default configured or placeholder state.
      */
     fun reset() {
         synchronized(this) {
-            currentUrl = PLACEHOLDER_URL
-            currentKey = PLACEHOLDER_KEY
+            currentUrl = BuildConfig.SUPABASE_URL.ifBlank { PLACEHOLDER_URL }
+            currentKey = BuildConfig.SUPABASE_ANON_KEY.ifBlank { PLACEHOLDER_KEY }
             client = null
         }
     }

@@ -154,7 +154,7 @@ class RemoteDtoMappingTest {
 
     @Test
     fun testSupabaseClientProviderConfiguration() {
-        assertFalse("Default client provider should recognize placeholder state", SupabaseClientProvider.isConfigured())
+        assertEquals("https://ljqwaqesiszczixbclwg.supabase.co", SupabaseClientProvider.getTargetUrl())
         assertNotNull(SupabaseClientProvider.getClient())
 
         SupabaseClientProvider.initialize(
@@ -162,14 +162,21 @@ class RemoteDtoMappingTest {
             key = "my-real-anon-key-12345"
         )
         assertTrue("Configured provider should report configured = true", SupabaseClientProvider.isConfigured())
+        assertEquals("https://my-real-project.supabase.co", SupabaseClientProvider.getTargetUrl())
 
         SupabaseClientProvider.reset()
-        assertFalse(SupabaseClientProvider.isConfigured())
+        assertEquals("https://ljqwaqesiszczixbclwg.supabase.co", SupabaseClientProvider.getTargetUrl())
     }
 
     @Test
     fun testDataSourceGracefulFailureWithPlaceholder() = runTest {
-        val dataSource = SupabaseRemoteDataSource()
+        val invalidClient = io.github.jan.supabase.createSupabaseClient(
+            SupabaseClientProvider.PLACEHOLDER_URL,
+            SupabaseClientProvider.PLACEHOLDER_KEY
+        ) {
+            install(io.github.jan.supabase.postgrest.Postgrest)
+        }
+        val dataSource = SupabaseRemoteDataSource { invalidClient }
         val dummyShipment = RemoteShipmentDto(
             id = "test-fail-1",
             qrCode = "QR",

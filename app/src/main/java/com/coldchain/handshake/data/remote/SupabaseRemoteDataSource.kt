@@ -107,4 +107,28 @@ open class SupabaseRemoteDataSource(
             }
             .decodeSingleOrNull<RemoteHandoverDto>()
     }
+
+    // -------------------------------------------------------------------------
+    // Safe Remote Cleanup (Used for Test Data Hygiene)
+    // -------------------------------------------------------------------------
+
+    suspend fun deleteShipment(id: String): Result<Unit> = runCatching {
+        client.postgrest.from(TABLE_SHIPMENTS).delete { filter { eq("id", id) } }
+        Unit
+    }
+
+    suspend fun deleteTemperatureEvent(id: String): Result<Unit> = runCatching {
+        client.postgrest.from(TABLE_TEMPERATURE_EVENTS).delete { filter { eq("id", id) } }
+        Unit
+    }
+
+    suspend fun deleteAlert(id: String): Result<Unit> = runCatching {
+        client.postgrest.from(TABLE_ALERTS).delete { filter { eq("id", id) } }
+        Unit
+    }
+
+    suspend fun deleteHandover(id: String): Result<Unit> = runCatching {
+        client.postgrest.from(TABLE_HANDOVERS).delete { filter { eq("id", id) } }
+        Unit
+    }
 }
