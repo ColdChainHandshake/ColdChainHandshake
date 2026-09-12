@@ -59,6 +59,15 @@ object RepositoryProvider {
 
     @Volatile
     private var simulator: TemperatureSimulator? = null
+    private var syncCoordinator: ShipmentHistorySyncCoordinator? = null
+
+    val shipmentHistorySyncCoordinator: ShipmentHistorySyncCoordinator
+        get() = syncCoordinator ?: synchronized(this) {
+            syncCoordinator ?: ShipmentHistorySyncCoordinator(
+                telemetryRepository = telemetryRepository,
+                remoteDataSource = SupabaseRemoteDataSource()
+            ).also { syncCoordinator = it }
+        }
 
     @Volatile
     internal var syncScope: CoroutineScope? = null
@@ -134,6 +143,12 @@ object RepositoryProvider {
 
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             syncScope = scope
+
+            val coordinator = ShipmentHistorySyncCoordinator(
+                telemetryRepository = tRepo,
+                remoteDataSource = remoteDataSource
+            )
+            syncCoordinator = coordinator
 
             syncServiceInstance = SyncServiceImpl(
                 shipmentDao = db.shipmentDao(),
@@ -305,6 +320,7 @@ object RepositoryProvider {
             safetyEngineInstance = null
             handoverOrchestratorInstance = null
             simulator = null
+            syncCoordinator = null
             chaosService = InMemoryChaosEngineService()
         }
     }

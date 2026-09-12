@@ -20,6 +20,12 @@ class TelemetryRepositoryImpl(
         temperatureEventDao.insertEvent(event.toEntity())
     }
 
+    override suspend fun saveTemperatures(events: List<TemperatureEvent>): Result<Unit> = runCatching {
+        if (events.isEmpty()) return@runCatching
+        temperatureEventDao.insertEvents(events.map { it.toEntity() })
+        Unit
+    }
+
     override fun getTemperatures(shipmentId: String): Flow<List<TemperatureEvent>> {
         return temperatureEventDao.getTemperatures(shipmentId).map { entities ->
             entities.map { it.toDomain() }

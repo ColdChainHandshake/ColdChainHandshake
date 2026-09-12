@@ -354,6 +354,11 @@ class HandoverOrchestratorTest {
             return Result.success(Unit)
         }
 
+        override suspend fun saveTemperatures(events: List<TemperatureEvent>): Result<Unit> {
+            events.forEach { saveTemperature(it) }
+            return Result.success(Unit)
+        }
+
         override fun getTemperatures(shipmentId: String): Flow<List<TemperatureEvent>> {
             if (shouldThrow) {
                 return flow {

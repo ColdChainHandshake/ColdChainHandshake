@@ -332,6 +332,14 @@ class FakeTemperatureEventDao : TemperatureEventDao {
         return events.size.toLong()
     }
 
+    override suspend fun insertEvents(events: List<TemperatureEventEntity>): List<Long> {
+        val result = mutableListOf<Long>()
+        for (event in events) {
+            result.add(insertEvent(event))
+        }
+        return result
+    }
+
     override suspend fun getPendingEvents(): List<TemperatureEventEntity> {
         return events.filter { it.syncStatus != SyncStatus.SYNCED }.sortedBy { it.timestamp }
     }
