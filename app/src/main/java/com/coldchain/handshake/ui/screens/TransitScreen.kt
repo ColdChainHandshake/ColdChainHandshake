@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocalShipping
@@ -37,7 +38,9 @@ import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +74,7 @@ import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.util.DeviceIdProvider
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.PrimaryCold
 import com.coldchain.handshake.ui.theme.StatusAmber
@@ -125,6 +129,11 @@ fun TransitScreen(
     val lastPersistenceError by simulator.lastPersistenceError.collectAsState()
 
     // Mode: Transporter (Phone A) vs Shipment Monitor (Phone B)
+        val myDeviceId = remember { DeviceIdProvider.getDeviceId(context) }
+    var isCurrentCustodyDevice by remember { mutableStateOf(false) }
+    var showHandedOverDialog by remember { mutableStateOf(false) }
+    var handedOverShipmentId by remember { mutableStateOf("") }
+
     var isMonitorMode by remember {
         mutableStateOf(currentShipment?.workerId == "W-MONITOR")
     }
@@ -315,6 +324,30 @@ fun TransitScreen(
         }
     }
 
+
+    // ----------------------------------------------------
+    // PHONE A: CUSTODY POLLING (Detect Handover Transfer)
+    // ----------------------------------------------------
+    LaunchedEffect(currentShipment?.id, isMonitorMode) {
+        val ship = currentShipment
+        if (!isMonitorMode && ship != null) {
+            val activeShipId = ship.id
+            while (isActive) {
+                delay(3500L)
+                runCatching {
+                    val custody = remoteDataSource.getCustodyState(activeShipId).getOrNull()
+                    if (custody != null && custody.activeDeviceId != myDeviceId && custody.custodyState == "TRANSFERRED") {
+                        // Custody transferred to receiving device!
+                        stopGpsTracking()
+                        simulator.reset()
+                        handedOverShipmentId = activeShipId
+                        showHandedOverDialog = true
+                    }
+                }
+            }
+        }
+    }
+
     // ----------------------------------------------------
     // PHONE B: 3-SECOND POLLING LOOP FOR LIVE MONITORING
     // ----------------------------------------------------
@@ -354,6 +387,15 @@ fun TransitScreen(
                             status = runCatching { ShipmentStatus.valueOf(remoteShip.status) }.getOrDefault(currentShipment.status)
                         )
                         RepositoryProvider.getShipmentRepository(context).saveShipment(updated)
+                    }
+                }
+
+                // 4. Poll custody state: if transferred to this device, become active holder
+                runCatching {
+                    val custody = remoteDataSource.getCustodyState(shipId).getOrNull()
+                    if (custody != null && custody.activeDeviceId == myDeviceId && custody.custodyState == "TRANSFERRED") {
+                        isCurrentCustodyDevice = true
+                        isMonitorMode = false
                     }
                 }
 
@@ -403,6 +445,16 @@ fun TransitScreen(
                     }
 
                     if (resolvedShipment != null) {
+                        // Download full telemetry history into local Room immediately
+                        runCatching {
+                            val remoteEvents = remoteDataSource.getTemperatureEvents(resolvedShipment.id).getOrNull()
+                            if (remoteEvents != null && remoteEvents.isNotEmpty()) {
+                                val tRepo = RepositoryProvider.getTelemetryRepository(context)
+                                remoteEvents.forEach { dto ->
+                                    tRepo.saveTemperature(dto.toDomain())
+                                }
+                            }
+                        }
                         simulator.attachShipment(resolvedShipment)
                         isMonitorMode = true
                     }
@@ -415,6 +467,22 @@ fun TransitScreen(
     // ----------------------------------------------------
     // UI LAYOUT
     // ----------------------------------------------------
+    if (showHandedOverDialog) {
+        AlertDialog(
+            onDismissRequest = { showHandedOverDialog = false },
+            icon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = StatusGreen) },
+            title = { Text("Shipment Handed Over") },
+            text = {
+                Text("Custody for $handedOverShipmentId is now with the receiving device.\n\nActive tracking on this device has concluded. All historical telemetry, GPS updates, and audit records remain preserved in your local Room storage.")
+            },
+            confirmButton = {
+                Button(onClick = { showHandedOverDialog = false }) {
+                    Text("Acknowledge")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()

@@ -213,3 +213,15 @@ data class RemoteShipmentLocationDto(
     @SerialName("accuracy") val accuracy: Float,
     @SerialName("timestamp") val timestamp: Long
 )
+
+/**
+ * Remote DTO for Supabase 'shipment_custody' table.
+ * Tracks authoritative custody ownership across devices.
+ */
+@Serializable
+data class RemoteShipmentCustodyDto(
+    @SerialName("shipment_id") val shipmentId: String,
+    @SerialName("active_device_id") val activeDeviceId: String,
+    @SerialName("custody_state") val custodyState: String,
+    @SerialName("updated_at") val updatedAt: Long
+)

@@ -52,7 +52,10 @@ import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.util.DeviceIdProvider
+import androidx.compose.ui.platform.LocalContext
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.ui.theme.StatusRed
@@ -60,13 +63,13 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun HandoverScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
     val activeShipment by RepositoryProvider.temperatureSimulator.activeShipment.collectAsState()
-    val allShipments by RepositoryProvider.shipmentRepository.getAllShipments().collectAsState(initial = emptyList())
 
-    val shipment = activeShipment ?: allShipments.firstOrNull()
+    val shipment = activeShipment
     val shipmentId = shipment?.id ?: ""
 
     val events by RepositoryProvider.telemetryRepository.getTemperatures(shipmentId).collectAsState(initial = emptyList())
@@ -351,7 +354,19 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                             pharmacistSigned = pharmacistSigned
                         )
                         if (result.isSuccess) {
-                            handoverResult = result.getOrNull()
+                            val res = result.getOrNull()
+                            handoverResult = res
+                            // If verdict is PASS, transfer custody to this receiving device
+                            if (res?.handover?.verdict == HandoverVerdict.PASS) {
+                                val myDeviceId = DeviceIdProvider.getDeviceId(context)
+                                runCatching {
+                                    SupabaseRemoteDataSource().transferCustody(
+                                        shipmentId = shipment.id,
+                                        newDeviceId = myDeviceId,
+                                        custodyState = "TRANSFERRED"
+                                    )
+                                }
+                            }
                         } else {
                             errorMessage = result.exceptionOrNull()?.message ?: "Handover processing failed"
                         }

@@ -3,6 +3,7 @@ package com.coldchain.handshake.data.remote
 import com.coldchain.handshake.data.remote.dto.RemoteAlertDto
 import com.coldchain.handshake.data.remote.dto.RemoteHandoverDto
 import com.coldchain.handshake.data.remote.dto.RemoteShipmentDto
+import com.coldchain.handshake.data.remote.dto.RemoteShipmentCustodyDto
 import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
 import com.coldchain.handshake.data.remote.dto.RemoteTemperatureEventDto
 import io.github.jan.supabase.SupabaseClient
@@ -23,6 +24,7 @@ open class SupabaseRemoteDataSource(
         const val TABLE_ALERTS = "alerts"
         const val TABLE_HANDOVERS = "handovers"
         const val TABLE_SHIPMENT_LOCATIONS = "shipment_locations"
+        const val TABLE_SHIPMENT_CUSTODY = "shipment_custody"
     }
 
     private val client: SupabaseClient get() = clientProvider()
@@ -74,6 +76,34 @@ open class SupabaseRemoteDataSource(
         client.postgrest.from(TABLE_SHIPMENT_LOCATIONS).upsert(location, onConflict = "id")
         Unit
     }
+
+    open suspend fun upsertCustody(custody: RemoteShipmentCustodyDto): Result<Unit> = runCatching {
+        client.postgrest.from(TABLE_SHIPMENT_CUSTODY).upsert(custody, onConflict = "shipment_id")
+        Unit
+    }
+
+    suspend fun getCustodyState(shipmentId: String): Result<RemoteShipmentCustodyDto?> = runCatching {
+        client.postgrest.from(TABLE_SHIPMENT_CUSTODY)
+            .select {
+                filter {
+                    eq("shipment_id", shipmentId)
+                }
+            }
+            .decodeSingleOrNull<RemoteShipmentCustodyDto>()
+    }
+
+    suspend fun transferCustody(
+        shipmentId: String,
+        newDeviceId: String,
+        custodyState: String = "TRANSFERRED"
+    ): Result<Unit> = upsertCustody(
+        RemoteShipmentCustodyDto(
+            shipmentId = shipmentId,
+            activeDeviceId = newDeviceId,
+            custodyState = custodyState,
+            updatedAt = System.currentTimeMillis()
+        )
+    )
 
 
 

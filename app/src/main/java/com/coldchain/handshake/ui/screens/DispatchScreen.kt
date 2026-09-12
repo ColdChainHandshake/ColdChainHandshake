@@ -57,7 +57,10 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.data.remote.dto.toDomain
+import com.coldchain.handshake.data.remote.dto.RemoteShipmentCustodyDto
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.util.DeviceIdProvider
+import androidx.compose.ui.platform.LocalContext
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
@@ -71,6 +74,7 @@ fun DispatchScreen(
     modifier: Modifier = Modifier,
     onNavigateToTransit: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var origin by remember { mutableStateOf("Central Cold Hub") }
@@ -138,6 +142,16 @@ fun DispatchScreen(
                     }
 
                     if (matchedShipment != null) {
+                        // Download full telemetry history into local Room
+                        runCatching {
+                            val remoteEvents = SupabaseRemoteDataSource().getTemperatureEvents(matchedShipment.id).getOrNull()
+                            if (remoteEvents != null && remoteEvents.isNotEmpty()) {
+                                val tRepo = RepositoryProvider.telemetryRepository
+                                remoteEvents.forEach { dto ->
+                                    tRepo.saveTemperature(dto.toDomain())
+                                }
+                            }
+                        }
                         // Identified existing shipment! Load, attach, and navigate to live monitor
                         currentShipment = matchedShipment
                         boundQrCode = matchedShipment.qrCode
@@ -411,7 +425,19 @@ fun DispatchScreen(
                                 scope.launch {
                                     RepositoryProvider.shipmentRepository.saveShipment(newShipment)
                                     RepositoryProvider.temperatureSimulator.attachShipment(newShipment)
-                                    infoBannerMessage = "Created Consignment $shipmentId with QR associated"
+                                    // Register initial custody with Supabase
+                                    val myDevId = DeviceIdProvider.getDeviceId(context)
+                                    runCatching {
+                                        SupabaseRemoteDataSource().upsertCustody(
+                                            RemoteShipmentCustodyDto(
+                                                shipmentId = shipmentId,
+                                                activeDeviceId = myDevId,
+                                                custodyState = "ACTIVE",
+                                                updatedAt = System.currentTimeMillis()
+                                            )
+                                        )
+                                    }
+                                    infoBannerMessage = "Created Consignment $shipmentId (Custody: $myDevId)"
                                 }
                             },
                             enabled = origin.isNotBlank() && destination.isNotBlank() && loggerId.isNotBlank()

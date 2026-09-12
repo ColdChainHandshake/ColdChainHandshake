@@ -63,9 +63,8 @@ import java.util.Locale
 fun AlertsScreen(modifier: Modifier = Modifier) {
     val coroutineScope = rememberCoroutineScope()
     val activeShipment by RepositoryProvider.temperatureSimulator.activeShipment.collectAsState()
-    val allShipments by RepositoryProvider.shipmentRepository.getAllShipments().collectAsState(initial = emptyList())
 
-    val currentShipment = activeShipment ?: allShipments.firstOrNull()
+    val currentShipment = activeShipment
     val shipmentId = currentShipment?.id ?: "ALL"
 
     val activeAlerts by RepositoryProvider.alertRepository.getActiveAlerts(shipmentId).collectAsState(initial = emptyList())
