@@ -55,6 +55,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import com.coldchain.handshake.data.remote.dto.toDomain
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.StatusAmber
@@ -98,21 +100,51 @@ fun DispatchScreen(
             onCodeScanned = { scannedCode ->
                 showScannerDialog = false
                 scope.launch {
-                    // 1. Check if an existing shipment matches this scanned QR code or ID
+                    val targetId = if (scannedCode.startsWith("CCH:SHIP:")) {
+                        scannedCode.split(":").getOrNull(2) ?: scannedCode
+                    } else {
+                        scannedCode
+                    }
+
+                    // 1. Check local repository
                     val allShipments = RepositoryProvider.shipmentRepository.getAllShipments().first()
-                    val matchedShipment = allShipments.firstOrNull {
+                    var matchedShipment = allShipments.firstOrNull {
                         it.qrCode == scannedCode ||
                                 it.id == scannedCode ||
-                                (scannedCode.startsWith("CCH:SHIP:") && it.id == scannedCode.split(":").getOrNull(2))
+                                it.id == targetId
+                    }
+
+                    // 2. If absent locally, fetch from Supabase (Phone B monitoring Phone A)
+                    if (matchedShipment == null) {
+                        val remoteRes = SupabaseRemoteDataSource().getShipment(targetId)
+                        if (remoteRes.isSuccess && remoteRes.getOrNull() != null) {
+                            matchedShipment = remoteRes.getOrNull()!!.toDomain()
+                            RepositoryProvider.shipmentRepository.saveShipment(matchedShipment)
+                        } else if (scannedCode.startsWith("CCH:SHIP:")) {
+                            val parts = scannedCode.split(":")
+                            if (parts.size >= 6) {
+                                matchedShipment = Shipment(
+                                    id = parts[2],
+                                    qrCode = scannedCode,
+                                    origin = parts[3],
+                                    destination = parts[4],
+                                    loggerId = parts[5],
+                                    workerId = "W-MONITOR",
+                                    status = ShipmentStatus.IN_TRANSIT
+                                )
+                                RepositoryProvider.shipmentRepository.saveShipment(matchedShipment)
+                            }
+                        }
                     }
 
                     if (matchedShipment != null) {
-                        // Identified existing shipment! Load and associate directly
+                        // Identified existing shipment! Load, attach, and navigate to live monitor
                         currentShipment = matchedShipment
                         boundQrCode = matchedShipment.qrCode
                         qrBitmap = QRCodeGenerator.generateQR(matchedShipment.qrCode, 400)
                         RepositoryProvider.temperatureSimulator.attachShipment(matchedShipment)
-                        infoBannerMessage = "Identified existing consignment ${matchedShipment.id} via QR"
+                        infoBannerMessage = "Identified consignment ${matchedShipment.id} via QR"
+                        onNavigateToTransit()
                     } else if (currentShipment != null && currentShipment!!.status == ShipmentStatus.CREATED) {
                         // Associate scanned QR code directly with existing active shipment
                         val updatedShipment = if (scannedCode.startsWith("LOG-")) {

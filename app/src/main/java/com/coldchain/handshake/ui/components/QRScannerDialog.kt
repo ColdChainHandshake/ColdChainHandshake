@@ -297,7 +297,7 @@ fun QRScannerDialog(
                     value = manualCodeInput,
                     onValueChange = { manualCodeInput = it },
                     label = { Text("Manual QR Payload") },
-                    placeholder = { Text("CCH:SHIP:SAMPLE-001:LOG-902") },
+                    placeholder = { Text("Enter Shipment ID or QR payload") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -309,12 +309,10 @@ fun QRScannerDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     OutlinedButton(
-                        onClick = {
-                            val preset = "CCH:SHIP:DEMO-${System.currentTimeMillis().toString().takeLast(4)}:LOG-902"
-                            onCodeScanned(preset)
-                        }
+                        onClick = { manualCodeInput = "" },
+                        enabled = manualCodeInput.isNotBlank()
                     ) {
-                        Text("Use Preset QR")
+                        Text("Clear")
                     }
 
                     Button(

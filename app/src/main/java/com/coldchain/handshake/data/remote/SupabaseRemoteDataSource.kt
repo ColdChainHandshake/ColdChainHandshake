@@ -3,6 +3,7 @@ package com.coldchain.handshake.data.remote
 import com.coldchain.handshake.data.remote.dto.RemoteAlertDto
 import com.coldchain.handshake.data.remote.dto.RemoteHandoverDto
 import com.coldchain.handshake.data.remote.dto.RemoteShipmentDto
+import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
 import com.coldchain.handshake.data.remote.dto.RemoteTemperatureEventDto
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
@@ -21,6 +22,7 @@ open class SupabaseRemoteDataSource(
         const val TABLE_TEMPERATURE_EVENTS = "temperature_events"
         const val TABLE_ALERTS = "alerts"
         const val TABLE_HANDOVERS = "handovers"
+        const val TABLE_SHIPMENT_LOCATIONS = "shipment_locations"
     }
 
     private val client: SupabaseClient get() = clientProvider()
@@ -68,6 +70,11 @@ open class SupabaseRemoteDataSource(
         Unit
     }
 
+    open suspend fun upsertShipmentLocation(location: RemoteShipmentLocationDto): Result<Unit> = runCatching {
+        client.postgrest.from(TABLE_SHIPMENT_LOCATIONS).upsert(location, onConflict = "id")
+        Unit
+    }
+
 
 
     // -------------------------------------------------------------------------
@@ -76,6 +83,27 @@ open class SupabaseRemoteDataSource(
 
     suspend fun getShipments(): Result<List<RemoteShipmentDto>> = runCatching {
         client.postgrest.from(TABLE_SHIPMENTS).select().decodeList<RemoteShipmentDto>()
+    }
+
+    suspend fun getShipment(id: String): Result<RemoteShipmentDto?> = runCatching {
+        client.postgrest.from(TABLE_SHIPMENTS)
+            .select {
+                filter {
+                    eq("id", id)
+                }
+            }
+            .decodeSingleOrNull<RemoteShipmentDto>()
+    }
+
+    suspend fun getLatestShipmentLocation(shipmentId: String): Result<RemoteShipmentLocationDto?> = runCatching {
+        client.postgrest.from(TABLE_SHIPMENT_LOCATIONS)
+            .select {
+                filter {
+                    eq("shipment_id", shipmentId)
+                }
+            }
+            .decodeList<RemoteShipmentLocationDto>()
+            .maxByOrNull { it.timestamp }
     }
 
     suspend fun getTemperatureEvents(shipmentId: String): Result<List<RemoteTemperatureEventDto>> = runCatching {

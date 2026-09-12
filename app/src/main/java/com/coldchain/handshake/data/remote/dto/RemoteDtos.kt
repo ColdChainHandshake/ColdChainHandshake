@@ -199,3 +199,17 @@ fun RemoteHandoverDto.toDomain(): Handover = Handover(
     verdict = runCatching { HandoverVerdict.valueOf(verdict) }.getOrDefault(HandoverVerdict.FAIL),
     timestamp = timestamp
 )
+
+/**
+ * Remote DTO for Supabase 'shipment_locations' table.
+ * Used for Phone A -> Phone B foreground GPS sharing during live monitoring.
+ */
+@Serializable
+data class RemoteShipmentLocationDto(
+    @SerialName("id") val id: String = java.util.UUID.randomUUID().toString(),
+    @SerialName("shipment_id") val shipmentId: String,
+    @SerialName("latitude") val latitude: Double,
+    @SerialName("longitude") val longitude: Double,
+    @SerialName("accuracy") val accuracy: Float,
+    @SerialName("timestamp") val timestamp: Long
+)
