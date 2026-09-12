@@ -144,6 +144,7 @@ open class SupabaseRemoteDataSource(
                     eq("shipment_id", shipmentId)
                 }
                 order("timestamp", Order.ASCENDING)
+                order("id", Order.ASCENDING)
             }
             .decodeList<RemoteTemperatureEventDto>()
     }

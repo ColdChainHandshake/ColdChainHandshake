@@ -447,6 +447,12 @@ class E2ETelemetryRepository : TelemetryRepository {
         return Result.success(Unit)
     }
 
+    override suspend fun saveTemperatures(events: List<TemperatureEvent>): Result<Unit> {
+        this.events.addAll(events)
+        flow.value = this.events.toList()
+        return Result.success(Unit)
+    }
+
     override fun getTemperatures(shipmentId: String): Flow<List<TemperatureEvent>> {
         return flow.map { list -> list.filter { it.shipmentId == shipmentId }.sortedBy { it.timestamp } }
     }

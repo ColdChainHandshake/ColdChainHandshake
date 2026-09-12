@@ -142,22 +142,15 @@ fun DispatchScreen(
                     }
 
                     if (matchedShipment != null) {
-                        // Download full telemetry history into local Room
-                        runCatching {
-                            val remoteEvents = SupabaseRemoteDataSource().getTemperatureEvents(matchedShipment.id).getOrNull()
-                            if (remoteEvents != null && remoteEvents.isNotEmpty()) {
-                                val tRepo = RepositoryProvider.telemetryRepository
-                                remoteEvents.forEach { dto ->
-                                    tRepo.saveTemperature(dto.toDomain())
-                                }
-                            }
-                        }
-                        // Identified existing shipment! Load, attach, and navigate to live monitor
+                        // Identified existing shipment via QR! Enter monitor mode and hydrate complete history
                         currentShipment = matchedShipment
                         boundQrCode = matchedShipment.qrCode
                         qrBitmap = QRCodeGenerator.generateQR(matchedShipment.qrCode, 400)
-                        RepositoryProvider.temperatureSimulator.attachShipment(matchedShipment)
-                        infoBannerMessage = "Identified consignment ${matchedShipment.id} via QR"
+                        RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(matchedShipment)
+                        scope.launch {
+                            RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(matchedShipment.id)
+                        }
+                        infoBannerMessage = "Identified consignment ${matchedShipment.id} via QR (Monitor Mode)"
                         onNavigateToTransit()
                     } else if (currentShipment != null && currentShipment!!.status == ShipmentStatus.CREATED) {
                         // Associate scanned QR code directly with existing active shipment
@@ -630,6 +623,7 @@ fun DispatchScreen(
                                     scope.launch {
                                         RepositoryProvider.shipmentRepository.saveShipment(inTransit)
                                         RepositoryProvider.temperatureSimulator.attachShipment(inTransit)
+                                        RepositoryProvider.shipmentHistorySyncCoordinator.markReady(inTransit.id)
                                         RepositoryProvider.temperatureSimulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
                                     }
                                     onNavigateToTransit()

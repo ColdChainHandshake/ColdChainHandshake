@@ -8,5 +8,6 @@ import kotlinx.coroutines.flow.Flow
  */
 interface TelemetryRepository {
     suspend fun saveTemperature(event: TemperatureEvent): Result<Unit>
+    suspend fun saveTemperatures(events: List<TemperatureEvent>): Result<Unit>
     fun getTemperatures(shipmentId: String): Flow<List<TemperatureEvent>>
 }

@@ -31,6 +31,13 @@ interface TemperatureEventDao {
     suspend fun insertEvent(event: TemperatureEventEntity): Long
 
     /**
+     * Atomic batch append-only insert within a single database transaction.
+     * Prevents UI invalidation storms and ensures imported histories are committed together.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertEvents(events: List<TemperatureEventEntity>): List<Long>
+
+    /**
      * Retrieve all pending or failed events that need cloud synchronization.
      */
     @Query("SELECT * FROM temperature_events WHERE syncStatus != 'SYNCED' ORDER BY timestamp ASC")

@@ -197,6 +197,10 @@ class EndToEndWorkflowTest {
                 return Result.failure(IOException("Simulated local database write lock failure"))
             }
 
+            override suspend fun saveTemperatures(events: List<TemperatureEvent>): Result<Unit> {
+                return Result.failure(IOException("Simulated local database write lock failure"))
+            }
+
             override fun getTemperatures(shipmentId: String): Flow<List<TemperatureEvent>> {
                 return telemetryRepository.getTemperatures(shipmentId)
             }

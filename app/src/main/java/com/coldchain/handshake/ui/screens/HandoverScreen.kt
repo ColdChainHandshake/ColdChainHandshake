@@ -26,6 +26,10 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Sync
+import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
+import com.coldchain.handshake.crypto.IntegrityVerificationState
+import com.coldchain.handshake.repository.HistorySyncState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -88,6 +92,20 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
     val shipment = activeShipment
     val shipmentId = shipment?.id ?: ""
 
+    // History sync status for this shipment
+    val syncState by (if (shipmentId.isNotBlank()) {
+        RepositoryProvider.shipmentHistorySyncCoordinator.getSyncState(shipmentId)
+    } else {
+        kotlinx.coroutines.flow.flowOf(HistorySyncState.IDLE)
+    }).collectAsState(initial = HistorySyncState.IDLE)
+
+    // Trigger history hydration if not ready
+    LaunchedEffect(shipmentId) {
+        if (shipmentId.isNotBlank()) {
+            RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipmentId)
+        }
+    }
+
     // Chronological telemetry events strictly for this shipment
     val telemetryEvents by (if (shipmentId.isNotBlank()) {
         RepositoryProvider.telemetryRepository.getTemperatures(shipmentId)
@@ -127,9 +145,10 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         BreachDetector.formatDuration(breachEvaluation.cumulativeBreachDurationMs)
     }
 
-    // Cryptographic Hash Chain Integrity Check
-    val integrityResult = remember(telemetryEvents) {
-        HashChainService.verifyChain(telemetryEvents)
+    // Cryptographic Hash Chain Integrity Check (State-Aware)
+    val isSyncComplete = syncState == HistorySyncState.HISTORY_READY
+    val integrityEvaluation = remember(telemetryEvents, isSyncComplete) {
+        ShipmentIntegrityEvaluator.evaluate(telemetryEvents, isSyncComplete)
     }
 
     // Historical Last Recorded Location
@@ -491,31 +510,34 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
+                val (evalColor, evalIcon) = when (integrityEvaluation.state) {
+                    IntegrityVerificationState.VERIFIED -> Pair(StatusGreen, Icons.Default.Security)
+                    IntegrityVerificationState.PENDING_SYNC -> Pair(StatusAmber, Icons.Default.Sync)
+                    IntegrityVerificationState.TAMPER_DETECTED -> Pair(StatusRed, Icons.Default.Cancel)
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (integrityResult.valid) Icons.Default.Security else Icons.Default.Cancel,
+                        imageVector = evalIcon,
                         contentDescription = null,
-                        tint = if (integrityResult.valid) StatusGreen else StatusRed,
+                        tint = evalColor,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (integrityResult.valid) "✓ HASH CHAIN VERIFIED" else "✗ TAMPER DETECTED",
+                            text = integrityEvaluation.title,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
-                            color = if (integrityResult.valid) StatusGreen else StatusRed
+                            color = evalColor
                         )
                         Text(
-                            text = if (integrityResult.valid)
-                                "${telemetryEvents.size} immutable SHA-256 telemetry blocks verified"
-                            else
-                                "${integrityResult.reason?.name ?: "CORRUPTION"}: ${integrityResult.corruptedEventId ?: integrityResult.message}",
+                            text = integrityEvaluation.message,
                             fontSize = 11.sp,
-                            color = if (integrityResult.valid) StatusGreen else StatusRed,
+                            color = evalColor,
                             fontFamily = FontFamily.Monospace
                         )
                     }
@@ -711,8 +733,31 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         Spacer(modifier = Modifier.height(16.dp))
 
         // 9. FINAL VERDICT & EXECUTE CUSTODY HANDOVER
-        val preliminaryPass = temperaturePassed && integrityResult.valid && workerSigned && pharmacistSigned
-        val verdictColor = if (preliminaryPass) StatusGreen else StatusRed
+        val isPendingSync = integrityEvaluation.state == IntegrityVerificationState.PENDING_SYNC
+        val isVerified = integrityEvaluation.state == IntegrityVerificationState.VERIFIED
+        val preliminaryPass = temperaturePassed && isVerified && workerSigned && pharmacistSigned
+
+        val verdictColor = when {
+            isPendingSync -> StatusAmber
+            preliminaryPass -> StatusGreen
+            else -> StatusRed
+        }
+        val verdictIcon = when {
+            isPendingSync -> Icons.Default.Sync
+            preliminaryPass -> Icons.Default.CheckCircle
+            else -> Icons.Default.Cancel
+        }
+        val verdictTitle = when {
+            isPendingSync -> "INTEGRITY VERIFICATION PENDING"
+            preliminaryPass -> "FINAL VERDICT: PASS"
+            else -> "FINAL VERDICT: FAIL"
+        }
+        val verdictSubtitle = when {
+            isPendingSync -> "Waiting for complete telemetry history before integrity verification"
+            preliminaryPass -> "Eligible for Acceptance"
+            integrityEvaluation.state == IntegrityVerificationState.TAMPER_DETECTED -> "Ineligible / Tamper Detected"
+            else -> "Ineligible / Requirements Unmet"
+        }
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -726,28 +771,32 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Icon(
-                        imageVector = if (preliminaryPass) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                        imageVector = verdictIcon,
                         contentDescription = null,
                         tint = verdictColor,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "FINAL VERDICT: " + if (preliminaryPass) "PASS" else "FAIL",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = verdictColor
-                    )
+                    Column {
+                        Text(
+                            text = verdictTitle,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = verdictColor
+                        )
+                        Text(
+                            text = verdictSubtitle,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = verdictColor
+                        )
+                    }
                 }
-
-                Text(
-                    text = if (preliminaryPass) "Eligible for Acceptance" else "Ineligible / Quarantine",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = verdictColor
-                )
             }
         }
 
@@ -793,7 +842,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     }
                 }
             },
-            enabled = !isProcessing,
+            enabled = !isProcessing && preliminaryPass,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
@@ -801,9 +850,16 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 containerColor = MaterialTheme.colorScheme.primary
             )
         ) {
-            Icon(imageVector = Icons.Default.Verified, contentDescription = null)
+            Icon(imageVector = if (isPendingSync) Icons.Default.Sync else Icons.Default.Verified, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text(if (isProcessing) "Evaluating & Sealing Handover..." else "Execute Custody Handover")
+            Text(
+                when {
+                    isProcessing -> "Evaluating & Sealing Handover..."
+                    isPendingSync -> "Waiting for Complete History..."
+                    !preliminaryPass -> "Cannot Handover (Verdict FAIL)"
+                    else -> "Execute Custody Handover"
+                }
+            )
         }
 
         if (errorMessage != null) {

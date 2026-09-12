@@ -57,6 +57,9 @@ class TemperatureSimulator(
     private val _activeShipment = MutableStateFlow<Shipment?>(null)
     val activeShipment: StateFlow<Shipment?> = _activeShipment.asStateFlow()
 
+    private val _isMonitorOnly = MutableStateFlow(false)
+    val isMonitorOnly: StateFlow<Boolean> = _isMonitorOnly.asStateFlow()
+
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
@@ -87,7 +90,23 @@ class TemperatureSimulator(
     /**
      * Attaches the shipment to monitor and resets simulation step counter.
      */
+    /**
+     * Attaches the shipment in read-only monitor mode (Phone B).
+     * Stops continuous simulation and disables event generation so Phone B
+     * acts purely as a monitor and never creates competing telemetry.
+     */
+    fun attachShipmentForMonitoring(shipment: Shipment) {
+        stopContinuousSimulation()
+        _isMonitorOnly.value = true
+        _activeShipment.value = shipment
+        _lastPersistenceError.value = null
+    }
+
+    /**
+     * Attaches the shipment to monitor and resets simulation step counter (Transporter mode).
+     */
     fun attachShipment(shipment: Shipment, startTimestamp: Long = System.currentTimeMillis()) {
+        _isMonitorOnly.value = false
         _activeShipment.value = shipment
         _simulatedTimestamp.value = startTimestamp
         stepCounter = 0
@@ -128,6 +147,7 @@ class TemperatureSimulator(
      * - Triggers [SafetyEngine] to detect thermal breaches and apply quarantine.
      */
     suspend fun tickOnce(simulatedStepDurationSeconds: Long = 60L): TemperatureEvent? {
+        if (_isMonitorOnly.value) return null
         val shipment = _activeShipment.value ?: return null
 
         return tickMutex.withLock {
@@ -209,6 +229,7 @@ class TemperatureSimulator(
         intervalMs: Long = 1000L,
         simulatedStepSeconds: Long = 60L
     ) {
+        if (_isMonitorOnly.value) return
         if (_isRunning.value) return
         _isRunning.value = true
 
@@ -231,6 +252,7 @@ class TemperatureSimulator(
      */
     fun reset() {
         stopContinuousSimulation()
+        _isMonitorOnly.value = false
         _activeShipment.value = null
         _latestTemperature.value = null
         _isHeatSpikeMode.value = false
@@ -248,6 +270,7 @@ class TemperatureSimulator(
      */
     suspend fun resetSync() {
         stopContinuousSimulation()
+        _isMonitorOnly.value = false
         _activeShipment.value = null
         _latestTemperature.value = null
         _isHeatSpikeMode.value = false

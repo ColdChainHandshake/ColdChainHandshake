@@ -383,15 +383,9 @@ fun TransitScreen(
                     }
                 }
 
-                // 2. Fetch latest telemetry events from Supabase and replicate to Room
+                // 2. Hydrate latest telemetry events from Supabase atomically into Room
                 runCatching {
-                    val remoteEvents = remoteDataSource.getTemperatureEvents(shipId).getOrNull()
-                    if (remoteEvents != null && remoteEvents.isNotEmpty()) {
-                        val tRepo = RepositoryProvider.getTelemetryRepository(context)
-                        remoteEvents.forEach { dto ->
-                            tRepo.saveTemperature(dto.toDomain())
-                        }
-                    }
+                    RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipId)
                 }
 
                 // 3. Fetch latest shipment status
@@ -460,18 +454,11 @@ fun TransitScreen(
                     }
 
                     if (resolvedShipment != null) {
-                        // Download full telemetry history into local Room immediately
-                        runCatching {
-                            val remoteEvents = remoteDataSource.getTemperatureEvents(resolvedShipment.id).getOrNull()
-                            if (remoteEvents != null && remoteEvents.isNotEmpty()) {
-                                val tRepo = RepositoryProvider.getTelemetryRepository(context)
-                                remoteEvents.forEach { dto ->
-                                    tRepo.saveTemperature(dto.toDomain())
-                                }
-                            }
-                        }
-                        simulator.attachShipment(resolvedShipment)
+                        simulator.attachShipmentForMonitoring(resolvedShipment)
                         isMonitorMode = true
+                        runCatching {
+                            RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(resolvedShipment.id)
+                        }
                     }
                 }
             },
