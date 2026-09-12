@@ -27,10 +27,12 @@ import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Refresh
 import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.crypto.IntegrityVerificationState
 import com.coldchain.handshake.repository.HistorySyncState
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -81,6 +83,40 @@ import java.util.Locale
  * Pure historical trip inspection and formal digital sign-off report.
  * Read-only audit snapshot; contains NO live telemetry or continuous GPS controls.
  */
+
+/**
+ * Maps custody transfer exceptions to user-friendly, truthful diagnostic messages.
+ * Avoids misrepresenting server/database errors as generic "network issues".
+ */
+fun formatCustodyErrorMessage(throwable: Throwable?): String {
+    if (throwable == null) return "Waiting for network to confirm custody transfer"
+    val msg = throwable.message ?: ""
+    val className = throwable.javaClass.simpleName
+
+    return when {
+        throwable is java.net.UnknownHostException ||
+        throwable is java.io.IOException ||
+        msg.contains("Unable to resolve host", ignoreCase = true) ||
+        msg.contains("Failed to connect", ignoreCase = true) ||
+        msg.contains("ConnectException", ignoreCase = true) ||
+        msg.contains("SocketTimeoutException", ignoreCase = true) -> {
+            "Waiting for network to confirm custody transfer"
+        }
+        msg.contains("permission denied", ignoreCase = true) || msg.contains("42501") -> {
+            "Custody transfer failed: Permission denied (table 'shipment_custody' requires GRANT/RLS policy in Supabase)"
+        }
+        msg.contains("Could not find the table", ignoreCase = true) || msg.contains("PGRST205") -> {
+            "Custody transfer failed: Table 'shipment_custody' not found in Supabase database"
+        }
+        msg.isNotBlank() -> {
+            "Custody transfer failed: $msg"
+        }
+        else -> {
+            "Custody transfer failed: $className"
+        }
+    }
+}
+
 @Composable
 fun HandoverScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -821,7 +857,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                             // If verdict is PASS, transfer custody to this receiving device
                             if (res?.handover?.verdict == HandoverVerdict.PASS) {
                                 val myDeviceId = DeviceIdProvider.getDeviceId(context)
-                                val custodyResult = remoteDataSource.transferCustody(
+                                val custodyResult = remoteDataSource.transferCustodyWithConfirmation(
                                     shipmentId = shipment.id,
                                     newDeviceId = myDeviceId,
                                     custodyState = "TRANSFERRED"
@@ -829,7 +865,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                                 if (custodyResult.isSuccess) {
                                     custodyTransferNotice = "CUSTODY TRANSFERRED to this device ($myDeviceId)"
                                 } else {
-                                    custodyTransferNotice = "Waiting for network to confirm custody transfer"
+                                    val err = custodyResult.exceptionOrNull()
+                                    custodyTransferNotice = formatCustodyErrorMessage(err)
                                 }
                             }
                         } else {
@@ -873,12 +910,54 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
         if (custodyTransferNotice != null) {
             Spacer(modifier = Modifier.height(10.dp))
+            val isSuccess = custodyTransferNotice!!.startsWith("CUSTODY TRANSFERRED")
+            val isWaitingNetwork = custodyTransferNotice!!.startsWith("Waiting for network")
+            val noticeColor = when {
+                isSuccess -> StatusGreen
+                isWaitingNetwork -> StatusAmber
+                else -> StatusRed
+            }
             Text(
                 text = custodyTransferNotice!!,
-                color = if (custodyTransferNotice!!.startsWith("CUSTODY TRANSFERRED")) StatusGreen else StatusAmber,
+                color = noticeColor,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.bodySmall
             )
+
+            if (!isSuccess && handoverResult?.handover?.verdict == HandoverVerdict.PASS) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        isProcessing = true
+                        coroutineScope.launch {
+                            try {
+                                val myDeviceId = DeviceIdProvider.getDeviceId(context)
+                                val custodyResult = remoteDataSource.transferCustodyWithConfirmation(
+                                    shipmentId = shipment.id,
+                                    newDeviceId = myDeviceId,
+                                    custodyState = "TRANSFERRED"
+                                )
+                                if (custodyResult.isSuccess) {
+                                    custodyTransferNotice = "CUSTODY TRANSFERRED to this device ($myDeviceId)"
+                                } else {
+                                    val err = custodyResult.exceptionOrNull()
+                                    custodyTransferNotice = formatCustodyErrorMessage(err)
+                                }
+                            } catch (e: Exception) {
+                                custodyTransferNotice = formatCustodyErrorMessage(e)
+                            } finally {
+                                isProcessing = false
+                            }
+                        }
+                    },
+                    enabled = !isProcessing,
+                    modifier = Modifier.fillMaxWidth().height(40.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Retry Custody Transfer to Network", fontSize = 12.sp)
+                }
+            }
         }
 
         // Post-execution Summary Card

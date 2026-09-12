@@ -83,28 +83,96 @@ open class SupabaseRemoteDataSource(
         Unit
     }
 
-    suspend fun getCustodyState(shipmentId: String): Result<RemoteShipmentCustodyDto?> = runCatching {
-        client.postgrest.from(TABLE_SHIPMENT_CUSTODY)
+    open suspend fun getCustodyState(shipmentId: String): Result<RemoteShipmentCustodyDto?> = runCatching {
+        android.util.Log.d("CustodyTransfer", "Querying custody state for shipment: $shipmentId from table '${TABLE_SHIPMENT_CUSTODY}'")
+        val result = client.postgrest.from(TABLE_SHIPMENT_CUSTODY)
             .select {
                 filter {
                     eq("shipment_id", shipmentId)
                 }
             }
             .decodeSingleOrNull<RemoteShipmentCustodyDto>()
+        android.util.Log.d("CustodyTransfer", "getCustodyState($shipmentId) result: $result")
+        result
+    }.onFailure { ex ->
+        android.util.Log.e("CustodyTransfer", "getCustodyState($shipmentId) FAILED: ${ex.javaClass.simpleName} - ${ex.message}")
     }
 
-    suspend fun transferCustody(
+    open suspend fun transferCustody(
         shipmentId: String,
         newDeviceId: String,
         custodyState: String = "TRANSFERRED"
-    ): Result<Unit> = upsertCustody(
-        RemoteShipmentCustodyDto(
+    ): Result<Unit> = transferCustodyWithConfirmation(shipmentId, newDeviceId, custodyState).map { Unit }
+
+    open suspend fun transferCustodyWithConfirmation(
+        shipmentId: String,
+        newDeviceId: String,
+        custodyState: String = "TRANSFERRED"
+    ): Result<RemoteShipmentCustodyDto> {
+        val tag = "CustodyTransfer"
+        android.util.Log.d(tag, "=== INITIATING CUSTODY TRANSFER ===")
+        android.util.Log.d(tag, "Shipment ID: $shipmentId")
+        android.util.Log.d(tag, "Local Device ID: $newDeviceId")
+        android.util.Log.d(tag, "Target Custody State: $custodyState")
+        android.util.Log.d(tag, "Target Supabase Table: $TABLE_SHIPMENT_CUSTODY")
+        android.util.Log.d(tag, "HTTP Operation: UPSERT (onConflict = shipment_id)")
+
+        val custodyDto = RemoteShipmentCustodyDto(
             shipmentId = shipmentId,
             activeDeviceId = newDeviceId,
             custodyState = custodyState,
             updatedAt = System.currentTimeMillis()
         )
-    )
+
+        // 1. Execute UPSERT
+        val upsertResult = runCatching {
+            client.postgrest.from(TABLE_SHIPMENT_CUSTODY).upsert(custodyDto, onConflict = "shipment_id")
+            Unit
+        }
+
+        if (upsertResult.isFailure) {
+            val ex = upsertResult.exceptionOrNull() ?: Exception("Unknown upsert failure")
+            android.util.Log.e(tag, "Custody UPSERT FAILED")
+            android.util.Log.e(tag, "Exception Type: ${ex.javaClass.name}")
+            android.util.Log.e(tag, "Exception Message: ${ex.message}")
+            return Result.failure(ex)
+        }
+
+        android.util.Log.d(tag, "Custody UPSERT operation completed. Executing remote confirmation query...")
+
+        // 2. Execute CONFIRMATION query
+        val confirmResult = runCatching {
+            client.postgrest.from(TABLE_SHIPMENT_CUSTODY)
+                .select {
+                    filter {
+                        eq("shipment_id", shipmentId)
+                    }
+                }
+                .decodeSingleOrNull<RemoteShipmentCustodyDto>()
+        }
+
+        if (confirmResult.isFailure) {
+            val ex = confirmResult.exceptionOrNull() ?: Exception("Unknown query failure")
+            android.util.Log.e(tag, "Custody confirmation query FAILED: ${ex.javaClass.name} - ${ex.message}")
+            return Result.failure(ex)
+        }
+
+        val confirmed = confirmResult.getOrNull()
+        if (confirmed == null) {
+            android.util.Log.e(tag, "Custody confirmation returned ZERO rows! The record was not persisted remotely.")
+            return Result.failure(IllegalStateException("Confirmation query returned zero rows for shipment $shipmentId on table $TABLE_SHIPMENT_CUSTODY"))
+        }
+
+        android.util.Log.d(tag, "Confirmation query result: active_device_id=${confirmed.activeDeviceId}, state=${confirmed.custodyState}, updated_at=${confirmed.updatedAt}")
+
+        if (confirmed.activeDeviceId != newDeviceId || confirmed.custodyState != custodyState) {
+            android.util.Log.e(tag, "Custody confirmation state mismatch: expected ($newDeviceId, $custodyState) but found (${confirmed.activeDeviceId}, ${confirmed.custodyState})")
+            return Result.failure(IllegalStateException("Custody state mismatch on remote database: expected device $newDeviceId, found ${confirmed.activeDeviceId}"))
+        }
+
+        android.util.Log.d(tag, "=== CUSTODY TRANSFER CONFIRMED ON REMOTE SUPABASE ===")
+        return Result.success(confirmed)
+    }
 
 
 
