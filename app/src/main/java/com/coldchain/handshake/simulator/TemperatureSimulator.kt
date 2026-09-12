@@ -91,6 +91,7 @@ class TemperatureSimulator(
         _activeShipment.value = shipment
         _simulatedTimestamp.value = startTimestamp
         stepCounter = 0
+        lastKnownHash = HashChainService.GENESIS_HASH
         _lastPersistenceError.value = null
     }
 
@@ -129,21 +130,35 @@ class TemperatureSimulator(
     suspend fun tickOnce(simulatedStepDurationSeconds: Long = 60L): TemperatureEvent? {
         val shipment = _activeShipment.value ?: return null
 
-        val temp = if (_isHeatSpikeMode.value) {
-            heatSpikeReadings[stepCounter % heatSpikeReadings.size]
-        } else {
-            normalReadings[stepCounter % normalReadings.size]
-        }
-
-        val nextTimestamp = _simulatedTimestamp.value + (simulatedStepDurationSeconds * 1000L)
-
         return tickMutex.withLock {
-            val previousHash = if (stepCounter == 0) {
-                // Try fetching previous event from repo if available
-                val existingEvents = telemetryRepository.getTemperatures(shipment.id).firstOrNull()
-                existingEvents?.lastOrNull()?.currentHash ?: HashChainService.GENESIS_HASH
+            val existingEvents = telemetryRepository.getTemperatures(shipment.id).firstOrNull()
+            val latestExisting = existingEvents?.maxByOrNull { it.timestamp }
+
+            val previousHash = if (latestExisting != null) {
+                latestExisting.currentHash
+            } else if (stepCounter == 0 || lastKnownHash == HashChainService.GENESIS_HASH) {
+                HashChainService.GENESIS_HASH
             } else {
                 lastKnownHash
+            }
+
+            val baseTimestamp = if (latestExisting != null) {
+                maxOf(_simulatedTimestamp.value, latestExisting.timestamp)
+            } else {
+                _simulatedTimestamp.value
+            }
+            val nextTimestamp = baseTimestamp + (simulatedStepDurationSeconds * 1000L)
+
+            val currentStep = if (latestExisting != null && stepCounter == 0) {
+                existingEvents.size
+            } else {
+                stepCounter
+            }
+
+            val temp = if (_isHeatSpikeMode.value) {
+                heatSpikeReadings[currentStep % heatSpikeReadings.size]
+            } else {
+                normalReadings[currentStep % normalReadings.size]
             }
 
             val rawEvent = TemperatureEvent(
@@ -164,7 +179,7 @@ class TemperatureSimulator(
                 lastKnownHash = hashedEvent.currentHash
                 _simulatedTimestamp.value = nextTimestamp
                 _latestTemperature.value = temp
-                stepCounter++
+                stepCounter = currentStep + 1
                 _lastPersistenceError.value = null
 
                 // Person 3 Safety Decision Layer Hook: Evaluate safety & apply quarantine/alerts if breached

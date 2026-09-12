@@ -138,6 +138,21 @@ fun TransitScreen(
         mutableStateOf(currentShipment?.workerId == "W-MONITOR")
     }
 
+    LaunchedEffect(currentShipment?.id) {
+        val ship = currentShipment
+        if (ship != null) {
+            runCatching {
+                val custody = remoteDataSource.getCustodyState(ship.id).getOrNull()
+                if (custody != null) {
+                    isCurrentCustodyDevice = (custody.activeDeviceId == myDeviceId)
+                    if (!isCurrentCustodyDevice && custody.custodyState != "TRANSFERRED") {
+                        isMonitorMode = true
+                    }
+                }
+            }
+        }
+    }
+
     // QR scanner dialog for Phone B live monitor pairing
     var showQrScanner by remember { mutableStateOf(false) }
 

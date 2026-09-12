@@ -25,4 +25,10 @@ class AlertRepositoryImpl(
             entities.map { it.toDomain() }
         }
     }
+
+    override fun getAllAlerts(shipmentId: String): Flow<List<Alert>> {
+        return alertDao.getAllAlerts(shipmentId).map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
 }

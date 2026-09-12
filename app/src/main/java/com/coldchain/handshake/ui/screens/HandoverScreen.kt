@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AssignmentTurnedIn
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Thermostat
@@ -35,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,45 +46,100 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShipmentStatus
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.repository.RepositoryProvider
-import com.coldchain.handshake.util.DeviceIdProvider
-import androidx.compose.ui.platform.LocalContext
+import com.coldchain.handshake.safety.BreachDetector
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.ui.theme.StatusRed
+import com.coldchain.handshake.util.DeviceIdProvider
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+/**
+ * Destination Custody Handover Screen.
+ * Pure historical trip inspection and formal digital sign-off report.
+ * Read-only audit snapshot; contains NO live telemetry or continuous GPS controls.
+ */
 @Composable
 fun HandoverScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val remoteDataSource = remember { SupabaseRemoteDataSource() }
 
     val activeShipment by RepositoryProvider.temperatureSimulator.activeShipment.collectAsState()
-
     val shipment = activeShipment
     val shipmentId = shipment?.id ?: ""
 
-    val events by RepositoryProvider.telemetryRepository.getTemperatures(shipmentId).collectAsState(initial = emptyList())
+    // Chronological telemetry events strictly for this shipment
+    val telemetryEvents by (if (shipmentId.isNotBlank()) {
+        RepositoryProvider.telemetryRepository.getTemperatures(shipmentId)
+    } else {
+        kotlinx.coroutines.flow.flowOf(emptyList())
+    }).collectAsState(initial = emptyList())
 
-    // Person 3 Thermal Safety Check
-    val temperaturePassed = remember(events) {
-        if (events.isEmpty()) true else RepositoryProvider.safetyEngine.evaluateHandoverTemperatureSafety(events)
+    // Historical alerts strictly for this shipment
+    val tripAlerts by (if (shipmentId.isNotBlank()) {
+        RepositoryProvider.alertRepository.getAllAlerts(shipmentId)
+    } else {
+        kotlinx.coroutines.flow.flowOf(emptyList())
+    }).collectAsState(initial = emptyList())
+
+    // Derived Trip Summary Metrics
+    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+
+    val journeyStart = remember(telemetryEvents) {
+        telemetryEvents.firstOrNull()?.timestamp
+    }
+    val journeyEnd = remember(telemetryEvents) {
+        telemetryEvents.lastOrNull()?.timestamp
+    }
+    val minTemp = remember(telemetryEvents) {
+        telemetryEvents.minOfOrNull { it.temperature }
+    }
+    val maxTemp = remember(telemetryEvents) {
+        telemetryEvents.maxOfOrNull { it.temperature }
     }
 
-    // Person 4 Hash Chain Cryptographic Integrity Check
-    val integrityResult = remember(events) {
-        HashChainService.verifyChain(events)
+    // Safety breach evaluation
+    val breachEvaluation = remember(telemetryEvents) {
+        BreachDetector.evaluateTelemetry(telemetryEvents)
+    }
+    val temperaturePassed = breachEvaluation.temperaturePassed
+    val cumulativeExcursionStr = remember(breachEvaluation) {
+        BreachDetector.formatDuration(breachEvaluation.cumulativeBreachDurationMs)
+    }
+
+    // Cryptographic Hash Chain Integrity Check
+    val integrityResult = remember(telemetryEvents) {
+        HashChainService.verifyChain(telemetryEvents)
+    }
+
+    // Historical Last Recorded Location
+    var lastRecordedLocation by remember { mutableStateOf<RemoteShipmentLocationDto?>(null) }
+    LaunchedEffect(shipmentId) {
+        if (shipmentId.isNotBlank()) {
+            runCatching {
+                lastRecordedLocation = remoteDataSource.getLatestShipmentLocation(shipmentId).getOrNull()
+            }
+        }
     }
 
     var workerSigned by remember { mutableStateOf(true) }
@@ -89,6 +147,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
     var handoverResult by remember { mutableStateOf<HandoverOrchestratorResult?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var custodyTransferNotice by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
 
     Column(
@@ -97,13 +156,13 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
-        // Header
+        // 1. Screen Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.QrCodeScanner,
+                imageVector = Icons.Default.AssignmentTurnedIn,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(32.dp)
@@ -111,19 +170,19 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    text = "Custody Handover",
+                    text = "CUSTODY HANDOVER",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Formal destination inspection & digital sign-off",
+                    text = "Historical Destination Inspection Report",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         if (shipment == null) {
             Card(
@@ -142,13 +201,13 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "No Active Consignment",
+                        text = "No Active Shipment",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Create and transit a consignment from the Dispatch screen first.",
+                        text = "Create a shipment in Dispatch or scan a consignment QR code to inspect.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -157,7 +216,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             return
         }
 
-        // Shipment Details Card
+        // 2. Consignment Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -200,19 +259,19 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 Text(
                     text = "${shipment.origin} → ${shipment.destination}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "Logger: ${shipment.loggerId}  |  Worker: ${shipment.workerId}",
+                    text = "Worker: ${shipment.workerId}   |   Logger: ${shipment.loggerId}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Pre-Handover Verification Criteria Card
+        // 3. TRIP SUMMARY
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -221,35 +280,38 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Verification Criteria",
+                    text = "TRIP SUMMARY",
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Criterion 1: Thermal Safety
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = if (temperaturePassed) Icons.Default.CheckCircle else Icons.Default.Cancel,
-                        contentDescription = null,
-                        tint = if (temperaturePassed) StatusGreen else StatusRed,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Journey Start:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            text = "Temperature Safety (Safe: 2°C–8°C)",
+                            text = journeyStart?.let { timeFormatter.format(Date(it)) } ?: "N/A",
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace
                         )
+                    }
+                    Column {
+                        Text("Last Recorded Event:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            text = if (temperaturePassed) "Nominal (<= 5 min cumulative excursion)"
-                            else "BREACHED (> 5 min cumulative excursion > 8°C)",
-                            fontSize = 11.sp,
-                            color = if (temperaturePassed) StatusGreen else StatusRed
+                            text = journeyEnd?.let { timeFormatter.format(Date(it)) } ?: "N/A",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Column {
+                        Text("Telemetry Events:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "${telemetryEvents.size}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
                         )
                     }
                 }
@@ -258,40 +320,163 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 Divider()
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Criterion 2: Cryptographic Hash Chain Integrity
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Temperature Range:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = if (minTemp != null && maxTemp != null) {
+                                String.format(Locale.US, "Min: %.1f°C  |  Max: %.1f°C", minTemp, maxTemp)
+                            } else "N/A",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Time Above 8°C:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = cumulativeExcursionStr,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = if (breachEvaluation.hasBreach) StatusRed else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (integrityResult.valid) Icons.Default.Security else Icons.Default.Cancel,
+                        imageVector = if (temperaturePassed) Icons.Default.CheckCircle else Icons.Default.Cancel,
                         contentDescription = null,
-                        tint = if (integrityResult.valid) StatusGreen else StatusRed,
-                        modifier = Modifier.size(20.dp)
+                        tint = if (temperaturePassed) StatusGreen else StatusRed,
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "SHA-256 Hash Chain Integrity",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = if (integrityResult.valid)
-                                "Valid: ${events.size} immutable telemetry blocks verified"
-                            else
-                                "TAMPER DETECTED: ${integrityResult.corruptedEventId ?: integrityResult.message}",
-                            fontSize = 11.sp,
-                            color = if (integrityResult.valid) StatusGreen else StatusRed
-                        )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (temperaturePassed) "Temperature Result: ✓ IN RANGE (Safe: 2°C–8°C)" else "Temperature Result: ⚠️ BREACH DETECTED (> 5 min excursion)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (temperaturePassed) StatusGreen else StatusRed
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 4. TEMPERATURE HISTORY
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TEMPERATURE HISTORY (${telemetryEvents.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Chronological Audit Log",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (telemetryEvents.isEmpty()) {
+                    Text(
+                        text = "No telemetry events recorded for this trip.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
+                    // Show compact table of historical telemetry (up to 15 events shown, scrollable)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (telemetryEvents.size > 5) 160.dp else (telemetryEvents.size * 32).dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        telemetryEvents.forEach { event ->
+                            val isWarm = event.temperature > 8.0 || event.temperature < 2.0
+                            val tempColor = if (isWarm) StatusRed else StatusGreen
+
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(tempColor)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = timeFormatter.format(Date(event.timestamp)),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "#${event.currentHash.take(6)}",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = String.format(Locale.US, "%.1f°C", event.temperature),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = tempColor
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = event.syncStatus.name,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (event.syncStatus == SyncStatus.SYNCED) StatusGreen else StatusAmber
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Dual Signatures Card
+        // 5. INTEGRITY VERIFICATION
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -300,7 +485,192 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Dual Custody Signatures",
+                    text = "INTEGRITY VERIFICATION",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (integrityResult.valid) Icons.Default.Security else Icons.Default.Cancel,
+                        contentDescription = null,
+                        tint = if (integrityResult.valid) StatusGreen else StatusRed,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (integrityResult.valid) "✓ HASH CHAIN VERIFIED" else "✗ TAMPER DETECTED",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = if (integrityResult.valid) StatusGreen else StatusRed
+                        )
+                        Text(
+                            text = if (integrityResult.valid)
+                                "${telemetryEvents.size} immutable SHA-256 telemetry blocks verified"
+                            else
+                                "${integrityResult.reason?.name ?: "CORRUPTION"}: ${integrityResult.corruptedEventId ?: integrityResult.message}",
+                            fontSize = 11.sp,
+                            color = if (integrityResult.valid) StatusGreen else StatusRed,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 6. TRIP ALERT HISTORY
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "TRIP ALERT HISTORY",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (tripAlerts.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = StatusGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "✓ No alerts recorded during trip",
+                            fontSize = 12.sp,
+                            color = StatusGreen,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        tripAlerts.forEach { alert ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(6.dp),
+                                color = StatusRed.copy(alpha = 0.08f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = alert.type.name.replace('_', ' '),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = StatusRed
+                                        )
+                                        Text(
+                                            text = alert.message,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = timeFormatter.format(Date(alert.timestamp)),
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text(
+                                            text = alert.escalationLevel.name,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = StatusAmber
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 7. LAST RECORDED LOCATION
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "LAST RECORDED LOCATION",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val loc = lastRecordedLocation
+                if (loc != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = String.format(Locale.US, "Lat: %.5f, Lon: %.5f (±%.1fm)", loc.latitude, loc.longitude, loc.accuracy),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Recorded at: ${timeFormatter.format(Date(loc.timestamp))}",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "No GPS fix recorded for this consignment.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 8. CUSTODY SIGN-OFF
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "CUSTODY SIGN-OFF",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -316,8 +686,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Column {
-                        Text("Logistics Courier Sign-off", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                        Text("Confirms physical handover of sealed cold chain unit", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Logistics Courier / Worker Sign-off", fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                        Text("Confirms physical delivery of intact thermal package", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -331,8 +701,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Column {
-                        Text("Receiving Pharmacist Sign-off", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                        Text("Confirms receipt, visual inspection, and chain clearance", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Receiving Pharmacist Sign-off", fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                        Text("Confirms receipt, inspection, and formal custody acceptance", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -340,11 +710,54 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Action Button
+        // 9. FINAL VERDICT & EXECUTE CUSTODY HANDOVER
+        val preliminaryPass = temperaturePassed && integrityResult.valid && workerSigned && pharmacistSigned
+        val verdictColor = if (preliminaryPass) StatusGreen else StatusRed
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            color = verdictColor.copy(alpha = 0.12f)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (preliminaryPass) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                        contentDescription = null,
+                        tint = verdictColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "FINAL VERDICT: " + if (preliminaryPass) "PASS" else "FAIL",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = verdictColor
+                    )
+                }
+
+                Text(
+                    text = if (preliminaryPass) "Eligible for Acceptance" else "Ineligible / Quarantine",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = verdictColor
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         Button(
             onClick = {
                 isProcessing = true
                 errorMessage = null
+                custodyTransferNotice = null
                 coroutineScope.launch {
                     try {
                         val result = RepositoryProvider.handoverOrchestrator.processHandover(
@@ -359,12 +772,15 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                             // If verdict is PASS, transfer custody to this receiving device
                             if (res?.handover?.verdict == HandoverVerdict.PASS) {
                                 val myDeviceId = DeviceIdProvider.getDeviceId(context)
-                                runCatching {
-                                    SupabaseRemoteDataSource().transferCustody(
-                                        shipmentId = shipment.id,
-                                        newDeviceId = myDeviceId,
-                                        custodyState = "TRANSFERRED"
-                                    )
+                                val custodyResult = remoteDataSource.transferCustody(
+                                    shipmentId = shipment.id,
+                                    newDeviceId = myDeviceId,
+                                    custodyState = "TRANSFERRED"
+                                )
+                                if (custodyResult.isSuccess) {
+                                    custodyTransferNotice = "CUSTODY TRANSFERRED to this device ($myDeviceId)"
+                                } else {
+                                    custodyTransferNotice = "Waiting for network to confirm custody transfer"
                                 }
                             }
                         } else {
@@ -387,7 +803,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         ) {
             Icon(imageVector = Icons.Default.Verified, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text(if (isProcessing) "Evaluating & Sealing..." else "Execute Custody Handover")
+            Text(if (isProcessing) "Evaluating & Sealing Handover..." else "Execute Custody Handover")
         }
 
         if (errorMessage != null) {
@@ -399,7 +815,17 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        // Result Verdict Card
+        if (custodyTransferNotice != null) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = custodyTransferNotice!!,
+                color = if (custodyTransferNotice!!.startsWith("CUSTODY TRANSFERRED")) StatusGreen else StatusAmber,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        // Post-execution Summary Card
         if (handoverResult != null) {
             Spacer(modifier = Modifier.height(16.dp))
             val result = handoverResult!!
@@ -426,7 +852,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "VERDICT: ${result.handover.verdict.name}",
+                                text = "OFFICIAL RECORD: ${result.handover.verdict.name}",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = bannerColor
@@ -458,7 +884,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                         )
                     } else if (isPass) {
                         Text(
-                            text = "All 4 handover criteria satisfied. Cargo custody officially transferred.",
+                            text = "All 4 criteria satisfied. Handover officially sealed in immutable Room storage.",
                             style = MaterialTheme.typography.bodySmall,
                             color = StatusGreen
                         )

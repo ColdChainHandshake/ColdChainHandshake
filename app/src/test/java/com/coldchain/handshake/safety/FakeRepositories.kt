@@ -36,6 +36,12 @@ class FakeAlertRepository : AlertRepository {
             list.filter { it.shipmentId == shipmentId && !it.acknowledged }
         }
     }
+
+    override fun getAllAlerts(shipmentId: String): Flow<List<Alert>> {
+        return alertsFlow.map { list ->
+            list.filter { it.shipmentId == shipmentId }
+        }
+    }
 }
 
 /**

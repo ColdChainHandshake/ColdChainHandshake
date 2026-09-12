@@ -475,6 +475,10 @@ class E2EAlertRepository : AlertRepository {
     override fun getActiveAlerts(shipmentId: String): Flow<List<Alert>> {
         return flow.map { list -> list.filter { it.shipmentId == shipmentId && !it.acknowledged } }
     }
+
+    override fun getAllAlerts(shipmentId: String): Flow<List<Alert>> {
+        return flow.map { list -> list.filter { it.shipmentId == shipmentId } }
+    }
 }
 
 class E2EHandoverRepository : HandoverRepository {

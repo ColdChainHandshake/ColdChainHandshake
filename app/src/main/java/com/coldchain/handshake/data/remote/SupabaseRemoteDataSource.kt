@@ -8,6 +8,7 @@ import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
 import com.coldchain.handshake.data.remote.dto.RemoteTemperatureEventDto
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Order
 
 /**
  * Remote data source for Supabase interactions.
@@ -142,6 +143,7 @@ open class SupabaseRemoteDataSource(
                 filter {
                     eq("shipment_id", shipmentId)
                 }
+                order("timestamp", Order.ASCENDING)
             }
             .decodeList<RemoteTemperatureEventDto>()
     }
@@ -152,6 +154,7 @@ open class SupabaseRemoteDataSource(
                 filter {
                     eq("shipment_id", shipmentId)
                 }
+                order("timestamp", Order.ASCENDING)
             }
             .decodeList<RemoteAlertDto>()
     }

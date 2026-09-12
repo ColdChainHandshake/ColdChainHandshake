@@ -14,13 +14,13 @@ interface TemperatureEventDao {
     /**
      * Observable stream of all temperature events for a shipment, sorted chronologically.
      */
-    @Query("SELECT * FROM temperature_events WHERE shipmentId = :shipmentId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM temperature_events WHERE shipmentId = :shipmentId ORDER BY timestamp ASC, id ASC")
     fun getTemperatures(shipmentId: String): Flow<List<TemperatureEventEntity>>
 
     /**
      * Direct snapshot read for verification logic.
      */
-    @Query("SELECT * FROM temperature_events WHERE shipmentId = :shipmentId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM temperature_events WHERE shipmentId = :shipmentId ORDER BY timestamp ASC, id ASC")
     suspend fun getTemperaturesDirect(shipmentId: String): List<TemperatureEventEntity>
 
     /**

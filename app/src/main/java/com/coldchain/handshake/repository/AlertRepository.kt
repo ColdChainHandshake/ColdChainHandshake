@@ -9,4 +9,5 @@ import kotlinx.coroutines.flow.Flow
 interface AlertRepository {
     suspend fun saveAlert(alert: Alert): Result<Unit>
     fun getActiveAlerts(shipmentId: String): Flow<List<Alert>>
+    fun getAllAlerts(shipmentId: String): Flow<List<Alert>> = getActiveAlerts(shipmentId)
 }
