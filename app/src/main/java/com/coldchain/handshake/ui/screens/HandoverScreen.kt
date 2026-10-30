@@ -24,16 +24,13 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Thermostat
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Refresh
 import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.crypto.IntegrityVerificationState
 import com.coldchain.handshake.repository.HistorySyncState
-import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -48,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,7 +61,12 @@ import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
+import com.coldchain.handshake.handover.HandoverVerdictEngine
 import com.coldchain.handshake.models.HandoverVerdict
+import com.coldchain.handshake.models.ShakeTestResult
+import com.coldchain.handshake.models.VvmStage
+import com.coldchain.handshake.safety.TemperatureVerdict
+import com.coldchain.handshake.ui.components.HandoverDecisionForm
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.repository.RepositoryProvider
@@ -173,8 +176,12 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
     }
 
     // Safety breach evaluation
-    val breachEvaluation = remember(telemetryEvents) {
-        BreachDetector.evaluateTelemetry(telemetryEvents)
+    val breachEvaluation = remember(telemetryEvents, shipment) {
+        shipment?.let {
+            RepositoryProvider.safetyEngine
+                .evaluateShipment(it, telemetryEvents, windowEnd = System.currentTimeMillis())
+                .evaluation
+        } ?: BreachDetector.evaluateTelemetry(telemetryEvents)
     }
     val temperaturePassed = breachEvaluation.temperaturePassed
     val cumulativeExcursionStr = remember(breachEvaluation) {
@@ -204,6 +211,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var custodyTransferNotice by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var vvmStage by rememberSaveable { mutableStateOf(VvmStage.NOT_RECORDED) }
+    var shakeTest by rememberSaveable { mutableStateOf(ShakeTestResult.NOT_DONE) }
 
     Column(
         modifier = modifier
@@ -404,18 +413,23 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val (resultColor, resultText) = when (breachEvaluation.verdict) {
+                        TemperatureVerdict.PASS -> StatusGreen to "Temperature Result: ✓ IN RANGE"
+                        TemperatureVerdict.UNKNOWN -> StatusAmber to "Temperature Result: UNKNOWN (gap in the readings)"
+                        TemperatureVerdict.FAIL -> StatusRed to "Temperature Result: ⚠️ BREACH"
+                    }
                     Icon(
-                        imageVector = if (temperaturePassed) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                        imageVector = if (temperaturePassed) Icons.Default.CheckCircle else Icons.Default.Warning,
                         contentDescription = null,
-                        tint = if (temperaturePassed) StatusGreen else StatusRed,
+                        tint = resultColor,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (temperaturePassed) "Temperature Result: ✓ IN RANGE (Safe: 2°C–8°C)" else "Temperature Result: ⚠️ BREACH DETECTED (> 5 min excursion)",
+                        text = resultText,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (temperaturePassed) StatusGreen else StatusRed
+                        color = resultColor
                     )
                 }
             }
@@ -771,26 +785,36 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         // 9. FINAL VERDICT & EXECUTE CUSTODY HANDOVER
         val isPendingSync = integrityEvaluation.state == IntegrityVerificationState.PENDING_SYNC
         val isVerified = integrityEvaluation.state == IntegrityVerificationState.VERIFIED
-        val preliminaryPass = temperaturePassed && isVerified && workerSigned && pharmacistSigned
+        val computedEvaluation = HandoverVerdictEngine.evaluate(
+            temperature = breachEvaluation.verdict,
+            integrityPassed = isVerified,
+            workerSigned = workerSigned,
+            pharmacistSigned = pharmacistSigned,
+            vvmStage = vvmStage,
+            shakeTest = shakeTest
+        )
+        val preliminaryVerdict = computedEvaluation.verdict
 
         val verdictColor = when {
             isPendingSync -> StatusAmber
-            preliminaryPass -> StatusGreen
+            preliminaryVerdict == HandoverVerdict.PASS -> StatusGreen
+            preliminaryVerdict == HandoverVerdict.UNKNOWN -> StatusAmber
             else -> StatusRed
         }
         val verdictIcon = when {
             isPendingSync -> Icons.Default.Sync
-            preliminaryPass -> Icons.Default.CheckCircle
+            preliminaryVerdict == HandoverVerdict.PASS -> Icons.Default.CheckCircle
+            preliminaryVerdict == HandoverVerdict.UNKNOWN -> Icons.Default.Warning
             else -> Icons.Default.Cancel
         }
         val verdictTitle = when {
             isPendingSync -> "INTEGRITY VERIFICATION PENDING"
-            preliminaryPass -> "FINAL VERDICT: PASS"
-            else -> "FINAL VERDICT: FAIL"
+            else -> "FINAL VERDICT: ${preliminaryVerdict.name}"
         }
         val verdictSubtitle = when {
             isPendingSync -> "Waiting for complete telemetry history before integrity verification"
-            preliminaryPass -> "Eligible for Acceptance"
+            preliminaryVerdict == HandoverVerdict.PASS -> "Eligible for Acceptance"
+            preliminaryVerdict == HandoverVerdict.UNKNOWN -> "The readings have a gap, so the shipment is held"
             integrityEvaluation.state == IntegrityVerificationState.TAMPER_DETECTED -> "Ineligible / Tamper Detected"
             else -> "Ineligible / Requirements Unmet"
         }
@@ -838,8 +862,20 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        Button(
-            onClick = {
+        HandoverDecisionForm(
+            evaluation = computedEvaluation,
+            vvmStage = vvmStage,
+            onVvmStageChange = { vvmStage = it },
+            shakeTest = shakeTest,
+            onShakeTestChange = { shakeTest = it },
+            enabled = !isProcessing && !isPendingSync && handoverResult == null,
+            waitingLabel = when {
+                isProcessing -> "Evaluating & Recording Handover..."
+                isPendingSync -> "Waiting for Complete History..."
+                handoverResult != null -> "Handover Recorded"
+                else -> null
+            },
+            onRecord = { verdict, reason ->
                 isProcessing = true
                 errorMessage = null
                 custodyTransferNotice = null
@@ -848,7 +884,11 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                         val result = RepositoryProvider.handoverOrchestrator.processHandover(
                             shipmentId = shipment.id,
                             workerSigned = workerSigned,
-                            pharmacistSigned = pharmacistSigned
+                            pharmacistSigned = pharmacistSigned,
+                            declaredVerdict = verdict,
+                            reason = reason,
+                            vvmStage = vvmStage,
+                            shakeTest = shakeTest
                         )
                         if (result.isSuccess) {
                             val res = result.getOrNull()
@@ -878,25 +918,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     }
                 }
             },
-            enabled = !isProcessing && preliminaryPass,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            )
-        ) {
-            Icon(imageVector = if (isPendingSync) Icons.Default.Sync else Icons.Default.Verified, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                when {
-                    isProcessing -> "Evaluating & Sealing Handover..."
-                    isPendingSync -> "Waiting for Complete History..."
-                    !preliminaryPass -> "Cannot Handover (Verdict FAIL)"
-                    else -> "Execute Custody Handover"
-                }
-            )
-        }
+            modifier = Modifier.fillMaxWidth()
+        )
 
         if (errorMessage != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -964,7 +987,11 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(16.dp))
             val result = handoverResult!!
             val isPass = result.handover.verdict == HandoverVerdict.PASS
-            val bannerColor = if (isPass) StatusGreen else StatusRed
+            val bannerColor = when (result.handover.verdict) {
+                HandoverVerdict.PASS -> StatusGreen
+                HandoverVerdict.UNKNOWN -> StatusAmber
+                HandoverVerdict.FAIL -> StatusRed
+            }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1009,18 +1036,18 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (!isPass && result.evaluation.failureReasons.isNotEmpty()) {
+                    if (isPass) {
                         Text(
-                            text = "Failure Reasons: " + result.evaluation.failureReasons.joinToString { it.name },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = StatusRed,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    } else if (isPass) {
-                        Text(
-                            text = "All 4 criteria satisfied. Handover officially sealed in immutable Room storage.",
+                            text = "All checks passed. Handover recorded on this device.",
                             style = MaterialTheme.typography.bodySmall,
                             color = StatusGreen
+                        )
+                    } else {
+                        Text(
+                            text = "Reason: ${result.handover.reason}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = bannerColor,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
 
@@ -1031,6 +1058,25 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (result.updatedShipment.status == ShipmentStatus.QUARANTINED) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                isProcessing = true
+                                coroutineScope.launch {
+                                    RepositoryProvider.handoverOrchestrator.requestReplacement(shipment.id)
+                                        .onSuccess { handoverResult = result.copy(updatedShipment = it) }
+                                        .onFailure { errorMessage = it.message ?: "Could not request a replacement" }
+                                    isProcessing = false
+                                }
+                            },
+                            enabled = !isProcessing,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Request Replacement")
+                        }
+                    }
                 }
             }
         }

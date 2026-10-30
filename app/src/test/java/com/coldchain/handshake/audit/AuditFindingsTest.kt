@@ -1,29 +1,17 @@
 package com.coldchain.handshake.audit
 
 import com.coldchain.handshake.crypto.HashChainService
-import com.coldchain.handshake.models.AlertType
-import com.coldchain.handshake.models.Shipment
-import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
-import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.BreachDetector
-import com.coldchain.handshake.safety.FakeAlertRepository
-import com.coldchain.handshake.safety.FakeShipmentRepository
-import com.coldchain.handshake.safety.SafetyEngine
-import com.coldchain.handshake.safety.TemperatureVerdict
-import com.coldchain.handshake.simulator.TemperatureSimulator
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Tests written during the code review. Each one passes when the weakness it
- * describes is PRESENT in the current code, so they document behaviour rather
- * than guard it. Flip the assertions once the corresponding fix lands.
+ * Tests written during the code review. Each one passes because the weakness it describes is still
+ * PRESENT, so they document behaviour rather than guard it. Both are review finding 2, which Phase 3
+ * fixes with the keyed chain and server checks. Flip each assertion then and move it to [RegressionTest].
  */
 class AuditFindingsTest {
 
@@ -64,56 +52,5 @@ class AuditFindingsTest {
         assertTrue(HashChainService.verifyChain(forged).valid)
         assertEquals(original.map { it.id }, forged.map { it.id })
         assertTrue(BreachDetector.evaluateTelemetry(forged).temperaturePassed)
-    }
-
-    @Test
-    fun finding3_freezingFailsAFreezeSensitiveProduct() {
-        // Three hours at -3 C: catastrophic for freeze-sensitive vaccines
-        val frozen = HashChainService.buildChain(rawEvents(List(181) { -3.0 }))
-        val eval = BreachDetector.evaluateTelemetry(frozen)
-        assertEquals(TemperatureVerdict.FAIL, eval.verdict)
-        assertFalse("freeze excursion must not pass", eval.temperaturePassed)
-        assertEquals(180 * minute, eval.cumulativeBreachDurationMs)
-    }
-
-    @Test
-    fun finding4_dataGapsAreUnknownNotSafe() {
-        // 5 C, then the logger is silent for 6 hours, then one hot reading, then safe again
-        val events = HashChainService.buildChain(
-            listOf(
-                rawEvents(listOf(5.0))[0],
-                rawEvents(listOf(5.0))[0].copy(id = "TE-B", timestamp = t0 + 6 * 60 * minute, temperature = 12.0),
-                rawEvents(listOf(5.0))[0].copy(id = "TE-C", timestamp = t0 + 6 * 60 * minute + minute, temperature = 5.0)
-            )
-        )
-        val eval = BreachDetector.evaluateTelemetry(events)
-        assertEquals(TemperatureVerdict.UNKNOWN, eval.verdict)
-        assertFalse("six unexplained hours must not pass", eval.temperaturePassed)
-        assertEquals(minute, eval.cumulativeBreachDurationMs)
-    }
-
-    @Test
-    fun finding5_oneExcursionCreatesOneAlert() = runTest {
-        val dispatcher = StandardTestDispatcher(testScheduler)
-        val alerts = FakeAlertRepository()
-        val shipments = FakeShipmentRepository()
-        val shipment = Shipment("SHIP-STORM", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.IN_TRANSIT)
-        shipments.saveShipment(shipment)
-
-        val sim = TemperatureSimulator(
-            telemetryRepository = InMemoryTelemetryRepository(),
-            chaosEngineService = null,
-            dispatcher = dispatcher,
-            safetyEngine = SafetyEngine(alerts, shipments)
-        )
-        sim.attachShipment(shipment, startTimestamp = t0)
-
-        sim.setHeatSpikeModeSync(true)
-        repeat(8) { sim.tickOnce(60) }          // 8 hot minutes -> breach
-        sim.setHeatSpikeModeSync(false)
-        repeat(20) { sim.tickOnce(60) }         // 20 normal minutes after cooling down
-
-        val breachAlerts = alerts.savedAlerts.count { it.type == AlertType.TEMPERATURE_BREACH }
-        assertEquals(1, breachAlerts)
     }
 }

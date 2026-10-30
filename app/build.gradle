@@ -146,6 +146,11 @@ dependencies {
     // Background work
     implementation 'androidx.work:work-runtime-ktx:2.9.1'
 
+    constraints {
+        // CameraX brings in Fragment 1.1, but the Activity Result APIs need 1.3 or newer.
+        implementation('androidx.fragment:fragment:1.6.2')
+    }
+
     // Foreground Location Provider
     implementation 'com.google.android.gms:play-services-location:21.0.1'
 
@@ -156,6 +161,8 @@ dependencies {
     testImplementation 'org.robolectric:robolectric:4.13'
     testImplementation 'androidx.test:core:1.5.0'
     testImplementation 'androidx.work:work-testing:2.9.1'
+    testImplementation platform('androidx.compose:compose-bom:2023.10.01')
+    testImplementation 'androidx.compose.ui:ui-test-junit4'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     debugImplementation 'androidx.compose.ui:ui-tooling'

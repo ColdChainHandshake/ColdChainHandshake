@@ -44,6 +44,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
@@ -61,6 +63,7 @@ import com.coldchain.handshake.data.remote.dto.RemoteShipmentCustodyDto
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.util.DeviceIdProvider
 import androidx.compose.ui.platform.LocalContext
+import com.coldchain.handshake.ui.components.OptionSelector
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
@@ -84,6 +87,7 @@ fun DispatchScreen(
 
     // Authoritative scanned QR identifier to bind to Shipment.qrCode
     var boundQrCode by remember { mutableStateOf<String?>(null) }
+    var selectedProfileId by rememberSaveable { mutableStateOf(ProductProfiles.DEFAULT.id) }
     var infoBannerMessage by remember { mutableStateOf<String?>(null) }
 
     var currentShipment by remember { mutableStateOf<Shipment?>(null) }
@@ -342,6 +346,16 @@ fun DispatchScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    OptionSelector(
+                        title = "Product",
+                        options = ProductProfiles.ALL,
+                        selected = ProductProfiles.byId(selectedProfileId),
+                        label = { it.name },
+                        onSelect = { selectedProfileId = it.id }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     OutlinedTextField(
                         value = origin,
                         onValueChange = { origin = it },
@@ -410,7 +424,8 @@ fun DispatchScreen(
                                     origin = origin.trim(),
                                     destination = destination.trim(),
                                     workerId = workerId.trim(),
-                                    status = ShipmentStatus.CREATED
+                                    status = ShipmentStatus.CREATED,
+                                    productProfileId = selectedProfileId
                                 )
                                 currentShipment = newShipment
                                 qrBitmap = QRCodeGenerator.generateQR(authoritativeQr, 400)
