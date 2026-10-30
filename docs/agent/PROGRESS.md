@@ -90,7 +90,17 @@ Not proven yet: nothing has run on a phone or emulator. Screens are checked by R
 
 ## Phase 3: Toolchain upgrade and server trust
 
-- [x] 3.0 Toolchain: Kotlin 2.x, KSP, AGP 9, Gradle, Java 17, SDK 36, Compose BOM, Room 2.8, supabase-kt 3.x. Done in `03ddefc`, `4db626c` and the supabase-kt commit. targetSdk 36, compileSdk 37, see `DECISIONS.md`
+- [x] 3.0 Toolchain: Kotlin 2.x, KSP, AGP 9, Gradle, Java 17, SDK 36, Compose BOM, Room 2.8, supabase-kt 3.x. Done in `03ddefc`, `4db626c` and `047772f`. targetSdk 36, compileSdk 37, see `DECISIONS.md`
+
+```text
+Fresh clone of 047772f, no local.properties, --no-daemon:
+BUILD FAILED only on SyncServiceTest.test9, a test race, fixed afterwards
+Debug tests 270 failures 1 | Release tests 242 failures 0 | release APK built
+This folder after the fix: ./gradlew testDebugUnitTest testReleaseUnitTest lintDebug
+BUILD SUCCESSFUL in 3m 26s
+Debug tests 271 failures 0 errors 0 | Release tests 243 failures 0 errors 0
+```
+
 - [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out
 - [ ] 3.2 Data-model migrations, RLS, RPCs
 - [ ] 3.3 `confirm_handover`

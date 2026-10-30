@@ -405,7 +405,11 @@ class SyncServiceTest {
 
         // 3. Automatic sync happens WITHOUT calling syncPendingData() manually
         var attempts = 0
-        while ((testRemote.uploadedShipments.isEmpty() || testRemote.uploadedEvents.isEmpty()) && attempts < 50) {
+        // Wait for the rows to be marked synced, not just uploaded: cancelling between the two loses that write.
+        while (
+            (shipmentDao.getPendingShipments().isNotEmpty() || temperatureEventDao.getPendingEvents().isNotEmpty()) &&
+            attempts < 50
+        ) {
             delay(50)
             attempts++
         }

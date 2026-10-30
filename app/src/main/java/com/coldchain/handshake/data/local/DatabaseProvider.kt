@@ -34,6 +34,16 @@ object DatabaseProvider {
     }
 
     /**
+     * Closes the singleton, because a test environment can outlive the connection behind it.
+     */
+    internal fun closeForTesting() {
+        synchronized(this) {
+            instance?.close()
+            instance = null
+        }
+    }
+
+    /**
      * Factory for an isolated in-memory database instance, useful for tests.
      */
     fun createInMemoryDatabase(context: Context): ColdChainDatabase {
