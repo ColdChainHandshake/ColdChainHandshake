@@ -253,7 +253,7 @@ class FullAutonomousColdChainE2ETest {
         assertEquals(ShipmentStatus.QUARANTINED, latestShipment?.status)
 
         // Step 19: Open handover evaluation
-        val tempPassed = safetyEngine.evaluateHandoverTemperatureSafety(allEvents)
+        val tempPassed = safetyEngine.evaluateHandoverTemperatureSafety(latestShipment!!, allEvents)
         // Step 20: Verify temperature safety failed
         assertFalse("Handover temperature safety check must FAIL", tempPassed)
 
@@ -307,7 +307,7 @@ class FullAutonomousColdChainE2ETest {
         }
 
         val events = telemetryRepo.getTemperatures(shipmentId).first()
-        val tempPassed = safetyEngine.evaluateHandoverTemperatureSafety(events)
+        val tempPassed = safetyEngine.evaluateHandoverTemperatureSafety(shipmentRepo.getShipment(shipmentId).first()!!, events)
         assertTrue("Nominal telemetry must pass temperature check", tempPassed)
 
         val outcome = handoverOrchestrator.processHandover(

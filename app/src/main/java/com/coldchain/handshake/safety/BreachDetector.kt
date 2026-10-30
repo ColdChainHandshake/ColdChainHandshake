@@ -1,88 +1,141 @@
 package com.coldchain.handshake.safety
 
+import com.coldchain.handshake.models.ProductProfile
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.TemperatureEvent
 
 /**
  * Pure Kotlin evaluation engine for cold-chain temperature telemetry.
  *
- * Enforces the canonical business rule:
- * - Safe range: 2°C through 8°C inclusive.
- * - Only temperature > 8°C is considered an excursion (8.0°C exactly is SAFE).
- * - Breach threshold: cumulative proven duration strictly > 5 minutes (300,000 ms).
- *   (5:00 exactly = NOT A BREACH; 5:01 / 300,001 ms or greater = BREACH).
- * - Irregular timestamps supported; multiple separated intervals accumulate.
+ * Rules, all taken from the [ProductProfile]:
+ * - Readings exactly on a limit are safe.
+ * - Heat and freeze have separate cumulative budgets, and separated excursions accumulate.
+ *   A budget of 0 means a single reading past that limit fails, because a final reading proves
+ *   no duration at all.
+ * - Silence longer than [ProductProfile.maxSilenceMs] is a gap. It makes the verdict
+ *   [TemperatureVerdict.UNKNOWN], and is counted neither as safe nor as an excursion.
+ * - A confirmed breach outranks a gap, and no readings at all is never a pass.
  * - Never extrapolates beyond the final recorded event timestamp.
  */
 object BreachDetector {
 
     /**
-     * Evaluates a sequence of [TemperatureEvent]s against thermal safety thresholds.
+     * Evaluates a sequence of [TemperatureEvent]s against a product's rules.
      *
-     * @param events List of temperature telemetry events, which may be unordered or irregularly spaced.
-     * @return [BreachEvaluation] containing cumulative breach duration, breach state, and safety verdict.
+     * @param events Telemetry events, which may be unordered or irregularly spaced.
+     * @param profile The rules to apply. Defaults to the strictest profile.
+     * @param windowStart When monitoring should have begun, so a late first reading is seen as a gap.
+     * @param windowEnd When monitoring should still have been running, such as the moment of
+     *   handover, so a logger that went quiet early is seen as a gap.
+     * @return [BreachEvaluation] with the verdict and the excursions and gaps behind it.
      */
-    fun evaluateTelemetry(events: List<TemperatureEvent>): BreachEvaluation {
-        if (events.isEmpty()) {
-            return BreachEvaluation(
-                hasBreach = false,
-                cumulativeBreachDurationMs = 0L,
-                temperaturePassed = true,
-                maxExcursionTemperature = null,
-                excursionIntervalCount = 0
-            )
-        }
-
-        // 1. Sort telemetry deterministically: timestamp ascending, with ID tie-breaker
+    fun evaluateTelemetry(
+        events: List<TemperatureEvent>,
+        profile: ProductProfile = ProductProfiles.DEFAULT,
+        windowStart: Long? = null,
+        windowEnd: Long? = null
+    ): BreachEvaluation {
+        // Sort telemetry deterministically: timestamp ascending, with ID tie-breaker
         val sortedEvents = events.sortedWith(
             compareBy<TemperatureEvent>({ it.timestamp }, { it.id })
         )
 
-        var cumulativeBreachMs = 0L
-        var maxExcursionTemp: Double? = null
-        var intervalCount = 0
-        var insideExcursion = false
+        val excursions = markBreaches(findExcursions(sortedEvents, profile), profile)
+        val dataGaps = findDataGaps(sortedEvents, profile, windowStart, windowEnd)
+        val hasBreach = excursions.any { it.breached }
 
-        // Record excursion peak even if a single event exists
-        for (event in sortedEvents) {
-            if (event.temperature > SafetyConstants.MAX_SAFE_TEMPERATURE) {
-                maxExcursionTemp = maxOf(maxExcursionTemp ?: event.temperature, event.temperature)
-            }
-        }
-
-        // 2. Iterate consecutive event pairs (earlier, next)
-        for (i in 0 until sortedEvents.size - 1) {
-            val earlier = sortedEvents[i]
-            val next = sortedEvents[i + 1]
-
-            if (earlier.temperature > SafetyConstants.MAX_SAFE_TEMPERATURE) {
-                val elapsed = next.timestamp - earlier.timestamp
-                if (elapsed > 0L) {
-                    cumulativeBreachMs += elapsed
-                    if (!insideExcursion) {
-                        intervalCount++
-                        insideExcursion = true
-                    }
-                }
-            } else {
-                // Return to safe range (or safe start) marks end of the previous excursion interval
-                insideExcursion = false
-            }
-        }
-
-        // 3. Final-event non-extrapolation:
-        // No elapsed time is added beyond sortedEvents.last().timestamp.
-
-        // 4. Threshold rule: cumulative proven duration strictly > 5 minutes (300,000 ms)
-        val hasBreach = cumulativeBreachMs > SafetyConstants.BREACH_DURATION_THRESHOLD_MS
-        val temperaturePassed = !hasBreach
+        val heat = excursions.filter { it.type == ExcursionType.HEAT }
+        val freeze = excursions.filter { it.type == ExcursionType.FREEZE }
 
         return BreachEvaluation(
             hasBreach = hasBreach,
-            cumulativeBreachDurationMs = cumulativeBreachMs,
-            temperaturePassed = temperaturePassed,
-            maxExcursionTemperature = maxExcursionTemp,
-            excursionIntervalCount = intervalCount
+            cumulativeBreachDurationMs = excursions.sumOf { it.durationMs },
+            maxExcursionTemperature = heat.maxOfOrNull { it.extremeTemperature },
+            excursionIntervalCount = excursions.count { it.durationMs > 0L },
+            verdict = when {
+                hasBreach -> TemperatureVerdict.FAIL
+                sortedEvents.isEmpty() || dataGaps.isNotEmpty() -> TemperatureVerdict.UNKNOWN
+                else -> TemperatureVerdict.PASS
+            },
+            cumulativeFreezeDurationMs = freeze.sumOf { it.durationMs },
+            minExcursionTemperature = freeze.minOfOrNull { it.extremeTemperature },
+            excursions = excursions,
+            dataGaps = dataGaps
         )
+    }
+
+    private fun classify(temperature: Double, profile: ProductProfile): ExcursionType? = when {
+        temperature > profile.maxC -> ExcursionType.HEAT
+        temperature < profile.minC -> ExcursionType.FREEZE
+        else -> null
+    }
+
+    /**
+     * Each reading speaks for the time until the next one, but never for more than the product's
+     * silence tolerance, so a gap can't be counted as time spent out of range.
+     */
+    private fun findExcursions(sortedEvents: List<TemperatureEvent>, profile: ProductProfile): List<Excursion> {
+        val excursions = mutableListOf<Excursion>()
+        var current: Excursion? = null
+
+        sortedEvents.forEachIndexed { index, event ->
+            val type = classify(event.temperature, profile)
+            if (current != null && current?.type != type) {
+                current?.let { excursions.add(it) }
+                current = null
+            }
+
+            val elapsed = sortedEvents.getOrNull(index + 1)?.let { it.timestamp - event.timestamp } ?: 0L
+            val credited = elapsed.coerceAtMost(profile.maxSilenceMs)
+
+            if (type != null) {
+                val running = current ?: Excursion(type, event.timestamp, 0L, event.temperature)
+                val extreme = when (type) {
+                    ExcursionType.HEAT -> maxOf(running.extremeTemperature, event.temperature)
+                    ExcursionType.FREEZE -> minOf(running.extremeTemperature, event.temperature)
+                }
+                current = running.copy(durationMs = running.durationMs + credited, extremeTemperature = extreme)
+            }
+
+            if (elapsed > profile.maxSilenceMs) {
+                current?.let { excursions.add(it) }
+                current = null
+            }
+        }
+        current?.let { excursions.add(it) }
+
+        return excursions
+    }
+
+    private fun markBreaches(excursions: List<Excursion>, profile: ProductProfile): List<Excursion> {
+        val runningTotals = mutableMapOf<ExcursionType, Long>()
+
+        return excursions.map { excursion ->
+            val total = (runningTotals[excursion.type] ?: 0L) + excursion.durationMs
+            runningTotals[excursion.type] = total
+
+            val budgetMinutes = when (excursion.type) {
+                ExcursionType.HEAT -> profile.maxExcursionMinutesHeat
+                ExcursionType.FREEZE -> profile.maxExcursionMinutesFreeze
+            }
+            excursion.copy(breached = budgetMinutes == 0 || total > budgetMinutes * 60_000L)
+        }
+    }
+
+    private fun findDataGaps(
+        sortedEvents: List<TemperatureEvent>,
+        profile: ProductProfile,
+        windowStart: Long?,
+        windowEnd: Long?
+    ): List<DataGap> {
+        val checkpoints = buildList {
+            windowStart?.let { add(it) }
+            addAll(sortedEvents.map { it.timestamp })
+            windowEnd?.let { add(it) }
+        }
+        return checkpoints.zipWithNext()
+            .filter { (earlier, later) -> later - earlier > profile.maxSilenceMs }
+            .map { (earlier, later) -> DataGap(earlier, later) }
     }
 
     /**

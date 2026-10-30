@@ -24,5 +24,7 @@ data class Shipment(
     val origin: String,
     val destination: String,
     val workerId: String,
-    val status: ShipmentStatus = ShipmentStatus.CREATED
+    val status: ShipmentStatus = ShipmentStatus.CREATED,
+    val productProfileId: String = ProductProfiles.DEFAULT.id,
+    val dispatchedAt: Long? = null
 )

@@ -1,6 +1,7 @@
 package com.coldchain.handshake.safety
 
 import com.coldchain.handshake.models.Alert
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.AlertRepository
@@ -27,9 +28,15 @@ class SafetyEngine(
      */
     fun evaluateShipment(
         shipment: Shipment,
-        events: List<TemperatureEvent>
+        events: List<TemperatureEvent>,
+        windowEnd: Long? = null
     ): SafetyDecision {
-        val evaluation = BreachDetector.evaluateTelemetry(events)
+        val evaluation = BreachDetector.evaluateTelemetry(
+            events = events,
+            profile = ProductProfiles.byId(shipment.productProfileId),
+            windowStart = shipment.dispatchedAt,
+            windowEnd = windowEnd
+        )
         val shouldQuarantine = QuarantineManager.shouldQuarantine(evaluation)
         val formattedDuration = BreachDetector.formatDuration(evaluation.cumulativeBreachDurationMs)
 
@@ -47,12 +54,12 @@ class SafetyEngine(
      *
      * Rules:
      * - safe history -> true
-     * - exactly 8°C -> true
-     * - exactly 5:00 hot duration -> true
-     * - >5:00 hot duration -> false
+     * - exactly on a limit -> true
+     * - within the product's budget -> true
+     * - past the budget, or a gap in the record -> false
      */
-    fun evaluateHandoverTemperatureSafety(events: List<TemperatureEvent>): Boolean {
-        return BreachDetector.evaluateTelemetry(events).temperaturePassed
+    fun evaluateHandoverTemperatureSafety(shipment: Shipment, events: List<TemperatureEvent>): Boolean {
+        return evaluateShipment(shipment, events).evaluation.temperaturePassed
     }
 
     /**
@@ -165,7 +172,7 @@ class SafetyEngine(
         events: List<TemperatureEvent>,
         timestamp: Long = System.currentTimeMillis()
     ): Alert? {
-        val evaluation = BreachDetector.evaluateTelemetry(events)
+        val evaluation = evaluateShipment(shipment, events).evaluation
         return if (evaluation.hasBreach) {
             AlertEscalationEngine.createBreachAlert(
                 shipmentId = shipment.id,
@@ -184,7 +191,7 @@ class SafetyEngine(
         shipment: Shipment,
         events: List<TemperatureEvent>
     ): Shipment {
-        val evaluation = BreachDetector.evaluateTelemetry(events)
+        val evaluation = evaluateShipment(shipment, events).evaluation
         return QuarantineManager.applyQuarantine(shipment, evaluation)
     }
 }

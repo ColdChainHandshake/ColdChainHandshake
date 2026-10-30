@@ -1,5 +1,6 @@
 package com.coldchain.handshake.safety
 
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import org.junit.Assert.assertEquals
@@ -29,6 +30,10 @@ class BreachDetectorTest {
         )
     }
 
+    // The default profile treats 3 silent minutes as a gap. These tests are about the 5-minute budget
+    // and use sparser readings, so they name a logger that records less often.
+    private val sparseLogger = ProductProfiles.DEFAULT.copy(loggingIntervalSeconds = 600)
+
     @Test
     fun exact8DegreesIsSafe() {
         val baseTime = 1_700_000_000_000L
@@ -39,7 +44,7 @@ class BreachDetectorTest {
             createEvent("e4", baseTime + 600_000L, 8.0)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals("Cumulative breach duration must be 0 for 8.0°C", 0L, result.cumulativeBreachDurationMs)
         assertFalse("8.0°C exact must not trigger a breach", result.hasBreach)
@@ -79,7 +84,7 @@ class BreachDetectorTest {
             createEvent("e2", baseTime + 300_000L, 5.0)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals(300_000L, result.cumulativeBreachDurationMs)
         assertFalse("Exactly 5 minutes must NOT trigger a breach", result.hasBreach)
@@ -99,7 +104,7 @@ class BreachDetectorTest {
             createEvent("e2", baseTime + 300_001L, 5.0)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals(300_001L, result.cumulativeBreachDurationMs)
         assertTrue("Exceeding 5 minutes by 1ms MUST trigger a breach", result.hasBreach)
@@ -125,7 +130,7 @@ class BreachDetectorTest {
             createEvent("e5", baseTime + 541_000L, 5.0)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals(301_000L, result.cumulativeBreachDurationMs)
         assertTrue("Cumulative excursion > 5 mins must trigger breach", result.hasBreach)
@@ -154,7 +159,9 @@ class BreachDetectorTest {
 
         assertEquals(120_000L, result.cumulativeBreachDurationMs)
         assertFalse("Dropout must not fabricate hot duration", result.hasBreach)
-        assertTrue(result.temperaturePassed)
+        // Finding 6: ten silent minutes are unknown, not safe.
+        assertEquals(TemperatureVerdict.UNKNOWN, result.verdict)
+        assertFalse(result.temperaturePassed)
     }
 
     @Test
@@ -172,7 +179,7 @@ class BreachDetectorTest {
             createEvent("e5", baseTime + 721_000L, 6.0)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals(301_000L, result.cumulativeBreachDurationMs)
         assertTrue("Separated intervals totaling > 5 mins must trigger breach", result.hasBreach)
@@ -239,7 +246,7 @@ class BreachDetectorTest {
             createEvent("e2", baseTime + 100_000L, 9.5)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals(301_000L, result.cumulativeBreachDurationMs)
         assertTrue(result.hasBreach)
@@ -254,7 +261,7 @@ class BreachDetectorTest {
             createEvent("e3", baseTime + 301_000L, 5.0)
         )
 
-        val result = BreachDetector.evaluateTelemetry(events)
+        val result = BreachDetector.evaluateTelemetry(events, sparseLogger)
 
         assertEquals(301_000L, result.cumulativeBreachDurationMs)
         assertTrue(result.hasBreach)
@@ -265,7 +272,9 @@ class BreachDetectorTest {
         val emptyResult = BreachDetector.evaluateTelemetry(emptyList())
         assertEquals(0L, emptyResult.cumulativeBreachDurationMs)
         assertFalse(emptyResult.hasBreach)
-        assertTrue(emptyResult.temperaturePassed)
+        // Finding 6: no readings is unknown, not a pass.
+        assertEquals(TemperatureVerdict.UNKNOWN, emptyResult.verdict)
+        assertFalse(emptyResult.temperaturePassed)
 
         val singleSafe = BreachDetector.evaluateTelemetry(listOf(createEvent("e1", 1000L, 5.0)))
         assertEquals(0L, singleSafe.cumulativeBreachDurationMs)

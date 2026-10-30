@@ -11,10 +11,12 @@ import com.coldchain.handshake.safety.BreachDetector
 import com.coldchain.handshake.safety.FakeAlertRepository
 import com.coldchain.handshake.safety.FakeShipmentRepository
 import com.coldchain.handshake.safety.SafetyEngine
+import com.coldchain.handshake.safety.TemperatureVerdict
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -65,16 +67,17 @@ class AuditFindingsTest {
     }
 
     @Test
-    fun finding3_freezingIsNeverABreach() {
+    fun finding3_freezingFailsAFreezeSensitiveProduct() {
         // Three hours at -3 C: catastrophic for freeze-sensitive vaccines
         val frozen = HashChainService.buildChain(rawEvents(List(181) { -3.0 }))
         val eval = BreachDetector.evaluateTelemetry(frozen)
-        assertTrue("freeze excursion passes", eval.temperaturePassed)
-        assertEquals(0L, eval.cumulativeBreachDurationMs)
+        assertEquals(TemperatureVerdict.FAIL, eval.verdict)
+        assertFalse("freeze excursion must not pass", eval.temperaturePassed)
+        assertEquals(180 * minute, eval.cumulativeBreachDurationMs)
     }
 
     @Test
-    fun finding4_dataGapsAreTreatedAsSafe() {
+    fun finding4_dataGapsAreUnknownNotSafe() {
         // 5 C, then the logger is silent for 6 hours, then one hot reading, then safe again
         val events = HashChainService.buildChain(
             listOf(
@@ -84,7 +87,8 @@ class AuditFindingsTest {
             )
         )
         val eval = BreachDetector.evaluateTelemetry(events)
-        assertTrue("six unexplained hours plus a 12 C reading still passes", eval.temperaturePassed)
+        assertEquals(TemperatureVerdict.UNKNOWN, eval.verdict)
+        assertFalse("six unexplained hours must not pass", eval.temperaturePassed)
         assertEquals(minute, eval.cumulativeBreachDurationMs)
     }
 

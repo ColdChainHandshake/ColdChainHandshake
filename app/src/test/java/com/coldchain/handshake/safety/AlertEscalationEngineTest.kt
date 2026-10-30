@@ -14,7 +14,6 @@ class AlertEscalationEngineTest {
         val evaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 320_000L,
-            temperaturePassed = false,
             maxExcursionTemperature = 10.4,
             excursionIntervalCount = 1
         )
@@ -38,7 +37,6 @@ class AlertEscalationEngineTest {
         val evaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 301_000L,
-            temperaturePassed = false
         )
         val initialAlert = AlertEscalationEngine.createBreachAlert("SHIP-001", evaluation)
         assertEquals(EscalationLevel.WORKER, initialAlert.escalationLevel)
@@ -62,7 +60,6 @@ class AlertEscalationEngineTest {
         val evaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 305_000L,
-            temperaturePassed = false
         )
         val alert = AlertEscalationEngine.createBreachAlert("SHIP-001", evaluation)
         assertFalse(alert.acknowledged)

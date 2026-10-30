@@ -61,7 +61,7 @@ class SafetyEngineTest {
         assertFalse(decision.shouldQuarantine)
         assertEquals("00:00", decision.breachDurationFormatted)
 
-        val handoverSafety = engine.evaluateHandoverTemperatureSafety(events)
+        val handoverSafety = engine.evaluateHandoverTemperatureSafety(shipment, events)
         assertTrue("Handover temperature check must pass", handoverSafety)
 
         val alert = engine.createBreachAlertIfViolated(shipment, events)
@@ -84,10 +84,7 @@ class SafetyEngineTest {
         )
 
         val baseTime = 1_700_000_000_000L
-        val events = listOf(
-            createEvent("e1", baseTime, 9.5),
-            createEvent("e2", baseTime + 301_000L, 5.0)
-        )
+        val events = hotThenSafe(baseTime, 301_000L, 9.5)
 
         val decision = engine.evaluateShipment(shipment, events)
 
@@ -96,7 +93,7 @@ class SafetyEngineTest {
         assertTrue(decision.shouldQuarantine)
         assertEquals("05:01", decision.breachDurationFormatted)
 
-        val handoverSafety = engine.evaluateHandoverTemperatureSafety(events)
+        val handoverSafety = engine.evaluateHandoverTemperatureSafety(shipment, events)
         assertFalse("Handover temperature check must fail on breach", handoverSafety)
 
         val alert = engine.createBreachAlertIfViolated(shipment, events)

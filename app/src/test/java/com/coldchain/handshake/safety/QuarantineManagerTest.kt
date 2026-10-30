@@ -24,14 +24,12 @@ class QuarantineManagerTest {
         val safeEvaluation = BreachEvaluation(
             hasBreach = false,
             cumulativeBreachDurationMs = 299_000L,
-            temperaturePassed = true
         )
         assertFalse(QuarantineManager.shouldQuarantine(safeEvaluation))
 
         val breachEvaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 301_000L,
-            temperaturePassed = false
         )
         assertTrue(QuarantineManager.shouldQuarantine(breachEvaluation))
     }
@@ -41,7 +39,6 @@ class QuarantineManagerTest {
         val breachEvaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 350_000L,
-            temperaturePassed = false
         )
 
         val updated = QuarantineManager.applyQuarantine(testShipment, breachEvaluation)
@@ -54,7 +51,6 @@ class QuarantineManagerTest {
         val safeEvaluation = BreachEvaluation(
             hasBreach = false,
             cumulativeBreachDurationMs = 100_000L,
-            temperaturePassed = true
         )
 
         val updated = QuarantineManager.applyQuarantine(testShipment, safeEvaluation)
@@ -67,7 +63,6 @@ class QuarantineManagerTest {
         val breachEvaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 400_000L,
-            temperaturePassed = false
         )
 
         val updated = QuarantineManager.applyQuarantine(replacementShipment, breachEvaluation)
@@ -80,7 +75,6 @@ class QuarantineManagerTest {
         val breachEvaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 400_000L,
-            temperaturePassed = false
         )
 
         val updated = QuarantineManager.applyQuarantine(quarantinedShipment, breachEvaluation)

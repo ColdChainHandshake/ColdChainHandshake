@@ -66,10 +66,7 @@ class SafetyIntegrationTest {
         fakeShipmentRepo.saveShipment(sampleShipment)
 
         val baseTime = 1_700_000_000_000L
-        val events = listOf(
-            createEvent("e1", baseTime, 9.2),
-            createEvent("e2", baseTime + 301_000L, 5.0) // 5m 1s hot excursion
-        )
+        val events = hotThenSafe(baseTime, 301_000L, 9.2)
 
         val decision = safetyEngine.processTelemetryAndEnforceSafety(sampleShipment, events)
 
@@ -111,10 +108,7 @@ class SafetyIntegrationTest {
         fakeAlertRepo.failureException = IllegalStateException("Disk I/O error writing alert")
 
         val baseTime = 1_700_000_000_000L
-        val events = listOf(
-            createEvent("e1", baseTime, 9.5),
-            createEvent("e2", baseTime + 305_000L, 5.0)
-        )
+        val events = hotThenSafe(baseTime, 305_000L, 9.5)
 
         val decision = safetyEngine.processTelemetryAndEnforceSafety(sampleShipment, events)
 
@@ -141,10 +135,7 @@ class SafetyIntegrationTest {
         fakeShipmentRepo.failureException = IllegalStateException("Database locked")
 
         val baseTime = 1_700_000_000_000L
-        val events = listOf(
-            createEvent("e1", baseTime, 9.5),
-            createEvent("e2", baseTime + 305_000L, 5.0)
-        )
+        val events = hotThenSafe(baseTime, 305_000L, 9.5)
 
         val decision = safetyEngine.processTelemetryAndEnforceSafety(sampleShipment, events)
 
@@ -165,10 +156,7 @@ class SafetyIntegrationTest {
         fakeShipmentRepo.saveShipment(sampleShipment)
 
         val baseTime = 1_700_000_000_000L
-        val events = listOf(
-            createEvent("e1", baseTime, 5.0),
-            createEvent("e2", baseTime + 600_000L, 5.5)
-        )
+        val events = steadyReadings(baseTime, 600_000L, 5.5)
 
         val decision = safetyEngine.processTelemetryAndEnforceSafety(sampleShipment, events)
 
@@ -220,7 +208,9 @@ class SafetyIntegrationTest {
         val decision = safetyEngine.processTelemetryAndEnforceSafety(sampleShipment, events)
 
         assertFalse("10-minute dropout must not create false breach", decision.evaluation.hasBreach)
-        assertTrue(decision.evaluation.temperaturePassed)
+        // Finding 6: ten silent minutes are unknown, not safe.
+        assertEquals(TemperatureVerdict.UNKNOWN, decision.evaluation.verdict)
+        assertFalse(decision.evaluation.temperaturePassed)
         assertFalse(decision.shouldQuarantine)
         assertTrue(fakeAlertRepo.savedAlerts.isEmpty())
         assertEquals(ShipmentStatus.IN_TRANSIT, fakeShipmentRepo.getShipment("SHIP-777").first()?.status)
@@ -229,10 +219,7 @@ class SafetyIntegrationTest {
     @Test
     fun deterministicEscalationPersistsUpdatesViaAlertRepository() = runBlocking {
         val baseTime = 1_700_000_000_000L
-        val events = listOf(
-            createEvent("e1", baseTime, 9.5),
-            createEvent("e2", baseTime + 310_000L, 5.0)
-        )
+        val events = hotThenSafe(baseTime, 310_000L, 9.5)
         safetyEngine.processTelemetryAndEnforceSafety(sampleShipment, events)
         val initialAlert = fakeAlertRepo.savedAlerts.first()
         assertEquals(EscalationLevel.WORKER, initialAlert.escalationLevel)
@@ -271,7 +258,6 @@ class SafetyIntegrationTest {
         val evaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 350_000L,
-            temperaturePassed = false
         )
 
         val result = QuarantineManager.quarantineAndPersist(quarantinedShipment, evaluation, fakeShipmentRepo)
@@ -287,7 +273,6 @@ class SafetyIntegrationTest {
         val evaluation = BreachEvaluation(
             hasBreach = true,
             cumulativeBreachDurationMs = 400_000L,
-            temperaturePassed = false
         )
 
         val result = QuarantineManager.quarantineAndPersist(replacementShipment, evaluation, fakeShipmentRepo)
@@ -321,36 +306,24 @@ class SafetyIntegrationTest {
         val baseTime = 1_700_000_000_000L
 
         // 1. Safe history -> true
-        val safeEvents = listOf(
-            createEvent("e1", baseTime, 4.5),
-            createEvent("e2", baseTime + 60_000L, 5.0)
-        )
+        val safeEvents = hotThenSafe(baseTime, 60_000L, 4.5)
         assertTrue("Safe history must pass handover check",
-            safetyEngine.evaluateHandoverTemperatureSafety(safeEvents))
+            safetyEngine.evaluateHandoverTemperatureSafety(sampleShipment, safeEvents))
 
         // 2. Exactly 8.0°C -> true
-        val exact8Events = listOf(
-            createEvent("e1", baseTime, 8.0),
-            createEvent("e2", baseTime + 600_000L, 8.0)
-        )
+        val exact8Events = steadyReadings(baseTime, 600_000L, 8.0)
         assertTrue("8.0°C exact must pass handover check",
-            safetyEngine.evaluateHandoverTemperatureSafety(exact8Events))
+            safetyEngine.evaluateHandoverTemperatureSafety(sampleShipment, exact8Events))
 
         // 3. Exactly 5:00 (300,000 ms) hot duration -> true
-        val exact5MinHotEvents = listOf(
-            createEvent("e1", baseTime, 9.0),
-            createEvent("e2", baseTime + 300_000L, 5.0)
-        )
+        val exact5MinHotEvents = hotThenSafe(baseTime, 300_000L, 9.0)
         assertTrue("Exactly 5:00 hot must pass handover check",
-            safetyEngine.evaluateHandoverTemperatureSafety(exact5MinHotEvents))
+            safetyEngine.evaluateHandoverTemperatureSafety(sampleShipment, exact5MinHotEvents))
 
         // 4. >5:00 hot duration (300,001 ms) -> false
-        val breachEvents = listOf(
-            createEvent("e1", baseTime, 9.0),
-            createEvent("e2", baseTime + 300_001L, 5.0)
-        )
+        val breachEvents = hotThenSafe(baseTime, 300_001L, 9.0)
         assertFalse(">5:00 hot duration must fail handover check",
-            safetyEngine.evaluateHandoverTemperatureSafety(breachEvents))
+            safetyEngine.evaluateHandoverTemperatureSafety(sampleShipment, breachEvents))
     }
 
     @Test
@@ -373,10 +346,7 @@ class SafetyIntegrationTest {
         assertFalse(safeDecision.hasPersistenceFailure)
 
         // 2. evaluateShipment on breached telemetry
-        val breachEvents = listOf(
-            createEvent("e1", 1_700_000_000_000L, 9.5),
-            createEvent("e2", 1_700_000_305_000L, 5.0)
-        )
+        val breachEvents = hotThenSafe(1_700_000_000_000L, 305_000L, 9.5)
         val breachDecision = pureEngine.evaluateShipment(sampleShipment, breachEvents)
         assertTrue(breachDecision.evaluation.hasBreach)
         assertFalse(breachDecision.evaluation.temperaturePassed)
@@ -387,8 +357,8 @@ class SafetyIntegrationTest {
         assertFalse(breachDecision.hasPersistenceFailure)
 
         // 3. evaluateHandoverTemperatureSafety
-        assertTrue(pureEngine.evaluateHandoverTemperatureSafety(safeEvents))
-        assertFalse(pureEngine.evaluateHandoverTemperatureSafety(breachEvents))
+        assertTrue(pureEngine.evaluateHandoverTemperatureSafety(sampleShipment, safeEvents))
+        assertFalse(pureEngine.evaluateHandoverTemperatureSafety(sampleShipment, breachEvents))
 
         // 4. Pure factory helpers
         assertNull(pureEngine.createBreachAlertIfViolated(sampleShipment, safeEvents))
@@ -407,10 +377,7 @@ class SafetyIntegrationTest {
         val pureEngine = SafetyEngine()
 
         val baseTime = 1_700_000_000_000L
-        val breachEvents = listOf(
-            createEvent("e1", baseTime, 9.5),
-            createEvent("e2", baseTime + 305_000L, 5.0)
-        )
+        val breachEvents = hotThenSafe(baseTime, 305_000L, 9.5)
 
         // 1. processTelemetryAndEnforceSafety must NOT silently succeed without repositories
         val decision = pureEngine.processTelemetryAndEnforceSafety(sampleShipment, breachEvents)
