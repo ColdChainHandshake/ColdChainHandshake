@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./local.properties)",
+      "Read(./**/local.properties)",
+      "Read(./**/*.jks)",
+      "Read(./**/*.keystore)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Edit(./local.properties)",
+      "Edit(./**/local.properties)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git push --mirror *)",
+      "Bash(git push --delete *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git stash drop *)",
+      "Bash(git stash clear *)",
+      "Bash(git filter-branch *)",
+      "Bash(git filter-repo *)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "PowerShell(git push --force *)",
+      "PowerShell(git push -f *)",
+      "PowerShell(git reset --hard *)",
+      "PowerShell(git clean *)",
+      "PowerShell(git branch -D *)",
+      "PowerShell(Format-Volume *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "PowerShell(git push *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh repo *)",
+      "Bash(supabase db push *)",
+      "Bash(npx supabase db push *)",
+      "Bash(supabase link *)",
+      "Bash(npx supabase link *)"
+    ]
+  }
+}

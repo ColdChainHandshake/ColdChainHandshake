@@ -13,3 +13,9 @@ local.properties
 reference/**/.gradle/
 reference/**/build/
 reference/**/.idea/
+
+# Local agent tooling, not project source
+.claude/settings.local.json
+.claude/skills/
+.mcp.json
+cch-claude-code-kit.zip
