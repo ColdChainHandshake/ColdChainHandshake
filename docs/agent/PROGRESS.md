@@ -1,6 +1,6 @@
 # Progress
 
-**Next action:** Phase 1, task 1.2, then 1.1 (order swapped, see `DECISIONS.md`).
+**Next action:** finish Gate 1: lint, clean-clone build, fresh-subagent review.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
@@ -28,15 +28,32 @@ live test classes in results: []
 
 ## Phase 1: Unblock and lock down
 
-- [ ] 1.2 Make the live test opt-in, keep default tests offline (runs first)
-- [ ] 1.1 Remove `org.gradle.java.home`, then replace the interim commands in `CLAUDE.md`
-- [ ] 1.3 `supabase init`, `0001_lockdown`, pgTAP
-- [ ] 1.3b Apply to dev project. Status: `blocked`, read-only MCP, `HANDOFF.md` Q1
+- [x] 1.2 Make the live test opt-in, keep default tests offline (runs first). Done in `ca9c39c`
+- [x] 1.1 Remove `org.gradle.java.home`, replace the interim commands in `CLAUDE.md`. Done in `060e8e8`
+- [x] 1.3 `supabase init`, `0001_lockdown`, pgTAP. Done in `67aa2aa`
+- [ ] 1.3b Apply to dev project. Status: `blocked`, read-only MCP and database unreachable, `HANDOFF.md` Q1
 - [x] 1.4 Lockdown guidance in `HANDOFF.md`. Done in `720856f`
-- [ ] 1.5 Room schema export, no destructive fallback, migration test
-- [ ] 1.6 Move demo corruption and chaos paths to the debug source set
-- [ ] 1.7 GitHub Actions workflow
-- [ ] 1.8 Fix the README ending
+- [x] 1.5 Room schema export, no destructive fallback, migration test. Done in `31de93a`
+- [x] 1.6 Move demo corruption and chaos paths to the debug source set. Done in `1bbe4cc`
+- [x] 1.7 GitHub Actions workflow. Done in `d20b448`. Parsed and action tags checked; never run on GitHub (`PUSH_POLICY = local-only`)
+- [x] 1.8 Fix the README ending. Done in `a02938a`
+
+Proof:
+
+```text
+1.2  ./gradlew testDebugUnitTest --tests '*OfflineTestGuardTest'     failed first: reached the internet
+     ./gradlew testDebugUnitTest --tests '*LiveSupabaseIntegrationTest*'
+     > No tests found for given includes: [*LiveSupabaseIntegrationTest*]
+1.3  with 0001_lockdown set aside:  Failed 26/35 subtests
+     npx supabase test db:          Files=1, Tests=35 ... Result: PASS
+     npx supabase db advisors --local:  No issues found
+1.5  with the fallback present: expected IllegalStateException to be thrown, but nothing was thrown
+     after removing it: tests 167 failures 0 errors 0
+1.6  ./gradlew testDebugUnitTest testReleaseUnitTest
+     Debug tests 170 failures 0 errors 0 | Release tests 157 failures 0 errors 0
+     ./gradlew assembleRelease assembleDebug    BUILD SUCCESSFUL in 11m 38s
+     release classes named ChaosScreen, InMemoryChaos*, ChaosAwareNetwork*: 0
+```
 
 **Gate 1:** not started.
 

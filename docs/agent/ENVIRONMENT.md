@@ -50,5 +50,6 @@ deny and ask rules apply from the next session. The `local.properties` rule was 
 ```bash
 export JAVA_HOME='D:\cch-tools\jdk-17.0.20.1+1'
 export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
+export GRADLE_USER_HOME='D:\cch-tools\gradle-home'   # keeps new downloads off C:
 ./gradlew testDebugUnitTest
 ```
