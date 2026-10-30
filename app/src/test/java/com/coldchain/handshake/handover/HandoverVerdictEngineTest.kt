@@ -2,6 +2,7 @@ package com.coldchain.handshake.handover
 
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.safety.TemperatureVerdict
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -17,7 +18,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun test9_allConditionsMetYieldsPassAndAccepted() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = true,
             workerSigned = true,
             pharmacistSigned = true
@@ -36,7 +37,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun test10_temperatureFailYieldsQuarantined() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = false,
+            temperature = TemperatureVerdict.FAIL,
             integrityPassed = true,
             workerSigned = true,
             pharmacistSigned = true
@@ -56,7 +57,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun test11_integrityFailYieldsQuarantined() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = false,
             workerSigned = true,
             pharmacistSigned = true
@@ -76,7 +77,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun test12_workerMissingSignatureYieldsFail() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = true,
             workerSigned = false,
             pharmacistSigned = true
@@ -96,7 +97,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun test13_pharmacistMissingSignatureYieldsFail() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = true,
             workerSigned = true,
             pharmacistSigned = false
@@ -116,7 +117,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun test14_bothSignaturesMissingYieldsFailWithTwoReasons() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = true,
             workerSigned = false,
             pharmacistSigned = false
@@ -137,7 +138,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun testA_allFourFalseYieldsFailWithAllFourReasons() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = false,
+            temperature = TemperatureVerdict.FAIL,
             integrityPassed = false,
             workerSigned = false,
             pharmacistSigned = false
@@ -165,7 +166,7 @@ class HandoverVerdictEngineTest {
     @Test
     fun testB_temperatureAndIntegrityFalseSignaturesTrue() {
         val result = HandoverVerdictEngine.evaluate(
-            temperaturePassed = false,
+            temperature = TemperatureVerdict.FAIL,
             integrityPassed = false,
             workerSigned = true,
             pharmacistSigned = true
@@ -190,13 +191,13 @@ class HandoverVerdictEngineTest {
     @Test
     fun testC_repeatedCallsProduceIdenticalResults() {
         val result1 = HandoverVerdictEngine.evaluate(
-            temperaturePassed = false,
+            temperature = TemperatureVerdict.FAIL,
             integrityPassed = true,
             workerSigned = false,
             pharmacistSigned = true
         )
         val result2 = HandoverVerdictEngine.evaluate(
-            temperaturePassed = false,
+            temperature = TemperatureVerdict.FAIL,
             integrityPassed = true,
             workerSigned = false,
             pharmacistSigned = true

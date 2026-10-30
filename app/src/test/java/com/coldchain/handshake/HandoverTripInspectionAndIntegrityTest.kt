@@ -24,6 +24,7 @@ import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.BreachDetector
 import com.coldchain.handshake.safety.FakeAlertRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
+import com.coldchain.handshake.safety.TemperatureVerdict
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -151,7 +152,7 @@ class HandoverTripInspectionAndIntegrityTest {
     fun `testHandoverVerdict_requiresAllFourConditions`() {
         // All 4 pass -> PASS & ACCEPTED
         val passEval = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = true,
             workerSigned = true,
             pharmacistSigned = true
@@ -162,7 +163,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         // Integrity failed -> FAIL & QUARANTINED
         val tamperEval = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = false,
             workerSigned = true,
             pharmacistSigned = true
@@ -173,7 +174,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         // Temperature failed -> FAIL & QUARANTINED
         val breachEval = HandoverVerdictEngine.evaluate(
-            temperaturePassed = false,
+            temperature = TemperatureVerdict.FAIL,
             integrityPassed = true,
             workerSigned = true,
             pharmacistSigned = true
@@ -184,7 +185,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         // Signature missing -> FAIL
         val sigEval = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = true,
             workerSigned = false,
             pharmacistSigned = true
@@ -566,7 +567,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipment.id,
-            temperaturePassed = true,
+            timestamp = baseTs + 180_000L,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -608,7 +609,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipment.id,
-            temperaturePassed = true,
+            timestamp = baseTs + 180_000L,
             workerSigned = true,
             pharmacistSigned = true
         )

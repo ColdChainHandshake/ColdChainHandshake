@@ -28,7 +28,9 @@ data class AlertEntity(
     val escalationLevel: EscalationLevel,
     val acknowledged: Boolean,
     val syncStatus: SyncStatus = SyncStatus.PENDING,
-    val lastModifiedTimestamp: Long = System.currentTimeMillis()
+    val lastModifiedTimestamp: Long = System.currentTimeMillis(),
+    val excursionStart: Long? = null,
+    val acknowledgedAt: Long? = null
 )
 
 fun AlertEntity.toDomain(): Alert = Alert(
@@ -38,7 +40,9 @@ fun AlertEntity.toDomain(): Alert = Alert(
     message = message,
     timestamp = timestamp,
     escalationLevel = escalationLevel,
-    acknowledged = acknowledged
+    acknowledged = acknowledged,
+    excursionStart = excursionStart,
+    acknowledgedAt = acknowledgedAt
 )
 
 fun Alert.toEntity(syncStatus: SyncStatus = SyncStatus.PENDING): AlertEntity = AlertEntity(
@@ -50,5 +54,7 @@ fun Alert.toEntity(syncStatus: SyncStatus = SyncStatus.PENDING): AlertEntity = A
     escalationLevel = escalationLevel,
     acknowledged = acknowledged,
     syncStatus = syncStatus,
-    lastModifiedTimestamp = System.currentTimeMillis()
+    lastModifiedTimestamp = System.currentTimeMillis(),
+    excursionStart = excursionStart,
+    acknowledgedAt = acknowledgedAt
 )

@@ -25,6 +25,7 @@ import com.coldchain.handshake.safety.BreachDetector
 import com.coldchain.handshake.safety.LoggerDisconnectMonitor
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.simulator.TemperatureSimulator
+import com.coldchain.handshake.safety.TemperatureVerdict
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -268,7 +269,7 @@ class FullAutonomousColdChainE2ETest {
         // Step 24: Process handover verdict
         val handoverOutcome = handoverOrchestrator.processHandover(
             shipmentId = shipmentId,
-            temperaturePassed = tempPassed,
+            timestamp = allEvents.last().timestamp + 1,
             workerSigned = workerSigned,
             pharmacistSigned = pharmacistSigned
         )
@@ -312,7 +313,7 @@ class FullAutonomousColdChainE2ETest {
 
         val outcome = handoverOrchestrator.processHandover(
             shipmentId = shipmentId,
-            temperaturePassed = tempPassed,
+            timestamp = events.last().timestamp + 1,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -364,7 +365,7 @@ class FullAutonomousColdChainE2ETest {
 
         // Verify HandoverVerdictEngine rejects tampered consignment
         val handoverEvaluation = HandoverVerdictEngine.evaluate(
-            temperaturePassed = true,
+            temperature = TemperatureVerdict.PASS,
             integrityPassed = tamperResult.valid,
             workerSigned = true,
             pharmacistSigned = true

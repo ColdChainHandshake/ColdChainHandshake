@@ -1,0 +1,21 @@
+package com.coldchain.handshake.data.local
+
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+
+/**
+ * Adds product profiles, the journey start, alert timing and the handover findings. Rows already
+ * on a device keep their data, and old shipments get the strictest profile. The literal values must
+ * not change later, because a migration has to keep doing what it did when it shipped.
+ */
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE shipments ADD COLUMN productProfileId TEXT NOT NULL DEFAULT 'vaccine-2-8-freeze-sensitive'")
+        db.execSQL("ALTER TABLE shipments ADD COLUMN journeyStartedAt INTEGER")
+        db.execSQL("ALTER TABLE alerts ADD COLUMN excursionStart INTEGER")
+        db.execSQL("ALTER TABLE alerts ADD COLUMN acknowledgedAt INTEGER")
+        db.execSQL("ALTER TABLE handovers ADD COLUMN reason TEXT")
+        db.execSQL("ALTER TABLE handovers ADD COLUMN vvmStage TEXT NOT NULL DEFAULT 'NOT_RECORDED'")
+        db.execSQL("ALTER TABLE handovers ADD COLUMN shakeTest TEXT NOT NULL DEFAULT 'NOT_DONE'")
+    }
+}

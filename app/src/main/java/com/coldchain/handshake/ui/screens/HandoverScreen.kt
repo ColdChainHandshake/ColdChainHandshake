@@ -847,7 +847,6 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     try {
                         val result = RepositoryProvider.handoverOrchestrator.processHandover(
                             shipmentId = shipment.id,
-                            temperaturePassed = temperaturePassed,
                             workerSigned = workerSigned,
                             pharmacistSigned = pharmacistSigned
                         )

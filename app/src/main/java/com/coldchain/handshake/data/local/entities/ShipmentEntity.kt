@@ -1,7 +1,9 @@
 package com.coldchain.handshake.data.local.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
@@ -21,7 +23,10 @@ data class ShipmentEntity(
     val workerId: String,
     val status: ShipmentStatus,
     val syncStatus: SyncStatus = SyncStatus.PENDING,
-    val lastModifiedTimestamp: Long = System.currentTimeMillis()
+    val lastModifiedTimestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "vaccine-2-8-freeze-sensitive")
+    val productProfileId: String = ProductProfiles.DEFAULT.id,
+    val journeyStartedAt: Long? = null
 )
 
 fun ShipmentEntity.toDomain(): Shipment = Shipment(
@@ -31,7 +36,9 @@ fun ShipmentEntity.toDomain(): Shipment = Shipment(
     origin = origin,
     destination = destination,
     workerId = workerId,
-    status = status
+    status = status,
+    productProfileId = productProfileId,
+    journeyStartedAt = journeyStartedAt
 )
 
 fun Shipment.toEntity(syncStatus: SyncStatus = SyncStatus.PENDING): ShipmentEntity = ShipmentEntity(
@@ -43,5 +50,7 @@ fun Shipment.toEntity(syncStatus: SyncStatus = SyncStatus.PENDING): ShipmentEnti
     workerId = workerId,
     status = status,
     syncStatus = syncStatus,
-    lastModifiedTimestamp = System.currentTimeMillis()
+    lastModifiedTimestamp = System.currentTimeMillis(),
+    productProfileId = productProfileId,
+    journeyStartedAt = journeyStartedAt
 )

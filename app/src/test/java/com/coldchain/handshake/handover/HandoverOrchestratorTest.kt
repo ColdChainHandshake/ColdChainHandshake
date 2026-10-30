@@ -31,6 +31,9 @@ class HandoverOrchestratorTest {
 
     private val testShipmentId = "SHP-VCC-2024-001"
 
+    // Just after the last reading in createValidChain, so the record has no trailing gap.
+    private val handoverTime = 1700000000000L + 180_000L
+
     @Before
     fun setUp() {
         shipmentRepo = TestShipmentRepository()
@@ -63,6 +66,20 @@ class HandoverOrchestratorTest {
         return HashChainService.buildChain(raw)
     }
 
+    // Ten minutes at 11°C, one reading a minute, then back in range.
+    private val hotHandoverTime = 1700000000000L + 11 * 60_000L
+
+    private fun createHotChain(baseTimestamp: Long = 1700000000000L): List<TemperatureEvent> {
+        val raw = (0..10).map { minute ->
+            val temperature = if (minute < 10) 11.0 else 5.0
+            TemperatureEvent(
+                "TE-$minute", testShipmentId, "LOG-902", baseTimestamp + minute * 60_000L,
+                temperature, "", "", SyncStatus.SYNCED
+            )
+        }
+        return HashChainService.buildChain(raw)
+    }
+
     /**
      * TEST 15:
      * valid temperature, valid hash chain, worker signed, pharmacist signed
@@ -74,7 +91,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -97,16 +114,16 @@ class HandoverOrchestratorTest {
 
     /**
      * TEST 16:
-     * temperaturePassed=false, valid hash chain, both signed
+     * hot readings, valid hash chain, both signed
      * Expected: Handover FAIL, integrityVerified=true, shipment QUARANTINED
      */
     @Test
     fun test16_temperatureFailedQuarantinesShipment() = runBlocking {
-        telemetryRepo.setEvents(testShipmentId, createValidChain())
+        telemetryRepo.setEvents(testShipmentId, createHotChain())
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = false,
+            timestamp = hotHandoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -138,7 +155,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -166,7 +183,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = false,
             pharmacistSigned = true
         )
@@ -191,7 +208,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = false
         )
@@ -217,7 +234,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -253,7 +270,7 @@ class HandoverOrchestratorTest {
         // 4. Orchestrator executes verification via real HashChainService
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -275,7 +292,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -292,7 +309,7 @@ class HandoverOrchestratorTest {
     fun testShipmentNotFoundReturnsFailure() = runBlocking {
         val result = orchestrator.processHandover(
             shipmentId = "NON-EXISTENT-ID",
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
@@ -308,7 +325,7 @@ class HandoverOrchestratorTest {
 
         val result = orchestrator.processHandover(
             shipmentId = testShipmentId,
-            temperaturePassed = true,
+            timestamp = handoverTime,
             workerSigned = true,
             pharmacistSigned = true
         )
