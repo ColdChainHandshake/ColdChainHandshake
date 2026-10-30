@@ -1,6 +1,7 @@
 // The rules of the system, with no Android in them: models, safety, the chain and verdicts.
 plugins {
     id 'org.jetbrains.kotlin.jvm'
+    id 'java-test-fixtures'
 }
 
 java {
