@@ -14,7 +14,8 @@ data class TemperatureEvent(
     val previousHash: String,
     val currentHash: String,
     val syncStatus: SyncStatus,
-    val seq: Long = 0L
+    val seq: Long = 0L,
+    val receivedAt: Long? = null
 ) {
     /**
      * The value the chain commits to. Every temperature comes down to this one conversion, so a

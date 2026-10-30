@@ -53,6 +53,22 @@ hash = SHA-256(
 )
 ```
 
+## Batch signature
+
+A device signs each upload with its own key, using ECDSA over P-256 with SHA-256. On a phone the key lives in the
+Android Keystore, and it is sent as X.509 SubjectPublicKeyInfo. Signatures are DER-encoded. Both travel as Base64.
+
+```text
+payload =
+    u8(2)
+    lp(shipment_id)
+    i64(first_seq)
+    i64(last_seq)
+    raw(head_hash)             the hash of the reading at last_seq
+```
+
+The signature shows which phone uploaded the batch, not that the readings are true.
+
 ## What the chain does and doesn't prove
 
 The hash alone proves nothing about who wrote a reading, because anyone holding the data can recompute it. Its value
