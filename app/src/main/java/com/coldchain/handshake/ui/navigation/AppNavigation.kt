@@ -14,8 +14,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.ui.screens.AlertsScreen
-import com.coldchain.handshake.ui.screens.ChaosScreen
 import com.coldchain.handshake.ui.screens.DispatchScreen
 import com.coldchain.handshake.ui.screens.HandoverScreen
 import com.coldchain.handshake.ui.screens.TransitScreen
@@ -84,7 +84,9 @@ fun AppNavigation() {
             }
             composable(Screen.Alerts.route) { AlertsScreen() }
             composable(Screen.Handover.route) { HandoverScreen() }
-            composable(Screen.Chaos.route) { ChaosScreen() }
+            if (DebugTools.ENABLED) {
+                composable(Screen.Chaos.route) { DebugTools.ChaosLab() }
+            }
         }
     }
 }

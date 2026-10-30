@@ -361,13 +361,6 @@ class FakeTemperatureEventDao : TemperatureEventDao {
         flow.value = ArrayList(events)
     }
 
-    override suspend fun corruptEventTemperatureForDemo(id: String, corruptedTemperature: Double) {
-        val index = events.indexOfFirst { it.id == id }
-        if (index >= 0) {
-            events[index] = events[index].copy(temperature = corruptedTemperature)
-            flow.value = ArrayList(events)
-        }
-    }
 }
 
 class FakeAlertDao : AlertDao {

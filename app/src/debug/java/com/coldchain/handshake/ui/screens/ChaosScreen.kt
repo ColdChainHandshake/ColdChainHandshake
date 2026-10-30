@@ -50,6 +50,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.coldchain.handshake.data.local.DatabaseProvider
+import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.models.ChaosScenarioType
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.theme.StatusAmber
@@ -84,8 +86,8 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
     var actionFeedback by remember { mutableStateOf<String?>(null) }
 
     // Chaos Event Log scoped strictly to the current shipment
-    val chaosDao = remember(context) { RepositoryProvider.getChaosEventDao(context) }
-    val chaosLogs by (if (shipmentId.isNotBlank() && chaosDao != null) {
+    val chaosDao = remember(context) { DebugTools.chaosEventDao(context) }
+    val chaosLogs by (if (shipmentId.isNotBlank()) {
         chaosDao.getChaosEvents(shipmentId)
     } else {
         flowOf(emptyList())
@@ -167,7 +169,8 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
                 else "Heat Spike deactivated. Restored nominal temperatures (4°C–6°C)."
                 if (shipmentId.isNotBlank()) {
                     coroutineScope.launch {
-                        RepositoryProvider.logChaosEvent(
+                        DebugTools.logChaosEvent(
+                            context = context,
                             shipmentId = shipmentId,
                             scenarioType = "HEAT_SPIKE",
                             message = if (nextState) "9.8°C excursion simulated" else "Excursion ended; restored nominal"
@@ -193,7 +196,8 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
                     RepositoryProvider.chaosEngineService.injectScenario(ChaosScenarioType.LOGGER_DISCONNECT)
                     actionFeedback = "Logger Disconnect triggered! Alert created and visible in Alerts tab."
                     if (shipmentId.isNotBlank()) {
-                        RepositoryProvider.logChaosEvent(
+                        DebugTools.logChaosEvent(
+                            context = context,
                             shipmentId = shipmentId,
                             scenarioType = "LOGGER_DISCONNECT",
                             message = "Logger disconnect warning generated"
@@ -220,7 +224,8 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
                         RepositoryProvider.chaosEngineService.resetScenario(ChaosScenarioType.NETWORK_FAILURE)
                         actionFeedback = "Network restored! Automatic sync to Supabase engaged."
                         if (shipmentId.isNotBlank()) {
-                            RepositoryProvider.logChaosEvent(
+                            DebugTools.logChaosEvent(
+                                context = context,
                                 shipmentId = shipmentId,
                                 scenarioType = "NETWORK_RESTORED",
                                 message = "Synchronization resumed"
@@ -230,7 +235,8 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
                         RepositoryProvider.chaosEngineService.injectScenario(ChaosScenarioType.NETWORK_FAILURE)
                         actionFeedback = "Offline mode active! Telemetry will buffer in local Room as PENDING."
                         if (shipmentId.isNotBlank()) {
-                            RepositoryProvider.logChaosEvent(
+                            DebugTools.logChaosEvent(
+                                context = context,
                                 shipmentId = shipmentId,
                                 scenarioType = "NETWORK_FAILURE",
                                 message = "Offline buffering activated"
@@ -255,10 +261,11 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
             onAction = {
                 coroutineScope.launch {
                     if (shipmentId.isNotBlank()) {
-                        val corrupted = RepositoryProvider.corruptLatestEventForDemo(shipmentId, corruptedTemp = 99.9)
+                        val corrupted = DebugTools.corruptLatestEvent(DatabaseProvider.getDatabase(context), shipmentId, corruptedTemp = 99.9)
                         if (corrupted) {
                             actionFeedback = "Corrupted latest telemetry reading to 99.9°C! Go to Handover tab to verify cryptographic tamper detection."
-                            RepositoryProvider.logChaosEvent(
+                            DebugTools.logChaosEvent(
+                                context = context,
                                 shipmentId = shipmentId,
                                 scenarioType = "CORRUPT_EVENT",
                                 message = "Telemetry event intentionally mutated (99.9°C)"
@@ -283,7 +290,8 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
                     simulator.reset()
                     actionFeedback = "System Reset! All chaos scenarios cleared and simulator reset to nominal baseline."
                     if (shipmentId.isNotBlank()) {
-                        RepositoryProvider.logChaosEvent(
+                        DebugTools.logChaosEvent(
+                            context = context,
                             shipmentId = shipmentId,
                             scenarioType = "RESET",
                             message = "System reset - all scenarios cleared"

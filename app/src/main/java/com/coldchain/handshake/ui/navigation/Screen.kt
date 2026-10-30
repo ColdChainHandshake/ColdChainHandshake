@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.coldchain.handshake.debugtools.DebugTools
 
 /**
  * Top-level application destinations and navigation routes.
@@ -19,12 +20,12 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object Chaos : Screen("chaos", "Chaos", Icons.Default.Warning)
 
     companion object {
-        val bottomNavItems = listOf(
+        val bottomNavItems = listOfNotNull(
             Dispatch,
             Transit,
             Alerts,
             Handover,
-            Chaos
+            Chaos.takeIf { DebugTools.ENABLED }
         )
     }
 }

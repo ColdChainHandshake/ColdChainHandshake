@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
 import com.coldchain.handshake.data.remote.dto.toDomain
 import com.coldchain.handshake.models.Shipment
@@ -1040,40 +1041,42 @@ fun TransitScreen(
                     Text(if (isRunning) "Pause" else "Resume", fontSize = 12.sp)
                 }
 
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            simulator.tickOnce(simulatedStepDurationSeconds = 60L)
-                        }
-                    },
-                    modifier = Modifier.weight(1f).height(38.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FastForward,
-                        contentDescription = "Tick",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("+60s Tick", fontSize = 12.sp)
-                }
+                if (DebugTools.ENABLED) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                simulator.tickOnce(simulatedStepDurationSeconds = 60L)
+                            }
+                        },
+                        modifier = Modifier.weight(1f).height(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FastForward,
+                            contentDescription = "Tick",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("+60s Tick", fontSize = 12.sp)
+                    }
 
-                OutlinedButton(
-                    onClick = {
-                        simulator.setHeatSpikeMode(!isHeatSpikeMode)
-                    },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (isHeatSpikeMode) StatusRed.copy(alpha = 0.2f) else Color.Transparent
-                    ),
-                    modifier = Modifier.weight(1.2f).height(38.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isHeatSpikeMode) Icons.Default.AcUnit else Icons.Default.LocalFireDepartment,
-                        contentDescription = "Spike",
-                        tint = if (isHeatSpikeMode) StatusAmber else StatusRed,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isHeatSpikeMode) "Cool Down" else "Heat Spike", fontSize = 12.sp)
+                    OutlinedButton(
+                        onClick = {
+                            simulator.setHeatSpikeMode(!isHeatSpikeMode)
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (isHeatSpikeMode) StatusRed.copy(alpha = 0.2f) else Color.Transparent
+                        ),
+                        modifier = Modifier.weight(1.2f).height(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isHeatSpikeMode) Icons.Default.AcUnit else Icons.Default.LocalFireDepartment,
+                            contentDescription = "Spike",
+                            tint = if (isHeatSpikeMode) StatusAmber else StatusRed,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (isHeatSpikeMode) "Cool Down" else "Heat Spike", fontSize = 12.sp)
+                    }
                 }
             }
 

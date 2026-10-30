@@ -54,11 +54,4 @@ interface TemperatureEventDao {
      */
     @Query("UPDATE temperature_events SET syncStatus = :syncStatus WHERE id IN (:ids)")
     suspend fun updateSyncStatuses(ids: List<String>, syncStatus: SyncStatus)
-
-    /**
-     * DEMO/CHAOS ONLY: Mutates a protected telemetry field without recomputing hashes
-     * to simulate malicious in-transit tampering or data corruption for integrity verification testing.
-     */
-    @Query("UPDATE temperature_events SET temperature = :corruptedTemperature WHERE id = :id")
-    suspend fun corruptEventTemperatureForDemo(id: String, corruptedTemperature: Double)
 }

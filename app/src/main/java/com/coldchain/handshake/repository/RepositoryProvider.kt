@@ -1,19 +1,13 @@
 package com.coldchain.handshake.repository
 
-import com.coldchain.handshake.data.local.dao.ChaosEventDao
-import com.coldchain.handshake.data.local.entities.ChaosEventEntity
-
 import android.content.Context
 import com.coldchain.handshake.data.local.ColdChainDatabase
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.network.AndroidNetworkMonitor
-import com.coldchain.handshake.data.network.ChaosAwareNetworkMonitor
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.models.ChaosScenarioType
-import com.coldchain.handshake.models.SyncStatus
-import java.util.UUID
-import com.coldchain.handshake.repository.impl.InMemoryChaosEngineService
 import com.coldchain.handshake.safety.LoggerDisconnectMonitor
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.simulator.TemperatureSimulator
@@ -49,7 +43,7 @@ object RepositoryProvider {
     private var syncServiceInstance: SyncService? = null
 
     @Volatile
-    private var chaosService: ChaosEngineService = InMemoryChaosEngineService()
+    private var chaosService: ChaosEngineService = DebugTools.createChaosService()
 
     @Volatile
     private var safetyEngineInstance: SafetyEngine? = null
@@ -138,7 +132,7 @@ object RepositoryProvider {
             handoverOrchestratorInstance = hOrchestrator
 
             val baseNetworkMonitor = AndroidNetworkMonitor(appContext)
-            val chaosNetworkMonitor = ChaosAwareNetworkMonitor(baseNetworkMonitor, chaosService)
+            val networkMonitor = DebugTools.wrapNetworkMonitor(baseNetworkMonitor, chaosService)
             val remoteDataSource = SupabaseRemoteDataSource()
 
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -156,7 +150,7 @@ object RepositoryProvider {
                 alertDao = db.alertDao(),
                 handoverDao = db.handoverDao(),
                 remoteDataSource = remoteDataSource,
-                networkMonitor = chaosNetworkMonitor,
+                networkMonitor = networkMonitor,
                 coroutineScope = scope
             )
 
@@ -190,44 +184,6 @@ object RepositoryProvider {
                 }
             }
         }
-    }
-
-    /**
-     * DEMO/CHAOS ONLY: Mutates a protected telemetry event in Room without recomputing its SHA-256 hash.
-     * Used to test cryptographic tamper detection during Handover verification.
-     */
-    suspend fun corruptLatestEventForDemo(shipmentId: String, corruptedTemp: Double = 99.9): Boolean {
-        val db = database ?: return false
-        val events = db.temperatureEventDao().getTemperaturesDirect(shipmentId)
-        val latest = events.lastOrNull() ?: return false
-        db.temperatureEventDao().corruptEventTemperatureForDemo(latest.id, corruptedTemp)
-        return true
-    }
-
-    fun getChaosEventDao(context: Context? = null): ChaosEventDao? {
-        if (database == null && context != null) {
-            initialize(context)
-        }
-        return database?.chaosEventDao()
-    }
-
-    suspend fun logChaosEvent(
-        shipmentId: String,
-        scenarioType: String,
-        message: String,
-        syncStatus: SyncStatus = SyncStatus.SYNCED
-    ) {
-        val db = database ?: return
-        db.chaosEventDao().insertChaosEvent(
-            ChaosEventEntity(
-                id = UUID.randomUUID().toString(),
-                shipmentId = shipmentId,
-                scenarioType = scenarioType,
-                timestamp = System.currentTimeMillis(),
-                message = message,
-                syncStatus = syncStatus
-            )
-        )
     }
 
     fun getShipmentRepository(context: Context): ShipmentRepository {
@@ -321,7 +277,7 @@ object RepositoryProvider {
             handoverOrchestratorInstance = null
             simulator = null
             syncCoordinator = null
-            chaosService = InMemoryChaosEngineService()
+            chaosService = DebugTools.createChaosService()
         }
     }
 
