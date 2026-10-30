@@ -96,6 +96,7 @@ create table public.readings (
   chain_version smallint not null default 2,
   uploaded_by_device uuid not null references public.devices (device_id),
   received_at timestamptz not null default now(),
+  clock_ahead boolean not null default false,
   primary key (shipment_id, seq)
 );
 
@@ -137,6 +138,8 @@ create table public.handover_confirmations (
   user_id uuid not null references auth.users (id),
   role text not null check (role in ('sender', 'courier', 'receiver')),
   device_id uuid not null references public.devices (device_id),
+  head_hash text not null,
+  to_user uuid references auth.users (id),
   verdict text check (verdict in ('PASS', 'UNKNOWN', 'FAIL')),
   reason text,
   vvm_stage text not null default 'NOT_RECORDED'
@@ -149,6 +152,7 @@ create table public.handover_confirmations (
 
 create index handover_confirmations_user_id_idx on public.handover_confirmations (user_id);
 create index handover_confirmations_device_id_idx on public.handover_confirmations (device_id);
+create index handover_confirmations_to_user_idx on public.handover_confirmations (to_user);
 
 create table public.alerts (
   id text primary key,
@@ -230,6 +234,9 @@ language sql immutable set search_path = '' as $$
   ), 'hex')
 $$;
 
+create function private.clock_tolerance_ms() returns bigint
+language sql immutable set search_path = '' as 'select 300000::bigint';
+
 create function private.is_member(p_shipment_id text) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
@@ -257,6 +264,17 @@ language sql stable set search_path = '' as $$
   where e.shipment_id = p_shipment_id
   order by e.leg desc
   limit 1
+$$;
+
+-- The courier is the person a breach reflects on, so they can't clear alerts or end a shipment.
+create function private.can_oversee(p_shipment_id text) returns boolean
+language sql stable set search_path = '' as $$
+  select exists (
+    select 1 from public.shipment_members m
+    where m.shipment_id = p_shipment_id
+      and m.user_id = (select auth.uid())
+      and m.role in ('sender', 'receiver')
+  )
 $$;
 
 create function private.require_own_device(p_device_id uuid) returns void
@@ -318,20 +336,22 @@ begin
 end
 $$;
 
+-- A device keeps its key for life, so a stolen session can't swap the key behind past signatures.
 create function public.register_device(p_device_id uuid, p_public_key text) returns void
 language plpgsql security definer set search_path = '' as $$
-declare
-  v_owner uuid;
 begin
-  select d.user_id into v_owner from public.devices d where d.device_id = p_device_id;
-
-  if v_owner is not null and v_owner <> (select auth.uid()) then
-    raise exception 'This device is registered to someone else.' using errcode = 'CC005';
-  end if;
-
   insert into public.devices (device_id, user_id, public_key)
   values (p_device_id, (select auth.uid()), p_public_key)
-  on conflict (device_id) do update set public_key = excluded.public_key;
+  on conflict (device_id) do nothing;
+
+  if not exists (
+    select 1 from public.devices d
+    where d.device_id = p_device_id
+      and d.user_id = (select auth.uid())
+      and d.public_key = p_public_key
+  ) then
+    raise exception 'This device is already registered with a different owner or key.' using errcode = 'CC005';
+  end if;
 end
 $$;
 
@@ -445,8 +465,8 @@ $$;
 create function public.request_replacement(p_shipment_id text) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  if not private.is_member(p_shipment_id) then
-    raise exception 'You are not on this shipment.' using errcode = 'CC002';
+  if not private.can_oversee(p_shipment_id) then
+    raise exception 'Only the sender or receiver can ask for a replacement.' using errcode = 'CC002';
   end if;
 
   update public.shipments s set status = 'REPLACEMENT_REQUESTED'
@@ -466,7 +486,7 @@ create function public.append_readings(
   p_readings jsonb,
   p_expected_prev_head text,
   p_device_id uuid,
-  p_signature text default null
+  p_signature text
 ) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -483,8 +503,14 @@ declare
   v_running_head text;
   v_running_seq bigint;
   v_first_seq bigint;
+  v_now_ms bigint := (extract(epoch from now()) * 1000)::bigint;
+  v_earliest_ms bigint;
 begin
   perform private.require_own_device(p_device_id);
+
+  if coalesce(p_signature, '') = '' then
+    raise exception 'A batch must be signed by the device that sends it.' using errcode = 'CC006';
+  end if;
 
   -- The lock makes two uploads for one shipment take turns, so both can't build on the same head.
   select h.* into v_head from public.chain_heads h where h.shipment_id = p_shipment_id for update;
@@ -512,6 +538,8 @@ begin
   from public.readings r
   where r.shipment_id = p_shipment_id and r.seq = v_head.last_seq;
 
+  v_earliest_ms := (extract(epoch from v_shipment.created_at) * 1000)::bigint - private.clock_tolerance_ms();
+
   v_running_head := v_head.head_hash;
   v_running_seq := v_head.last_seq;
   v_first_seq := v_head.last_seq + 1;
@@ -531,8 +559,8 @@ begin
       raise exception 'Reading % is not linked to the one before it.', v_seq using errcode = 'CC004';
     end if;
 
-    if v_prev_ts is not null and v_ts < v_prev_ts then
-      raise exception 'Reading % is dated before the one before it.', v_seq using errcode = 'CC009';
+    if v_ts < coalesce(v_prev_ts, v_earliest_ms) or v_ts < v_earliest_ms then
+      raise exception 'Reading % is back-dated.', v_seq using errcode = 'CC009';
     end if;
 
     v_hash := private.reading_hash(p_shipment_id, v_shipment.logger_id, v_seq, v_ts, v_temp, v_running_head);
@@ -541,10 +569,13 @@ begin
       raise exception 'Reading % does not match its hash.', v_seq using errcode = 'CC004';
     end if;
 
+    -- A reading from the future can't be refused outright, because a logger's clock can drift, but
+    -- the server records that it arrived before it says it happened.
     insert into public.readings (
-      shipment_id, seq, logger_id, logger_ts, temp_centi_c, prev_hash, hash, uploaded_by_device
+      shipment_id, seq, logger_id, logger_ts, temp_centi_c, prev_hash, hash, uploaded_by_device, clock_ahead
     ) values (
-      p_shipment_id, v_seq, v_shipment.logger_id, v_ts, v_temp, v_running_head, v_hash, p_device_id
+      p_shipment_id, v_seq, v_shipment.logger_id, v_ts, v_temp, v_running_head, v_hash, p_device_id,
+      v_ts > v_now_ms + private.clock_tolerance_ms()
     );
 
     v_running_head := v_hash;
@@ -568,12 +599,15 @@ $$;
 
 -- Client functions: handover -----------------------------------------------------------------------
 
--- Custody moves only when the current custodian and one other person have each confirmed, on their
--- own registered devices. The person receiving gives the verdict.
+-- Custody moves when the custodian has named who receives, that person has confirmed, and both of
+-- them confirmed the history as it stands now. A verdict that isn't a pass quarantines the shipment
+-- straight away: it doesn't wait for the custodian, who could otherwise block it by not confirming.
 create function public.confirm_handover(
   p_shipment_id text,
   p_leg integer,
   p_device_id uuid,
+  p_head_hash text,
+  p_to_user uuid default null,
   p_verdict text default null,
   p_reason text default null,
   p_vvm_stage text default 'NOT_RECORDED',
@@ -583,17 +617,21 @@ language plpgsql security definer set search_path = '' as $$
 declare
   v_uid uuid := (select auth.uid());
   v_shipment public.shipments;
+  v_head public.chain_heads;
   v_custodian uuid;
   v_role text;
   v_current_leg integer;
   v_is_custodian boolean;
+  v_mine public.handover_confirmations;
+  v_releasing public.handover_confirmations;
   v_receiving public.handover_confirmations;
-  v_custodian_done boolean;
 begin
   perform private.require_own_device(p_device_id);
 
-  -- Taking turns here means two confirmations can't both see the other as missing.
+  -- Taking turns here means two confirmations can't both see the other as missing, and an upload
+  -- can't slip in while this one reads the head.
   select s.* into v_shipment from public.shipments s where s.id = p_shipment_id for update;
+  select h.* into v_head from public.chain_heads h where h.shipment_id = p_shipment_id for update;
 
   select m.role into v_role
   from public.shipment_members m
@@ -612,56 +650,85 @@ begin
     raise exception 'This handover is not open.' using errcode = 'CC007';
   end if;
 
+  if p_head_hash is distinct from v_head.head_hash then
+    raise exception 'The history has moved on. Check the latest readings and confirm again.'
+      using errcode = 'CC001';
+  end if;
+
   if v_is_custodian then
+    if p_to_user is null or p_to_user = v_uid or not exists (
+      select 1 from public.shipment_members m
+      where m.shipment_id = p_shipment_id and m.user_id = p_to_user and m.role in ('courier', 'receiver')
+    ) then
+      raise exception 'The custodian must name the courier or receiver taking over.' using errcode = 'CC006';
+    end if;
     p_verdict := null;
     p_reason := null;
-  elsif p_verdict is null then
-    raise exception 'The person receiving must give a verdict.' using errcode = 'CC006';
-  elsif p_verdict <> 'PASS' and coalesce(btrim(p_reason), '') = '' then
-    raise exception 'A % verdict needs a reason.', p_verdict using errcode = 'CC006';
+  else
+    p_to_user := null;
+    if p_verdict is null then
+      raise exception 'The person receiving must give a verdict.' using errcode = 'CC006';
+    elsif p_verdict <> 'PASS' and coalesce(btrim(p_reason), '') = '' then
+      raise exception 'A % verdict needs a reason.', p_verdict using errcode = 'CC006';
+    end if;
   end if;
 
-  if exists (
-    select 1 from public.handover_confirmations c
-    where c.shipment_id = p_shipment_id and c.leg = p_leg
-      and (c.user_id = v_uid or c.device_id = p_device_id)
-  ) then
-    raise exception 'This person or device has already confirmed.' using errcode = 'CC008';
+  select c.* into v_mine
+  from public.handover_confirmations c
+  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_uid;
+
+  if v_mine.head_hash = p_head_hash then
+    raise exception 'You have already confirmed this history.' using errcode = 'CC008';
   end if;
 
-  if not v_is_custodian and exists (
-    select 1 from public.handover_confirmations c
-    where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id <> v_custodian
-  ) then
-    raise exception 'Someone else is already receiving this shipment.' using errcode = 'CC008';
-  end if;
-
+  -- A confirmation of older history no longer counts, so its owner confirms again.
   insert into public.handover_confirmations (
-    shipment_id, leg, user_id, role, device_id, verdict, reason, vvm_stage, shake_test
+    shipment_id, leg, user_id, role, device_id, head_hash, to_user, verdict, reason, vvm_stage, shake_test
   ) values (
-    p_shipment_id, p_leg, v_uid, v_role, p_device_id, p_verdict, p_reason, p_vvm_stage, p_shake_test
-  );
+    p_shipment_id, p_leg, v_uid, v_role, p_device_id, p_head_hash, p_to_user,
+    p_verdict, p_reason, p_vvm_stage, p_shake_test
+  )
+  on conflict (shipment_id, leg, user_id) do update set
+    device_id = excluded.device_id,
+    head_hash = excluded.head_hash,
+    to_user = excluded.to_user,
+    verdict = excluded.verdict,
+    reason = excluded.reason,
+    vvm_stage = excluded.vvm_stage,
+    shake_test = excluded.shake_test,
+    server_time = now();
+
+  select c.* into v_releasing
+  from public.handover_confirmations c
+  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_custodian;
+
+  if not v_is_custodian and p_verdict <> 'PASS'
+     and (v_role = 'receiver' or v_releasing.to_user = v_uid) then
+    update public.shipments s set status = 'QUARANTINED'
+    where s.id = p_shipment_id and s.status = 'IN_TRANSIT';
+  end if;
 
   select c.* into v_receiving
   from public.handover_confirmations c
-  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id <> v_custodian;
+  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_releasing.to_user;
 
-  v_custodian_done := exists (
-    select 1 from public.handover_confirmations c
-    where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_custodian
-  );
-
-  if v_receiving.user_id is null or not v_custodian_done then
-    return jsonb_build_object('state', 'WAITING', 'status', v_shipment.status);
+  if v_receiving.user_id is null
+     or v_releasing.head_hash <> v_head.head_hash
+     or v_receiving.head_hash <> v_head.head_hash then
+    return jsonb_build_object(
+      'state', 'WAITING',
+      'status', (select s.status from public.shipments s where s.id = p_shipment_id)
+    );
   end if;
 
   perform private.transfer_custody(p_shipment_id, p_leg, v_receiving.user_id, v_receiving.device_id);
 
   if v_receiving.verdict <> 'PASS' then
     update public.shipments s set status = 'QUARANTINED'
-    where s.id = p_shipment_id and s.status <> 'QUARANTINED';
-  elsif v_receiving.role = 'receiver' and v_shipment.status = 'IN_TRANSIT' then
-    update public.shipments s set status = 'ACCEPTED' where s.id = p_shipment_id;
+    where s.id = p_shipment_id and s.status = 'IN_TRANSIT';
+  elsif v_receiving.role = 'receiver' then
+    update public.shipments s set status = 'ACCEPTED'
+    where s.id = p_shipment_id and s.status = 'IN_TRANSIT';
   end if;
 
   return jsonb_build_object(
@@ -673,23 +740,32 @@ $$;
 
 -- Client functions: alerts and location ------------------------------------------------------------
 
+-- The server builds the ID. It is global, so if clients chose it, a member of one shipment could
+-- claim the ID of another shipment's alert and stop that alert from ever being stored.
 create function public.record_alert(
-  p_id text,
   p_shipment_id text,
   p_type text,
   p_excursion_start bigint,
   p_message text
-) returns void
+) returns text
 language plpgsql security definer set search_path = '' as $$
+declare
+  v_id text := p_shipment_id || ':' || p_type || ':' || p_excursion_start;
 begin
   if not private.is_member(p_shipment_id) then
     raise exception 'You are not on this shipment.' using errcode = 'CC002';
   end if;
 
+  if p_excursion_start is null then
+    raise exception 'An alert needs the time its event began.' using errcode = 'CC006';
+  end if;
+
   -- An alert ID identifies one event, so seeing it again changes nothing.
   insert into public.alerts (id, shipment_id, type, excursion_start, message)
-  values (p_id, p_shipment_id, p_type, p_excursion_start, p_message)
+  values (v_id, p_shipment_id, p_type, p_excursion_start, p_message)
   on conflict (id) do nothing;
+
+  return v_id;
 end
 $$;
 
@@ -707,10 +783,18 @@ $$;
 
 create function public.acknowledge_alert(p_id text) returns void
 language plpgsql security definer set search_path = '' as $$
+declare
+  v_shipment_id text;
 begin
+  select a.shipment_id into v_shipment_id from public.alerts a where a.id = p_id;
+
+  if v_shipment_id is null or not private.can_oversee(v_shipment_id) then
+    raise exception 'Only the sender or receiver can acknowledge an alert.' using errcode = 'CC002';
+  end if;
+
   update public.alerts a
   set acknowledged_by = (select auth.uid()), acknowledged_at = now()
-  where a.id = p_id and a.acknowledged_at is null and private.is_member(a.shipment_id);
+  where a.id = p_id and a.acknowledged_at is null;
 end
 $$;
 
@@ -787,8 +871,8 @@ grant execute on function
   public.start_custody(text, uuid),
   public.request_replacement(text),
   public.append_readings(text, jsonb, text, uuid, text),
-  public.confirm_handover(text, integer, uuid, text, text, text, text),
-  public.record_alert(text, text, text, bigint, text),
+  public.confirm_handover(text, integer, uuid, text, uuid, text, text, text, text),
+  public.record_alert(text, text, bigint, text),
   public.escalate_alert(text, text),
   public.acknowledge_alert(text),
   public.append_gps_points(text, uuid, jsonb)
