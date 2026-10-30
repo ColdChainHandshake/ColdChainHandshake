@@ -43,7 +43,7 @@ The application combines:
 ✅ GPS location snapshots  
 ✅ Historical destination inspection  
 ✅ Worker + pharmacist signatures  
-✅ PASS / FAIL handover verdicts  
+✅ PASS / UNKNOWN / FAIL handover verdicts  
 ✅ Persistent shipment-scoped event logs  
 
 The goal is simple:
@@ -77,7 +77,7 @@ PHARMACIST
    ↓
 HANDOVER
    ↓
-PASS / FAIL
+PASS / UNKNOWN / FAIL
    ↓
 HASH VERIFICATION
 ```

@@ -235,7 +235,7 @@ fun AlertsScreen(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Thermal parameters and hardware sensors operated within safe bounds.",
+                        text = "Nothing to show.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

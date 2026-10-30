@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.data.remote.dto.toDomain
 import com.coldchain.handshake.data.remote.dto.RemoteShipmentCustodyDto
@@ -127,7 +128,7 @@ fun DispatchScreen(
                         val remoteRes = SupabaseRemoteDataSource().getShipment(targetId)
                         if (remoteRes.isSuccess && remoteRes.getOrNull() != null) {
                             matchedShipment = remoteRes.getOrNull()!!.toDomain()
-                            RepositoryProvider.shipmentRepository.saveShipment(matchedShipment)
+                            RepositoryProvider.shipmentRepository.adoptRemoteShipment(matchedShipment)
                         } else if (scannedCode.startsWith("CCH:SHIP:")) {
                             val parts = scannedCode.split(":")
                             if (parts.size >= 6) {
@@ -140,7 +141,7 @@ fun DispatchScreen(
                                     workerId = "W-MONITOR",
                                     status = ShipmentStatus.IN_TRANSIT
                                 )
-                                RepositoryProvider.shipmentRepository.saveShipment(matchedShipment)
+                                RepositoryProvider.shipmentRepository.adoptRemoteShipment(matchedShipment)
                             }
                         }
                     }
@@ -167,6 +168,7 @@ fun DispatchScreen(
                         boundQrCode = updatedShipment.qrCode
                         qrBitmap = QRCodeGenerator.generateQR(updatedShipment.qrCode, 400)
                         RepositoryProvider.shipmentRepository.saveShipment(updatedShipment)
+                            .onFailure { infoBannerMessage = "Couldn't save: ${it.message}" }
                         RepositoryProvider.temperatureSimulator.attachShipment(updatedShipment)
                         infoBannerMessage = "Associated QR payload with consignment ${updatedShipment.id}"
                     } else {
@@ -431,7 +433,12 @@ fun DispatchScreen(
                                 qrBitmap = QRCodeGenerator.generateQR(authoritativeQr, 400)
 
                                 scope.launch {
-                                    RepositoryProvider.shipmentRepository.saveShipment(newShipment)
+                                    val saved = RepositoryProvider.shipmentRepository.saveShipment(newShipment)
+                                    if (saved.isFailure) {
+                                        currentShipment = null
+                                        infoBannerMessage = "Couldn't save: ${saved.exceptionOrNull()?.message}"
+                                        return@launch
+                                    }
                                     RepositoryProvider.temperatureSimulator.attachShipment(newShipment)
                                     // Register initial custody with Supabase
                                     val myDevId = DeviceIdProvider.getDeviceId(context)
@@ -614,7 +621,12 @@ fun DispatchScreen(
                                     val dispatched = shipment.copy(status = ShipmentStatus.DISPATCHED)
                                     currentShipment = dispatched
                                     scope.launch {
-                                        RepositoryProvider.shipmentRepository.saveShipment(dispatched)
+                                        val saved = RepositoryProvider.shipmentRepository.saveShipment(dispatched)
+                                        if (saved.isFailure) {
+                                            currentShipment = shipment
+                                            infoBannerMessage = "Couldn't save: ${saved.exceptionOrNull()?.message}"
+                                            return@launch
+                                        }
                                         RepositoryProvider.temperatureSimulator.attachShipment(dispatched)
                                         infoBannerMessage = "Consignment ${dispatched.id} DISPATCHED and sealed"
                                     }
@@ -639,12 +651,18 @@ fun DispatchScreen(
                                     )
                                     currentShipment = inTransit
                                     scope.launch {
-                                        RepositoryProvider.shipmentRepository.saveShipment(inTransit)
+                                        val saved = RepositoryProvider.shipmentRepository.saveShipment(inTransit)
+                                        if (saved.isFailure) {
+                                            currentShipment = shipment
+                                            infoBannerMessage = "Couldn't save: ${saved.exceptionOrNull()?.message}"
+                                            return@launch
+                                        }
                                         RepositoryProvider.temperatureSimulator.attachShipment(inTransit)
                                         RepositoryProvider.shipmentHistorySyncCoordinator.markReady(inTransit.id)
                                         RepositoryProvider.temperatureSimulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
+                                        AlertEscalationScheduler.checkNow(context)
+                                        onNavigateToTransit()
                                     }
-                                    onNavigateToTransit()
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = StatusGreen

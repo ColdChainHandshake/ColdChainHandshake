@@ -450,7 +450,7 @@ fun TransitScreen(
                             }
                         }
                         if (resolvedShipment != null) {
-                            RepositoryProvider.getShipmentRepository(context).saveShipment(resolvedShipment)
+                            RepositoryProvider.getShipmentRepository(context).adoptRemoteShipment(resolvedShipment)
                         }
                     }
 
@@ -696,7 +696,7 @@ fun TransitScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isExcursion) "⚠️ TEMPERATURE BREACH EXCURSION (> 8°C)" else "SAFE THERMAL RANGE (2.0°C – 8.0°C)",
+                        text = if (isExcursion) "⚠️ OUTSIDE PRODUCT RANGE" else "WITHIN PRODUCT RANGE",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = tempColor
@@ -983,7 +983,7 @@ fun TransitScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "TEMPERATURE EXCURSION BREACH (>8°C)",
+                                text = "TEMPERATURE BREACH",
                                 color = StatusRed,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
@@ -997,7 +997,7 @@ fun TransitScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "NORMAL OPERATION (4°C–6°C Safe)",
+                                text = "IN RANGE",
                                 color = StatusGreen,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold

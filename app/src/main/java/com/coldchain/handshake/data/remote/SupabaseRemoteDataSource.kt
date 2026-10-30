@@ -205,7 +205,7 @@ open class SupabaseRemoteDataSource(
             .maxByOrNull { it.timestamp }
     }
 
-    suspend fun getTemperatureEvents(shipmentId: String): Result<List<RemoteTemperatureEventDto>> = runCatching {
+    open suspend fun getTemperatureEvents(shipmentId: String): Result<List<RemoteTemperatureEventDto>> = runCatching {
         client.postgrest.from(TABLE_TEMPERATURE_EVENTS)
             .select {
                 filter {

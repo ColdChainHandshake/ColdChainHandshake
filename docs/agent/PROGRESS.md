@@ -76,7 +76,7 @@ Proof:
 ```text
 ./gradlew testDebugUnitTest testReleaseUnitTest lintDebug
 BUILD SUCCESSFUL in 3m 3s
-Debug tests 263 failures 0 errors 0 skipped 0 | live: False
+Debug tests 263 failures 0 errors 0 skipped 0 | live: False   (269 at the commit reviewed; see the Gate 2 review below)
 Release tests 241 failures 0 errors 0 skipped 0 | live: False
 ./gradlew assembleRelease        BUILD SUCCESSFUL (at fcf04f9)
 npx supabase test db             Files=2, Tests=47 ... Result: PASS
@@ -84,9 +84,20 @@ npx supabase db advisors --local --fail-on info     No issues found
 Review mutations replayed in rolled-back transactions: 13 of 13 caught
 ```
 
-Not proven yet: nothing has run on a phone or emulator. Screens are checked by Robolectric and the compiler only, and WorkManager timing by its test harness. The CI workflow has never run on GitHub.
+Not proven yet: nothing has run on a phone or emulator. The handover and dispatch screens are driven by Robolectric, the others only open in the smoke test. WorkManager delays are read from its test harness, and no real delay has elapsed. The CI workflow has never run on GitHub.
 
-**Gate 2:** domain and screen work done; fresh-subagent review still running, interrupted twice by service limits. `gate-2` is not tagged until it reports and its findings are fixed. The tag will then include the Phase 3 commits made in the meantime.
+**Gate 2:** first review not met, at `8b7c865`. It found four ways to reach an unsafe PASS, a lost second handover, no way to record a verdict when the cloud failed, and 32 surviving mutations. All were fixed test-first in the commits below, except what `DECISIONS.md` lists as accepted. A second fresh review is next. `gate-2` will then include the Phase 3 commits made in the meantime.
+
+Proof after the fixes:
+
+```text
+Before the fixes, 12 of the new tests failed on behaviour, including each of the four unsafe PASS paths.
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease
+BUILD SUCCESSFUL in 2m 30s
+debug tests 342 failed 0 | release tests 298 failed 0 | core tests 53 failed 0
+npx supabase test db        Files=4, Tests=233 ... Result: PASS
+npx supabase db advisors --local --fail-on info     No issues found
+```
 
 ## Phase 3: Toolchain upgrade and server trust
 
@@ -105,8 +116,8 @@ Debug tests 271 failures 0 errors 0 | Release tests 243 failures 0 errors 0
 - [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out. Client libraries are in; the `profiles` table and `complete_profile` exist; no screens yet
 - [ ] 3.2 Data-model migrations, RLS, RPCs. Server done in `adf006d`, `33aeb1c` and `60ed408`. Status: `doing`, the app still calls the legacy tables, so sync fails until it moves over
 - [ ] 3.3 `confirm_handover`. Server done in the same commits. The checkboxes are still in the app, so finding 4 stays open
-- [ ] 3.4 Chain v2 with shared vectors and SQL. Domain, Room and SQL done in `91fbf99`. Uploading through `append_readings` is not done
-- [ ] 3.5 Clock-skew detection and Keystore interim signing. Server side done (`clock_ahead`, signature required); client not started
+- [ ] 3.4 Chain v2 with shared vectors and SQL. Domain, Room and SQL done in `91fbf99`. `ReadingUploader` is written and tested against a fake server (`0917dc1`, `aa9da30`), but the app doesn't call it yet
+- [ ] 3.5 Clock-skew detection and Keystore interim signing. Server side done (`clock_ahead`, signature required). Domain done in `c2f9899`: the signature format and `ClockSkewDetector`. The Keystore signer isn't written
 - [ ] 3.6 pgTAP attack tests and client-side JVM tests. Attack tests done; client tests done for the chain
 
 Proof so far:
@@ -119,6 +130,7 @@ Chain vectors: standalone Python, Postgres and Kotlin agree on all 18
 ./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug
 BUILD SUCCESSFUL in 2m 40s
 Debug tests 272 failures 0 errors 0 | Release tests 243 failures 0 errors 0 | core-domain 23 tests, no failures
+Superseded by the numbers in the Gate 2 proof above.
 ```
 
 Known gap: the app can't sync at the moment. The legacy tables are locked and renamed, and the app has not moved to the new functions yet. It still works on one device. The last commit's automated security review did not finish (HTTP 429).

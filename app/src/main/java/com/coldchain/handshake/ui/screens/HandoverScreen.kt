@@ -39,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -177,11 +178,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
     // Safety breach evaluation
     val breachEvaluation = remember(telemetryEvents, shipment) {
-        shipment?.let {
-            RepositoryProvider.safetyEngine
-                .evaluateShipment(it, telemetryEvents, windowEnd = System.currentTimeMillis())
-                .evaluation
-        } ?: BreachDetector.evaluateTelemetry(telemetryEvents)
+        shipment?.let { BreachDetector.evaluateForHandover(it, telemetryEvents, System.currentTimeMillis()) }
+            ?: BreachDetector.evaluateTelemetry(telemetryEvents)
     }
     val temperaturePassed = breachEvaluation.temperaturePassed
     val cumulativeExcursionStr = remember(breachEvaluation) {
@@ -190,9 +188,22 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
     // Cryptographic Hash Chain Integrity Check (State-Aware)
     val isSyncComplete = syncState == HistorySyncState.HISTORY_READY
-    val integrityEvaluation = remember(telemetryEvents, isSyncComplete) {
-        ShipmentIntegrityEvaluator.evaluate(telemetryEvents, isSyncComplete)
+    val integrityEvaluation = remember(telemetryEvents, isSyncComplete, shipment) {
+        ShipmentIntegrityEvaluator.evaluate(
+            telemetryEvents,
+            isSyncComplete,
+            shipment?.genesisHash ?: HashChainService.UNBOUND_GENESIS
+        )
     }
+
+    val isSyncing = syncState == HistorySyncState.HISTORY_LOADING || syncState == HistorySyncState.HISTORY_SYNCING
+
+    // A handover already recorded for this shipment, which this screen must show rather than replace
+    val storedHandover by (if (shipmentId.isNotBlank()) {
+        RepositoryProvider.handoverRepository.getHandover(shipmentId)
+    } else {
+        kotlinx.coroutines.flow.flowOf(null)
+    }).collectAsState(initial = null)
 
     // Historical Last Recorded Location
     var lastRecordedLocation by remember { mutableStateOf<RemoteShipmentLocationDto?>(null) }
@@ -397,7 +408,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Time Above 8°C:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Time Out of Range:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             text = cumulativeExcursionStr,
                             fontWeight = FontWeight.Bold,
@@ -783,7 +794,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         Spacer(modifier = Modifier.height(16.dp))
 
         // 9. FINAL VERDICT & EXECUTE CUSTODY HANDOVER
-        val isPendingSync = integrityEvaluation.state == IntegrityVerificationState.PENDING_SYNC
+        val isPendingSync = isSyncing
         val isVerified = integrityEvaluation.state == IntegrityVerificationState.VERIFIED
         val computedEvaluation = HandoverVerdictEngine.evaluate(
             temperature = breachEvaluation.verdict,
@@ -791,7 +802,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             workerSigned = workerSigned,
             pharmacistSigned = pharmacistSigned,
             vvmStage = vvmStage,
-            shakeTest = shakeTest
+            shakeTest = shakeTest,
+            historyAvailable = integrityEvaluation.state != IntegrityVerificationState.PENDING_SYNC
         )
         val preliminaryVerdict = computedEvaluation.verdict
 
@@ -868,11 +880,11 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             onVvmStageChange = { vvmStage = it },
             shakeTest = shakeTest,
             onShakeTestChange = { shakeTest = it },
-            enabled = !isProcessing && !isPendingSync && handoverResult == null,
+            enabled = !isProcessing && !isPendingSync && handoverResult == null && storedHandover == null,
             waitingLabel = when {
                 isProcessing -> "Evaluating & Recording Handover..."
                 isPendingSync -> "Waiting for Complete History..."
-                handoverResult != null -> "Handover Recorded"
+                handoverResult != null || storedHandover != null -> "Handover Recorded"
                 else -> null
             },
             onRecord = { verdict, reason ->
@@ -888,11 +900,13 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                             declaredVerdict = verdict,
                             reason = reason,
                             vvmStage = vvmStage,
-                            shakeTest = shakeTest
+                            shakeTest = shakeTest,
+                            historySynced = isSyncComplete
                         )
                         if (result.isSuccess) {
                             val res = result.getOrNull()
                             handoverResult = res
+                            res?.let { RepositoryProvider.temperatureSimulator.onHandedOver(it.updatedShipment) }
                             // If verdict is PASS, transfer custody to this receiving device
                             if (res?.handover?.verdict == HandoverVerdict.PASS) {
                                 val myDeviceId = DeviceIdProvider.getDeviceId(context)
@@ -920,6 +934,33 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             },
             modifier = Modifier.fillMaxWidth()
         )
+
+        if (syncState == HistorySyncState.SYNC_ERROR) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "The readings couldn't be fetched. You can still record what you found, or try again.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(
+                onClick = {
+                    coroutineScope.launch {
+                        RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipmentId)
+                    }
+                }
+            ) {
+                Text("Try Again")
+            }
+        }
+
+        val recorded = storedHandover
+        if (recorded != null && handoverResult == null) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Recorded: ${recorded.verdict.name}" + (recorded.reason?.let { ". Reason: $it" } ?: ""),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
 
         if (errorMessage != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -1038,7 +1079,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
                     if (isPass) {
                         Text(
-                            text = "All checks passed. Handover recorded on this device.",
+                            text = "No problems found in the checks made. Handover recorded on this device.",
                             style = MaterialTheme.typography.bodySmall,
                             color = StatusGreen
                         )
