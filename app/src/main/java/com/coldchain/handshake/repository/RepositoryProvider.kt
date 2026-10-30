@@ -1,6 +1,7 @@
 package com.coldchain.handshake.repository
 
 import android.content.Context
+import com.coldchain.handshake.alerts.AndroidAlertNotifier
 import com.coldchain.handshake.data.local.ColdChainDatabase
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.network.AndroidNetworkMonitor
@@ -8,7 +9,6 @@ import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.models.ChaosScenarioType
-import com.coldchain.handshake.safety.LoggerDisconnectMonitor
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import kotlinx.coroutines.CoroutineScope
@@ -125,7 +125,7 @@ object RepositoryProvider {
             alertRepo = aRepo
             handoverRepo = hRepo
 
-            val sEngine = SafetyEngine(aRepo, sRepo)
+            val sEngine = SafetyEngine(aRepo, sRepo, AndroidAlertNotifier(appContext))
             safetyEngineInstance = sEngine
 
             val hOrchestrator = HandoverOrchestrator(sRepo, tRepo, hRepo)
@@ -173,10 +173,9 @@ object RepositoryProvider {
                         val activeShipment = simulator?.activeShipment?.value
                         val shipmentId = activeShipment?.id ?: "SHIP-ACTIVE"
                         val loggerId = activeShipment?.loggerId ?: "LOG-SIMULATED"
-                        LoggerDisconnectMonitor.onLoggerDisconnectedAndPersist(
+                        sEngine.handleLoggerDisconnect(
                             shipmentId = shipmentId,
                             loggerId = loggerId,
-                            repository = aRepo,
                             reason = "Chaos injected: Logger sensor disconnected"
                         )
                     }

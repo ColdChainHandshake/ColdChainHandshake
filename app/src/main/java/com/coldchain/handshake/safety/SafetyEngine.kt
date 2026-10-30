@@ -170,8 +170,9 @@ class SafetyEngine(
             reason = reason,
             timestamp = timestamp
         )
-        val saveResult = repo.saveAlert(alert)
-        saveResult.getOrThrow()
+        if (repo.saveAlertIfAbsent(alert).getOrThrow()) {
+            alertNotifier.onAlertRaised(alert)
+        }
         return alert
     }
 

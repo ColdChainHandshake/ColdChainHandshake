@@ -47,6 +47,9 @@ class FakeAlertRepository : AlertRepository {
     }
 
     override suspend fun escalateIfUnacknowledged(alertId: String, level: EscalationLevel): Result<Boolean> {
+        if (shouldFail) {
+            return Result.failure(failureException)
+        }
         val alert = savedAlerts.firstOrNull { it.id == alertId && !it.acknowledged } ?: return Result.success(false)
         saveAlert(alert.copy(escalationLevel = level))
         return Result.success(true)

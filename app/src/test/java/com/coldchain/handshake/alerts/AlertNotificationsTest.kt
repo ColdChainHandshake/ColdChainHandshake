@@ -1,0 +1,149 @@
+package com.coldchain.handshake.alerts
+
+import android.Manifest
+import android.app.Application
+import android.app.NotificationManager
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import androidx.work.ListenableWorker
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.testing.WorkManagerTestInitHelper
+import com.coldchain.handshake.models.Alert
+import com.coldchain.handshake.models.AlertType
+import com.coldchain.handshake.models.EscalationLevel
+import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.safety.AlertEscalationEngine
+import com.coldchain.handshake.safety.FakeAlertRepository
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class AlertNotificationsTest {
+
+    private val context: Context = ApplicationProvider.getApplicationContext()
+    private val manager = context.getSystemService(NotificationManager::class.java)
+    private val alerts = FakeAlertRepository()
+
+    private fun alert(
+        level: EscalationLevel = EscalationLevel.WORKER,
+        createdAt: Long = System.currentTimeMillis()
+    ) = Alert(
+        id = "SHIP-1:TEMPERATURE_BREACH:1000",
+        shipmentId = "SHIP-1",
+        type = AlertType.TEMPERATURE_BREACH,
+        message = "Thermal breach detected: reached 11.0°C (Elapsed: 08:00).",
+        timestamp = createdAt,
+        escalationLevel = level,
+        acknowledged = false
+    )
+
+    private fun grantNotifications() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    @Before
+    fun setUp() {
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
+        RepositoryProvider.initialize(alertRepository = alerts)
+    }
+
+    @After
+    fun tearDown() {
+        RepositoryProvider.reset()
+    }
+
+    @Test
+    fun aRaisedAlertPostsANotificationOnTheAlertChannel() {
+        grantNotifications()
+
+        AndroidAlertNotifier(context).onAlertRaised(alert())
+
+        val notification = shadowOf(manager).allNotifications.single()
+        assertEquals(AndroidAlertNotifier.CHANNEL_ID, notification.channelId)
+        assertEquals(NotificationManager.IMPORTANCE_HIGH, manager.getNotificationChannel(notification.channelId).importance)
+        assertTrue(shadowOf(notification).contentText.contains("11.0°C"))
+    }
+
+    @Test
+    fun anEscalationUpdatesTheSameNotification() {
+        grantNotifications()
+        val notifier = AndroidAlertNotifier(context)
+
+        notifier.onAlertRaised(alert())
+        notifier.onAlertEscalated(alert(level = EscalationLevel.SUPERVISOR))
+
+        val notification = shadowOf(manager).allNotifications.single()
+        assertTrue(shadowOf(notification).contentTitle.contains("Supervisor"))
+    }
+
+    @Test
+    fun withoutPermissionNothingIsPostedAndNothingCrashes() {
+        shadowOf(context as Application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+
+        AndroidAlertNotifier(context).onAlertRaised(alert())
+
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+    }
+
+    @Test
+    fun aRaisedAlertSchedulesACheck() {
+        grantNotifications()
+
+        AndroidAlertNotifier(context).onAlertRaised(alert())
+
+        // Test WorkManager runs undelayed work at once, so the check may already have finished.
+        val checks = WorkManager.getInstance(context).getWorkInfosForUniqueWork(AlertEscalationScheduler.WORK_NAME)
+        assertEquals(1, checks.get().size)
+    }
+
+    @Test
+    fun theWorkerEscalatesWhatIsDueNotifiesAndBooksTheNextCheck() = runBlocking {
+        grantNotifications()
+        val interval = AlertEscalationEngine.ESCALATION_INTERVAL_MS
+        alerts.saveAlert(alert(createdAt = System.currentTimeMillis() - interval - 1_000L))
+
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        assertEquals(EscalationLevel.SUPERVISOR, alerts.savedAlerts.single().escalationLevel)
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+        assertEquals(1, pendingChecks())
+    }
+
+    @Test
+    fun theWorkerBooksNothingOnceNothingCanEscalate() = runBlocking {
+        alerts.saveAlert(alert(level = EscalationLevel.PHARMACIST))
+
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        assertEquals(0, pendingChecks())
+    }
+
+    @Test
+    fun theWorkerRetriesIfStorageFails() = runBlocking {
+        alerts.saveAlert(alert(createdAt = System.currentTimeMillis() - AlertEscalationEngine.ESCALATION_INTERVAL_MS))
+        alerts.shouldFail = true
+
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+
+        assertEquals(ListenableWorker.Result.retry(), result)
+    }
+
+    private fun pendingChecks(): Int =
+        WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWork(AlertEscalationScheduler.WORK_NAME)
+            .get()
+            .count { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
+}
