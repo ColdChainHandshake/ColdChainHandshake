@@ -36,7 +36,7 @@ class SafetyEngine(
         val evaluation = BreachDetector.evaluateTelemetry(
             events = events,
             profile = ProductProfiles.byId(shipment.productProfileId),
-            windowStart = shipment.dispatchedAt,
+            windowStart = shipment.journeyStartedAt,
             windowEnd = windowEnd
         )
         val shouldQuarantine = QuarantineManager.shouldQuarantine(evaluation)

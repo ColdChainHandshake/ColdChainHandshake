@@ -396,7 +396,7 @@ fun TransitScreen(
                         val updated = currentShipment.copy(
                             status = runCatching { ShipmentStatus.valueOf(remoteShip.status) }.getOrDefault(currentShipment.status)
                         )
-                        RepositoryProvider.getShipmentRepository(context).saveShipment(updated)
+                        RepositoryProvider.getShipmentRepository(context).adoptRemoteShipment(updated)
                     }
                 }
 

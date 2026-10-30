@@ -8,6 +8,7 @@ import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.ChaosEngineService
 import com.coldchain.handshake.repository.TelemetryRepository
+import com.coldchain.handshake.safety.QuarantineManager
 import com.coldchain.handshake.safety.SafetyEngine
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -207,8 +208,8 @@ class TemperatureSimulator(
                     try {
                         val events = telemetryRepository.getTemperatures(shipment.id).firstOrNull() ?: listOf(hashedEvent)
                         val decision = engine.processTelemetryAndEnforceSafety(shipment, events)
-                        if (decision.shouldQuarantine) {
-                            _activeShipment.value = _activeShipment.value?.copy(status = ShipmentStatus.QUARANTINED)
+                        _activeShipment.value = _activeShipment.value?.let {
+                            QuarantineManager.applyQuarantine(it, decision.evaluation)
                         }
                     } catch (_: Exception) {}
                 }

@@ -20,8 +20,8 @@ object QuarantineManager {
      * Applies quarantine status transition if a breach is detected.
      *
      * Rules:
-     * - If [BreachEvaluation.hasBreach] is true and shipment is not already [ShipmentStatus.QUARANTINED]
-     *   or [ShipmentStatus.REPLACEMENT_REQUESTED], updates status to [ShipmentStatus.QUARANTINED].
+     * - If [BreachEvaluation.hasBreach] is true and [ShipmentLifecycle] allows it, updates status to
+     *   [ShipmentStatus.QUARANTINED]. A shipment that is finished or not yet dispatched keeps its status.
      * - Preserves all other [Shipment] properties (id, qrCode, loggerId, origin, destination, workerId).
      * - If no breach is present, leaves the current status intact.
      */
@@ -30,11 +30,7 @@ object QuarantineManager {
             return shipment
         }
 
-        return when (shipment.status) {
-            ShipmentStatus.QUARANTINED,
-            ShipmentStatus.REPLACEMENT_REQUESTED -> shipment
-            else -> shipment.copy(status = ShipmentStatus.QUARANTINED)
-        }
+        return ShipmentLifecycle.transition(shipment, ShipmentStatus.QUARANTINED).getOrDefault(shipment)
     }
 
     /**

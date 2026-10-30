@@ -618,7 +618,10 @@ fun DispatchScreen(
                         ShipmentStatus.DISPATCHED -> {
                             Button(
                                 onClick = {
-                                    val inTransit = shipment.copy(status = ShipmentStatus.IN_TRANSIT)
+                                    val inTransit = shipment.copy(
+                                        status = ShipmentStatus.IN_TRANSIT,
+                                        journeyStartedAt = System.currentTimeMillis()
+                                    )
                                     currentShipment = inTransit
                                     scope.launch {
                                         RepositoryProvider.shipmentRepository.saveShipment(inTransit)
