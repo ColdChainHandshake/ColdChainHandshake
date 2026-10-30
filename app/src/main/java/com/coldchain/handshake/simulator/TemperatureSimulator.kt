@@ -53,7 +53,6 @@ class TemperatureSimulator(
 
     private var stepCounter = 0
     private val tickMutex = Mutex()
-    private var lastKnownHash: String = HashChainService.GENESIS_HASH
 
     private val _activeShipment = MutableStateFlow<Shipment?>(null)
     val activeShipment: StateFlow<Shipment?> = _activeShipment.asStateFlow()
@@ -111,7 +110,6 @@ class TemperatureSimulator(
         _activeShipment.value = shipment
         _simulatedTimestamp.value = startTimestamp
         stepCounter = 0
-        lastKnownHash = HashChainService.GENESIS_HASH
         _lastPersistenceError.value = null
     }
 
@@ -153,15 +151,11 @@ class TemperatureSimulator(
 
         return tickMutex.withLock {
             val existingEvents = telemetryRepository.getTemperatures(shipment.id).firstOrNull()
-            val latestExisting = existingEvents?.maxByOrNull { it.timestamp }
+            val latestExisting = existingEvents?.maxByOrNull { it.seq }
 
-            val previousHash = if (latestExisting != null) {
-                latestExisting.currentHash
-            } else if (stepCounter == 0 || lastKnownHash == HashChainService.GENESIS_HASH) {
-                HashChainService.GENESIS_HASH
-            } else {
-                lastKnownHash
-            }
+            val previousHash = latestExisting?.currentHash
+                ?: shipment.genesisHash
+                ?: HashChainService.UNBOUND_GENESIS
 
             val baseTimestamp = if (latestExisting != null) {
                 maxOf(_simulatedTimestamp.value, latestExisting.timestamp)
@@ -190,14 +184,14 @@ class TemperatureSimulator(
                 temperature = temp,
                 previousHash = previousHash,
                 currentHash = "",
-                syncStatus = SyncStatus.PENDING
+                syncStatus = SyncStatus.PENDING,
+                seq = (latestExisting?.seq ?: 0L) + 1L
             )
 
             val hashedEvent = HashChainService.appendHash(rawEvent, previousHash)
             val saveResult = telemetryRepository.saveTemperature(hashedEvent)
 
             if (saveResult.isSuccess) {
-                lastKnownHash = hashedEvent.currentHash
                 _simulatedTimestamp.value = nextTimestamp
                 _latestTemperature.value = temp
                 stepCounter = currentStep + 1

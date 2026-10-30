@@ -17,6 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,7 +53,7 @@ class ColdChainDatabaseMigrationTest {
             val entity = entities.getJSONObject(i)
             val table = entity.getString("tableName")
             database.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", table))
-            val indices = entity.getJSONArray("indices")
+            val indices = entity.optJSONArray("indices") ?: JSONArray()
             for (j in 0 until indices.length()) {
                 database.execSQL(indices.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", table))
             }
@@ -75,6 +76,27 @@ class ColdChainDatabaseMigrationTest {
         )
     }
 
+    @Test
+    fun aVersion2ChainKeepsItsReadingsThroughTheMigration() {
+        createDatabase(2).apply {
+            insertShipment()
+            execSQL(
+                """
+                INSERT INTO temperature_events
+                    (id, shipmentId, loggerId, timestamp, temperature, previousHash, currentHash, syncStatus)
+                VALUES ('TE-1', 'SHIP-1', 'LOG-1', 1700000000000, 5.5, 'previous', 'current', 'SYNCED')
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val database = DatabaseProvider.buildDatabase(context, dbName)
+        val readings = runBlocking { database.temperatureEventDao().getTemperaturesDirect("SHIP-1") }
+        database.close()
+
+        assertEquals(listOf("TE-1"), readings.map { it.id })
+    }
+
     @After
     fun cleanUp() {
         context.deleteDatabase(dbName)
@@ -89,7 +111,8 @@ class ColdChainDatabaseMigrationTest {
     fun schemaFilesMatchTheirRecordedHashes() {
         val recorded = mapOf(
             1 to "f740cf5168238cf469e45dbf7d9daf80",
-            2 to "16336bc1a46df29247067f953840fde0"
+            2 to "16336bc1a46df29247067f953840fde0",
+            3 to "dfd95156f9fdb479ca1bc5104da47f9b"
         )
         recorded.forEach { (version, hash) ->
             assertTrue("Schema $version has changed", schemaFile(version).contains("\"identityHash\": \"$hash\""))
@@ -102,7 +125,7 @@ class ColdChainDatabaseMigrationTest {
     }
 
     @Test
-    fun version1DataSurvivesTheMigrationToVersion2() {
+    fun version1DataSurvivesEveryMigration() {
         createDatabase(1).apply {
             insertShipment()
             execSQL(
@@ -144,10 +167,12 @@ class ColdChainDatabaseMigrationTest {
         assertEquals(5.5, reading.temperature, 0.0)
         assertEquals("previous", reading.previousHash)
         assertEquals("current", reading.currentHash)
+        assertEquals(0L, reading.seq)
 
         assertEquals(ShipmentStatus.IN_TRANSIT, shipment.status)
         assertEquals(ProductProfiles.DEFAULT.id, shipment.productProfileId)
         assertNull(shipment.journeyStartedAt)
+        assertNull(shipment.genesisHash)
 
         assertEquals(EscalationLevel.SUPERVISOR, alert.escalationLevel)
         assertTrue(alert.acknowledged)
@@ -161,7 +186,7 @@ class ColdChainDatabaseMigrationTest {
 
     @Test
     fun rowsFromTheCurrentSchemaSurviveReopening() {
-        createDatabase(2).apply {
+        createDatabase(3).apply {
             insertShipment()
             close()
         }
@@ -175,7 +200,7 @@ class ColdChainDatabaseMigrationTest {
 
     @Test
     fun aSchemaWithNoMigrationPathFailsInsteadOfWipingData() {
-        createDatabase(2).apply {
+        createDatabase(3).apply {
             insertShipment()
             version = 99
             close()

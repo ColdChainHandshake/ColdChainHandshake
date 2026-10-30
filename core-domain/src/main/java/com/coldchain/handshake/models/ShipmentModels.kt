@@ -26,5 +26,6 @@ data class Shipment(
     val workerId: String,
     val status: ShipmentStatus = ShipmentStatus.CREATED,
     val productProfileId: String = ProductProfiles.DEFAULT.id,
-    val journeyStartedAt: Long? = null
+    val journeyStartedAt: Long? = null,
+    val genesisHash: String? = null
 )

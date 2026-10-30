@@ -100,7 +100,10 @@ class HandoverOrchestrator(
         )
 
         // 4. Application independently determines integrity and temperature from the actual events
-        val integrityResult = HashChainService.verifyChain(events)
+        val integrityResult = HashChainService.verifyChain(
+            events,
+            shipment.genesisHash ?: HashChainService.UNBOUND_GENESIS
+        )
         val integrityPassed = integrityResult.valid
         val temperature = BreachDetector.evaluateTelemetry(
             events = events,

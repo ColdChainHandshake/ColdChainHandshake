@@ -7,6 +7,7 @@ enum class IntegrityFailureReason {
     EMPTY_CHAIN,
     ORDER_VIOLATION,
     INVALID_GENESIS,
+    SEQUENCE_GAP,
     PREVIOUS_HASH_MISMATCH,
     CURRENT_HASH_MISMATCH
 }

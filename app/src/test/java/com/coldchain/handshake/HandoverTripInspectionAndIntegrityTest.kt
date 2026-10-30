@@ -77,7 +77,7 @@ class HandoverTripInspectionAndIntegrityTest {
         assertTrue("Clean shipment must verify successfully", integrityResult.valid)
         assertNull("Corrupted event ID must be null on clean chain", integrityResult.corruptedEventId)
         assertNull("Failure reason must be null on clean chain", integrityResult.reason)
-        assertTrue("Verification message should indicate success", integrityResult.message.contains("verified successfully"))
+        assertTrue("Verification message should indicate success", integrityResult.message.contains("one unbroken chain"))
     }
 
     @Test
@@ -103,7 +103,7 @@ class HandoverTripInspectionAndIntegrityTest {
         assertFalse("Tampered chain must fail verification", integrityResult.valid)
         assertEquals("Tampered event must be identified", tamperedEvents[2].id, integrityResult.corruptedEventId)
         assertEquals(IntegrityFailureReason.CURRENT_HASH_MISMATCH, integrityResult.reason)
-        assertTrue(integrityResult.message.contains("Cryptographic integrity failure"))
+        assertTrue(integrityResult.message.contains("does not match its hash"))
     }
 
     @Test
@@ -277,8 +277,8 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val eval = ShipmentIntegrityEvaluator.evaluate(validChain, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.VERIFIED, eval.state)
-        assertEquals("✓ HASH CHAIN VERIFIED", eval.title)
-        assertTrue(eval.message.contains("4 immutable SHA-256 telemetry blocks verified"))
+        assertEquals("✓ READINGS VERIFIED", eval.title)
+        assertTrue(eval.message.contains("4 readings form one unbroken chain"))
         assertTrue(eval.isEligibleForHandover)
         assertNotNull(eval.integrityResult)
         assertTrue(eval.integrityResult!!.valid)
@@ -332,14 +332,14 @@ class HandoverTripInspectionAndIntegrityTest {
         val partialSuffix = fullChain.drop(2)
         assertEquals(2, partialSuffix.size)
         assertEquals("TE-03", partialSuffix[0].id)
-        assertFalse("Suffix previousHash is not Genesis constant", partialSuffix[0].previousHash == HashChainService.GENESIS_HASH)
+        assertFalse("Suffix previousHash is not Genesis constant", partialSuffix[0].previousHash == HashChainService.UNBOUND_GENESIS)
 
         // Must NEVER display TAMPER DETECTED
         val eval = ShipmentIntegrityEvaluator.evaluate(partialSuffix, isSyncComplete = false)
         assertEquals(IntegrityVerificationState.PENDING_SYNC, eval.state)
         assertFalse("Must never report TAMPER_DETECTED on incomplete suffix", eval.state == IntegrityVerificationState.TAMPER_DETECTED)
-        assertEquals("INTEGRITY VERIFICATION PENDING", eval.title)
-        assertTrue(eval.message.contains("Receiving complete shipment history from cloud (genesis block pending)"))
+        assertEquals("HISTORY SYNCING", eval.title)
+        assertTrue(eval.message.contains("Waiting for complete telemetry history"))
         assertFalse(eval.isEligibleForHandover)
     }
 
@@ -366,7 +366,7 @@ class HandoverTripInspectionAndIntegrityTest {
         val completeImported = (fullChain.take(2) + partialSuffix).sortedBy { it.timestamp }
         val readyEval = ShipmentIntegrityEvaluator.evaluate(completeImported, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.VERIFIED, readyEval.state)
-        assertEquals("✓ HASH CHAIN VERIFIED", readyEval.title)
+        assertEquals("✓ READINGS VERIFIED", readyEval.title)
         assertTrue(readyEval.isEligibleForHandover)
     }
 
@@ -503,7 +503,7 @@ class HandoverTripInspectionAndIntegrityTest {
     fun `test9_handoverOpenedWhileHistoryLoading_showsSyncPendingNotTamper`() {
         val evalEmpty = ShipmentIntegrityEvaluator.evaluate(emptyList(), isSyncComplete = false)
         assertEquals(IntegrityVerificationState.PENDING_SYNC, evalEmpty.state)
-        assertEquals("INTEGRITY VERIFICATION PENDING", evalEmpty.title)
+        assertEquals("HISTORY SYNCING", evalEmpty.title)
         assertFalse(evalEmpty.state == IntegrityVerificationState.TAMPER_DETECTED)
 
         val baseTs = 1700000000000L
@@ -536,7 +536,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val evalReady = ShipmentIntegrityEvaluator.evaluate(chain, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.VERIFIED, evalReady.state)
-        assertEquals("✓ HASH CHAIN VERIFIED", evalReady.title)
+        assertEquals("✓ READINGS VERIFIED", evalReady.title)
     }
 
     /**

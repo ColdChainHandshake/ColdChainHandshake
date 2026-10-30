@@ -38,7 +38,7 @@ class HashChainServiceTest {
     fun test1_sameEventAndPreviousHashProducesSameHash() {
         val event1 = createSampleEvent(id = "TE-001", temperature = 4.5, timestamp = 1700000000000L)
         val event2 = createSampleEvent(id = "TE-001", temperature = 4.5, timestamp = 1700000000000L)
-        val previousHash = HashChainService.GENESIS_HASH
+        val previousHash = HashChainService.UNBOUND_GENESIS
 
         val hash1 = HashChainService.createHash(event1, previousHash)
         val hash2 = HashChainService.createHash(event2, previousHash)
@@ -54,7 +54,7 @@ class HashChainServiceTest {
     fun test2_changingTemperatureChangesCurrentHash() {
         val baseEvent = createSampleEvent(temperature = 4.5)
         val modifiedEvent = baseEvent.copy(temperature = 4.6)
-        val previousHash = HashChainService.GENESIS_HASH
+        val previousHash = HashChainService.UNBOUND_GENESIS
 
         val hashBase = HashChainService.createHash(baseEvent, previousHash)
         val hashModified = HashChainService.createHash(modifiedEvent, previousHash)
@@ -69,7 +69,7 @@ class HashChainServiceTest {
     fun test3_changingTimestampChangesCurrentHash() {
         val baseEvent = createSampleEvent(timestamp = 1700000000000L)
         val modifiedEvent = baseEvent.copy(timestamp = 1700000060000L)
-        val previousHash = HashChainService.GENESIS_HASH
+        val previousHash = HashChainService.UNBOUND_GENESIS
 
         val hashBase = HashChainService.createHash(baseEvent, previousHash)
         val hashModified = HashChainService.createHash(modifiedEvent, previousHash)
@@ -224,7 +224,7 @@ class HashChainServiceTest {
     @Test
     fun testInvalidGenesisFails() {
         val event = createSampleEvent(id = "TE-001")
-        val hashed = HashChainService.appendHash(event, "INVALID_GENESIS")
+        val hashed = HashChainService.appendHash(event, "f".repeat(64))
         val result = HashChainService.verifyChain(listOf(hashed))
         assertFalse(result.valid)
         assertEquals(IntegrityFailureReason.INVALID_GENESIS, result.reason)
@@ -233,7 +233,7 @@ class HashChainServiceTest {
     @Test
     fun testHashLengthIsExactly64AndLowercaseHexadecimal() {
         val event = createSampleEvent()
-        val hash = HashChainService.createHash(event, HashChainService.GENESIS_HASH)
+        val hash = HashChainService.createHash(event, HashChainService.UNBOUND_GENESIS)
         assertEquals("Hash must be exactly 64 characters long", 64, hash.length)
         assertTrue("Hash must only contain lowercase hexadecimal characters", hash.matches(Regex("^[0-9a-f]{64}$")))
     }
@@ -258,7 +258,7 @@ class HashChainServiceTest {
         // Case B: Attacker recalculates Event 1's currentHash to hide temperature modification,
         // but does not recalculate Event 2's previousHash:
         val tamperedChain2 = chain.toMutableList()
-        val recomputedEvent1 = HashChainService.appendHash(chain[0].copy(temperature = 8.5), HashChainService.GENESIS_HASH)
+        val recomputedEvent1 = HashChainService.appendHash(chain[0].copy(temperature = 8.5), HashChainService.UNBOUND_GENESIS)
         tamperedChain2[0] = recomputedEvent1
         val result2 = HashChainService.verifyChain(tamperedChain2)
         assertFalse(result2.valid)

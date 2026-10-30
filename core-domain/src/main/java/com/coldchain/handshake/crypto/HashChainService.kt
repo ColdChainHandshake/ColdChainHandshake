@@ -1,54 +1,74 @@
 package com.coldchain.handshake.crypto
 
 import com.coldchain.handshake.models.TemperatureEvent
-import java.nio.charset.StandardCharsets
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.security.MessageDigest
-import java.util.Locale
 
 /**
- * Authoritative cryptographic SHA-256 hash-chain service.
+ * The fields a shipment's chain is committed to. The server computes the genesis hash from these when
+ * the shipment is created, and they can't change afterwards.
+ */
+data class ShipmentManifest(
+    val shipmentId: String,
+    val senderId: String,
+    val productProfileId: String,
+    val loggerId: String,
+    val createdAtMs: Long
+)
+
+/**
+ * The chain, version 2. Bytes are defined in docs/protocol/CANONICAL_ENCODING.md and shared with the
+ * SQL and the logger firmware through docs/protocol/chain_vectors.json.
  *
- * Implements tamper-evident temperature telemetry chaining where each event is cryptographically
- * bound to all preceding events via:
- *   currentHash = SHA-256(canonicalEventData + previousHash)
+ * On its own the chain shows that a history hangs together, not that it is complete or true: anyone
+ * holding the data can recompute every hash. Tail deletion and rewriting are caught by comparing
+ * against the head and count the server holds, in [ShipmentIntegrityEvaluator].
  */
 object HashChainService {
 
-    /**
-     * Fixed genesis constant for the first block in the chain.
-     */
-    const val GENESIS_HASH = "GENESIS"
+    const val CHAIN_VERSION = 2
 
     /**
-     * Computes the deterministic canonical string representation for a TemperatureEvent.
-     *
-     * Format: "$id|$shipmentId|$loggerId|$timestamp|${temperature formatted to 4 decimal places in Locale.US}"
-     *
-     * Note: PreviousHash, currentHash, and syncStatus are intentionally excluded because
-     * previousHash is passed explicitly as the chain link, currentHash is the output of this hashing,
-     * and syncStatus represents transport state rather than payload data.
+     * Stands in for a genesis hash on a shipment with no server record. A chain built on it can only
+     * be checked for internal consistency.
      */
-    fun canonicalEventData(event: TemperatureEvent): String {
-        val formattedTemp = String.format(Locale.US, "%.4f", event.temperature)
-        return "${event.id}|${event.shipmentId}|${event.loggerId}|${event.timestamp}|$formattedTemp"
+    const val UNBOUND_GENESIS = "0000000000000000000000000000000000000000000000000000000000000000"
+
+    fun genesisHash(manifest: ShipmentManifest): String = sha256 {
+        version()
+        text(manifest.shipmentId)
+        text(manifest.senderId)
+        text(manifest.productProfileId)
+        text(manifest.loggerId)
+        int64(manifest.createdAtMs)
     }
 
-    /**
-     * Computes the SHA-256 hex digest of (canonicalData + previousHash).
-     */
-    fun createHash(canonicalData: String, previousHash: String): String {
-        val payload = canonicalData + previousHash
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hashBytes = digest.digest(payload.toByteArray(StandardCharsets.UTF_8))
-        return hashBytes.joinToString("") { "%02x".format(it) }
+    fun readingHash(
+        shipmentId: String,
+        loggerId: String,
+        seq: Long,
+        loggerTs: Long,
+        tempCentiC: Int,
+        previousHash: String
+    ): String = sha256 {
+        version()
+        text(shipmentId)
+        text(loggerId)
+        int64(seq)
+        int64(loggerTs)
+        int32(tempCentiC)
+        hash(previousHash)
     }
 
-    /**
-     * Computes the SHA-256 hash for a TemperatureEvent given its previousHash.
-     */
-    fun createHash(event: TemperatureEvent, previousHash: String): String {
-        return createHash(canonicalEventData(event), previousHash)
-    }
+    fun createHash(event: TemperatureEvent, previousHash: String): String = readingHash(
+        shipmentId = event.shipmentId,
+        loggerId = event.loggerId,
+        seq = event.seq,
+        loggerTs = event.timestamp,
+        tempCentiC = event.tempCentiC,
+        previousHash = previousHash
+    )
 
     /**
      * Appends previousHash and computes currentHash for a TemperatureEvent, returning an updated copy.
@@ -59,13 +79,13 @@ object HashChainService {
     }
 
     /**
-     * Constructs a valid SHA-256 chain from a raw list of events starting from genesis.
+     * Constructs a chain from raw events, numbering them from 1 in the order given.
      */
-    fun buildChain(rawEvents: List<TemperatureEvent>, genesisHash: String = GENESIS_HASH): List<TemperatureEvent> {
+    fun buildChain(rawEvents: List<TemperatureEvent>, genesisHash: String = UNBOUND_GENESIS): List<TemperatureEvent> {
         val chain = mutableListOf<TemperatureEvent>()
         var prev = genesisHash
-        for (event in rawEvents) {
-            val hashed = appendHash(event, prev)
+        rawEvents.forEachIndexed { index, event ->
+            val hashed = appendHash(event.copy(seq = index + 1L), prev)
             chain.add(hashed)
             prev = hashed.currentHash
         }
@@ -73,23 +93,24 @@ object HashChainService {
     }
 
     /**
-     * Cryptographically verifies the integrity of an entire sequence of temperature events.
+     * Verifies that a sequence of temperature events is one unbroken chain from [genesisHash].
      *
      * Verification rules:
      * 1. Chain must not be empty (EMPTY_CHAIN).
      * 2. Events must be in chronological sequence (ORDER_VIOLATION).
-     * 3. First event previousHash must equal GENESIS_HASH (INVALID_GENESIS).
-     * 4. Each subsequent event.previousHash must match the preceding event.currentHash (PREVIOUS_HASH_MISMATCH).
-     * 5. Recomputed SHA-256 hash must match event.currentHash (CURRENT_HASH_MISMATCH).
+     * 3. First event previousHash must equal [genesisHash] (INVALID_GENESIS).
+     * 4. Sequence numbers must run from 1 with no gaps (SEQUENCE_GAP).
+     * 5. Each subsequent event.previousHash must match the preceding event.currentHash (PREVIOUS_HASH_MISMATCH).
+     * 6. Recomputed hash must match event.currentHash (CURRENT_HASH_MISMATCH).
      *
      * @return [IntegrityResult] with detailed outcome, corrupted event ID, and failure reason.
      */
-    fun verifyChain(events: List<TemperatureEvent>): IntegrityResult {
+    fun verifyChain(events: List<TemperatureEvent>, genesisHash: String = UNBOUND_GENESIS): IntegrityResult {
         if (events.isEmpty()) {
             return IntegrityResult(
                 valid = false,
                 reason = IntegrityFailureReason.EMPTY_CHAIN,
-                message = "Hash chain is empty."
+                message = "No readings to verify."
             )
         }
 
@@ -107,18 +128,27 @@ object HashChainService {
 
         // 2. Genesis hash check on the first event
         val firstEvent = events[0]
-        if (firstEvent.previousHash != GENESIS_HASH) {
+        if (firstEvent.previousHash != genesisHash) {
             return IntegrityResult(
                 valid = false,
                 corruptedEventId = firstEvent.id,
                 reason = IntegrityFailureReason.INVALID_GENESIS,
-                message = "First event ${firstEvent.id} has invalid genesis hash: expected '$GENESIS_HASH', found '${firstEvent.previousHash}'."
+                message = "First event ${firstEvent.id} does not start from this shipment's genesis."
             )
         }
 
-        // 3. Continuity and cryptographic digest verification
+        // 3. Continuity and digest verification
         for (i in events.indices) {
             val current = events[i]
+
+            if (current.seq != i + 1L) {
+                return IntegrityResult(
+                    valid = false,
+                    corruptedEventId = current.id,
+                    reason = IntegrityFailureReason.SEQUENCE_GAP,
+                    message = "Expected reading ${i + 1} but found ${current.seq}."
+                )
+            }
 
             // Check previousHash link continuity
             if (i > 0) {
@@ -133,32 +163,59 @@ object HashChainService {
                 }
             }
 
-            // Check recomputed SHA-256 hash match
+            // Check recomputed hash match
             val recomputedHash = createHash(current, current.previousHash)
             if (recomputedHash != current.currentHash) {
                 return IntegrityResult(
                     valid = false,
                     corruptedEventId = current.id,
                     reason = IntegrityFailureReason.CURRENT_HASH_MISMATCH,
-                    message = "Cryptographic integrity failure at event ${current.id}: recomputed hash ($recomputedHash) does not match stored currentHash (${current.currentHash})."
+                    message = "Reading ${current.id} does not match its hash."
                 )
             }
         }
 
-        return IntegrityResult(
-            valid = true,
-            message = "SHA-256 hash chain verified successfully (${events.size} telemetry blocks verified)."
-        )
+        return IntegrityResult(valid = true, message = "${events.size} readings form one unbroken chain.")
     }
 
     /**
      * Identifies and returns the first corrupted TemperatureEvent in the chain, or null if valid.
      */
-    fun findCorruptedEvent(events: List<TemperatureEvent>): TemperatureEvent? {
-        val result = verifyChain(events)
+    fun findCorruptedEvent(events: List<TemperatureEvent>, genesisHash: String = UNBOUND_GENESIS): TemperatureEvent? {
+        val result = verifyChain(events, genesisHash)
         if (result.valid || result.corruptedEventId == null) {
             return null
         }
         return events.firstOrNull { it.id == result.corruptedEventId }
     }
+
+    private fun sha256(write: CanonicalWriter.() -> Unit): String {
+        val bytes = CanonicalWriter().apply(write).toByteArray()
+        return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    }
+
+    private class CanonicalWriter {
+        private val out = ByteArrayOutputStream()
+
+        fun version() = out.write(CHAIN_VERSION)
+
+        fun text(value: String) {
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            int32(bytes.size)
+            out.write(bytes)
+        }
+
+        fun int32(value: Int) = out.write(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(value).array())
+
+        fun int64(value: Long) = out.write(ByteBuffer.allocate(Long.SIZE_BYTES).putLong(value).array())
+
+        fun hash(hex: String) {
+            require(hex.length == HASH_HEX_LENGTH) { "A hash is $HASH_HEX_LENGTH hex characters." }
+            out.write(ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() })
+        }
+
+        fun toByteArray(): ByteArray = out.toByteArray()
+    }
+
+    private const val HASH_HEX_LENGTH = 64
 }

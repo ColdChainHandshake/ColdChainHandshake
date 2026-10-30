@@ -1,5 +1,6 @@
 package com.coldchain.handshake.data.local.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -7,8 +8,7 @@ import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 
 /**
- * Room entity representing an immutable thermal logging event in the hash-chain.
- * Must remain append-only to preserve cryptographic integrity.
+ * Room entity representing one reading in a shipment's chain. Readings are only ever added.
  */
 @Entity(
     tableName = "temperature_events",
@@ -26,7 +26,9 @@ data class TemperatureEventEntity(
     val temperature: Double,
     val previousHash: String,
     val currentHash: String,
-    val syncStatus: SyncStatus
+    val syncStatus: SyncStatus,
+    @ColumnInfo(defaultValue = "0")
+    val seq: Long = 0L
 )
 
 fun TemperatureEventEntity.toDomain(): TemperatureEvent = TemperatureEvent(
@@ -37,7 +39,8 @@ fun TemperatureEventEntity.toDomain(): TemperatureEvent = TemperatureEvent(
     temperature = temperature,
     previousHash = previousHash,
     currentHash = currentHash,
-    syncStatus = syncStatus
+    syncStatus = syncStatus,
+    seq = seq
 )
 
 fun TemperatureEvent.toEntity(): TemperatureEventEntity = TemperatureEventEntity(
@@ -48,5 +51,6 @@ fun TemperatureEvent.toEntity(): TemperatureEventEntity = TemperatureEventEntity
     temperature = temperature,
     previousHash = previousHash,
     currentHash = currentHash,
-    syncStatus = syncStatus
+    syncStatus = syncStatus,
+    seq = seq
 )

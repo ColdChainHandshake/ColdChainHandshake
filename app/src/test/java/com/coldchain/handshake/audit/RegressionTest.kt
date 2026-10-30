@@ -1,6 +1,9 @@
 package com.coldchain.handshake.audit
 
 import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.crypto.IntegrityVerificationState
+import com.coldchain.handshake.crypto.ServerChainHead
+import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
@@ -17,11 +20,12 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Bugs found in the code review, now fixed. These started in [AuditFindingsTest], asserting that each
- * weakness was present, and were flipped when the fix landed. Numbers match the review's findings.
+ * Bugs found in the code review, now fixed. These started as tests asserting that each weakness was
+ * present, and were flipped when the fix landed. Numbers match the review's findings.
  */
 class RegressionTest {
 
@@ -41,6 +45,37 @@ class RegressionTest {
                 syncStatus = SyncStatus.PENDING
             )
         }
+
+    @Test
+    fun finding2_truncatingTheTailOfTheChainIsCaughtAgainstTheServer() {
+        // 6 safe readings followed by 8 hot readings (a real >5 min breach)
+        val chain = HashChainService.buildChain(rawEvents(List(6) { 5.0 } + List(8) { 10.5 }))
+        val server = ServerChainHead(chain.last().currentHash, chain.size.toLong())
+        assertTrue(BreachDetector.evaluateTelemetry(chain).hasBreach)
+
+        // Dropping the hot tail still leaves a chain that is consistent with itself
+        val truncated = chain.take(6)
+        assertTrue(HashChainService.verifyChain(truncated).valid)
+
+        val result = ShipmentIntegrityEvaluator.evaluate(truncated, serverHead = server)
+        assertEquals(IntegrityVerificationState.TAMPER_DETECTED, result.state)
+        assertFalse(result.isEligibleForHandover)
+    }
+
+    @Test
+    fun finding2_rewritingAndReHashingTheWholeChainIsCaughtAgainstTheServer() {
+        val original = HashChainService.buildChain(rawEvents(List(6) { 5.0 } + List(8) { 10.5 }))
+        val server = ServerChainHead(original.last().currentHash, original.size.toLong())
+
+        // Anyone holding the data can edit values and recompute every hash, because no key is involved
+        val forged = HashChainService.buildChain(original.map { it.copy(temperature = 5.0) })
+        assertTrue(HashChainService.verifyChain(forged).valid)
+        assertTrue(BreachDetector.evaluateTelemetry(forged).temperaturePassed)
+
+        val result = ShipmentIntegrityEvaluator.evaluate(forged, serverHead = server)
+        assertEquals(IntegrityVerificationState.TAMPER_DETECTED, result.state)
+        assertFalse(result.isEligibleForHandover)
+    }
 
     @Test
     fun finding3_freezingFailsAFreezeSensitiveProduct() {

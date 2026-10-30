@@ -27,7 +27,7 @@ import com.coldchain.handshake.data.local.dao.ChaosEventDao
         HandoverEntity::class,
         ChaosEventEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(RoomTypeConverters::class)

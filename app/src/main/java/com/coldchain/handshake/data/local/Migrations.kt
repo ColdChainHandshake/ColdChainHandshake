@@ -19,3 +19,14 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         db.execSQL("ALTER TABLE handovers ADD COLUMN shakeTest TEXT NOT NULL DEFAULT 'NOT_DONE'")
     }
 }
+
+/**
+ * Adds what chain version 2 needs. Readings already on a device keep their values and old hashes.
+ * They have no sequence numbers, so they won't verify as version 2 chains, and they stay readable.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE temperature_events ADD COLUMN seq INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE shipments ADD COLUMN genesisHash TEXT")
+    }
+}

@@ -183,7 +183,7 @@ class FullAutonomousColdChainE2ETest {
         assertEquals(3, initialEvents.size)
         val initialIntegrity = HashChainService.verifyChain(initialEvents)
         assertTrue("Hash chain must be cryptographically valid", initialIntegrity.valid)
-        assertEquals(HashChainService.GENESIS_HASH, initialEvents[0].previousHash)
+        assertEquals(HashChainService.UNBOUND_GENESIS, initialEvents[0].previousHash)
         assertEquals(initialEvents[0].currentHash, initialEvents[1].previousHash)
         assertEquals(initialEvents[1].currentHash, initialEvents[2].previousHash)
 

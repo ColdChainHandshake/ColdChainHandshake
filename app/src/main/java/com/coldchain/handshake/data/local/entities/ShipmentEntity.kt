@@ -26,7 +26,8 @@ data class ShipmentEntity(
     val lastModifiedTimestamp: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "vaccine-2-8-freeze-sensitive")
     val productProfileId: String = ProductProfiles.DEFAULT.id,
-    val journeyStartedAt: Long? = null
+    val journeyStartedAt: Long? = null,
+    val genesisHash: String? = null
 )
 
 fun ShipmentEntity.toDomain(): Shipment = Shipment(
@@ -38,7 +39,8 @@ fun ShipmentEntity.toDomain(): Shipment = Shipment(
     workerId = workerId,
     status = status,
     productProfileId = productProfileId,
-    journeyStartedAt = journeyStartedAt
+    journeyStartedAt = journeyStartedAt,
+    genesisHash = genesisHash
 )
 
 fun Shipment.toEntity(syncStatus: SyncStatus = SyncStatus.PENDING): ShipmentEntity = ShipmentEntity(
@@ -52,5 +54,6 @@ fun Shipment.toEntity(syncStatus: SyncStatus = SyncStatus.PENDING): ShipmentEnti
     syncStatus = syncStatus,
     lastModifiedTimestamp = System.currentTimeMillis(),
     productProfileId = productProfileId,
-    journeyStartedAt = journeyStartedAt
+    journeyStartedAt = journeyStartedAt,
+    genesisHash = genesisHash
 )
