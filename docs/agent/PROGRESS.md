@@ -90,7 +90,7 @@ Not proven yet: nothing has run on a phone or emulator. Screens are checked by R
 
 ## Phase 3: Toolchain upgrade and server trust
 
-- [ ] 3.0 Toolchain: Kotlin 2.x, KSP, AGP 9, Gradle, Java 17, SDK 36, Compose BOM, Room 2.8, supabase-kt 3.x
+- [x] 3.0 Toolchain: Kotlin 2.x, KSP, AGP 9, Gradle, Java 17, SDK 36, Compose BOM, Room 2.8, supabase-kt 3.x. Done in `03ddefc`, `4db626c` and the supabase-kt commit. targetSdk 36, compileSdk 37, see `DECISIONS.md`
 - [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out
 - [ ] 3.2 Data-model migrations, RLS, RPCs
 - [ ] 3.3 `confirm_handover`

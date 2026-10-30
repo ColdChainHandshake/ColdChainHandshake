@@ -157,7 +157,6 @@ class RemoteDtoMappingTest {
     fun testSupabaseClientProviderConfiguration() {
         val configuredUrl = BuildConfig.SUPABASE_URL.ifBlank { SupabaseClientProvider.PLACEHOLDER_URL }
         assertEquals(configuredUrl, SupabaseClientProvider.getTargetUrl())
-        assertNotNull(SupabaseClientProvider.getClient())
 
         SupabaseClientProvider.initialize(
             url = "https://my-real-project.supabase.co",

@@ -36,50 +36,50 @@ open class SupabaseRemoteDataSource(
 
     open suspend fun upsertShipments(shipments: List<RemoteShipmentDto>): Result<Unit> = runCatching {
         if (shipments.isEmpty()) return@runCatching
-        client.postgrest.from(TABLE_SHIPMENTS).upsert(shipments, onConflict = "id")
+        client.postgrest.from(TABLE_SHIPMENTS).upsert(shipments) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertShipment(shipment: RemoteShipmentDto): Result<Unit> = runCatching {
-        client.postgrest.from(TABLE_SHIPMENTS).upsert(shipment, onConflict = "id")
+        client.postgrest.from(TABLE_SHIPMENTS).upsert(shipment) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertTemperatureEvents(events: List<RemoteTemperatureEventDto>): Result<Unit> = runCatching {
         if (events.isEmpty()) return@runCatching
         // Idempotent upsert preserves append-only event stream and avoids duplicate rows on retry.
-        client.postgrest.from(TABLE_TEMPERATURE_EVENTS).upsert(events, onConflict = "id")
+        client.postgrest.from(TABLE_TEMPERATURE_EVENTS).upsert(events) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertTemperatureEvent(event: RemoteTemperatureEventDto): Result<Unit> = runCatching {
-        client.postgrest.from(TABLE_TEMPERATURE_EVENTS).upsert(event, onConflict = "id")
+        client.postgrest.from(TABLE_TEMPERATURE_EVENTS).upsert(event) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertAlerts(alerts: List<RemoteAlertDto>): Result<Unit> = runCatching {
         if (alerts.isEmpty()) return@runCatching
-        client.postgrest.from(TABLE_ALERTS).upsert(alerts, onConflict = "id")
+        client.postgrest.from(TABLE_ALERTS).upsert(alerts) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertAlert(alert: RemoteAlertDto): Result<Unit> = runCatching {
-        client.postgrest.from(TABLE_ALERTS).upsert(alert, onConflict = "id")
+        client.postgrest.from(TABLE_ALERTS).upsert(alert) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertHandover(handover: RemoteHandoverDto): Result<Unit> = runCatching {
-        client.postgrest.from(TABLE_HANDOVERS).upsert(handover, onConflict = "id")
+        client.postgrest.from(TABLE_HANDOVERS).upsert(handover) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertShipmentLocation(location: RemoteShipmentLocationDto): Result<Unit> = runCatching {
-        client.postgrest.from(TABLE_SHIPMENT_LOCATIONS).upsert(location, onConflict = "id")
+        client.postgrest.from(TABLE_SHIPMENT_LOCATIONS).upsert(location) { onConflict = "id" }
         Unit
     }
 
     open suspend fun upsertCustody(custody: RemoteShipmentCustodyDto): Result<Unit> = runCatching {
-        client.postgrest.from(TABLE_SHIPMENT_CUSTODY).upsert(custody, onConflict = "shipment_id")
+        client.postgrest.from(TABLE_SHIPMENT_CUSTODY).upsert(custody) { onConflict = "shipment_id" }
         Unit
     }
 
@@ -126,7 +126,7 @@ open class SupabaseRemoteDataSource(
 
         // 1. Execute UPSERT
         val upsertResult = runCatching {
-            client.postgrest.from(TABLE_SHIPMENT_CUSTODY).upsert(custodyDto, onConflict = "shipment_id")
+            client.postgrest.from(TABLE_SHIPMENT_CUSTODY).upsert(custodyDto) { onConflict = "shipment_id" }
             Unit
         }
 

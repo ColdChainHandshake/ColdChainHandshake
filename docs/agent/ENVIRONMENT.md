@@ -11,7 +11,7 @@ Machine: Windows 11 Home (10.0.26200), Git Bash and PowerShell 5.1.
 | Pinned `org.gradle.java.home` | **dead path** | Red Hat Java extension moved from 1.56.0 (JRE 21) to 1.58.0 (JRE 25) |
 | JDK used for this work | Temurin 17.0.20.1+1 | Portable, `D:\cch-tools\jdk-17.0.20.1+1`, SHA-256 checked against the Adoptium API. PATH and registry untouched |
 | `ANDROID_HOME` | **unset** | SDK is at `%LOCALAPPDATA%\Android\Sdk` |
-| SDK platforms / build-tools | android-34 / 34.0.0 | |
+| SDK platforms / build-tools | android-34, 36, 36-2, 37.0 / 34.0.0, 36.0.0 | 36 and later added for task 3.0 |
 | Emulator, system images, AVDs | **none** | `emulator/` and `system-images/` are absent |
 | SDK command-line tools | **none** | No `sdkmanager`. The `android` CLI installs SDK packages instead |
 | `adb devices` | no devices | adb works but is not on PATH: `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` |
