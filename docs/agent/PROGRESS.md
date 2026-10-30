@@ -1,6 +1,6 @@
 # Progress
 
-**Next action:** Gate 2 review, then Phase 3 task 3.0.
+**Next action:** task 3.5 (clock checks and interim signing), then connect the app to the server: 3.2, 3.3 and 3.4 are done on the server side only. Act on the Gate 2 review when it reports.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
@@ -86,7 +86,7 @@ Review mutations replayed in rolled-back transactions: 13 of 13 caught
 
 Not proven yet: nothing has run on a phone or emulator. Screens are checked by Robolectric and the compiler only, and WorkManager timing by its test harness. The CI workflow has never run on GitHub.
 
-**Gate 2:** domain and screen work done; fresh-subagent review running.
+**Gate 2:** domain and screen work done; fresh-subagent review still running, interrupted twice by service limits. `gate-2` is not tagged until it reports and its findings are fixed. The tag will then include the Phase 3 commits made in the meantime.
 
 ## Phase 3: Toolchain upgrade and server trust
 
@@ -101,14 +101,29 @@ BUILD SUCCESSFUL in 3m 26s
 Debug tests 271 failures 0 errors 0 | Release tests 243 failures 0 errors 0
 ```
 
-- [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out
-- [ ] 3.2 Data-model migrations, RLS, RPCs
-- [ ] 3.3 `confirm_handover`
-- [ ] 3.4 Chain v2 with shared vectors and SQL
-- [ ] 3.5 Clock-skew detection and Keystore interim signing
-- [ ] 3.6 pgTAP attack tests and client-side JVM tests
+- [x] 3.0b Extract `:core-domain`. Done in `7f89d30`, moved here from Phase 2
+- [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out. Client libraries are in; the `profiles` table and `complete_profile` exist; no screens yet
+- [ ] 3.2 Data-model migrations, RLS, RPCs. Server done in `adf006d`, `33aeb1c` and `60ed408`. Status: `doing`, the app still calls the legacy tables, so sync fails until it moves over
+- [ ] 3.3 `confirm_handover`. Server done in the same commits. The checkboxes are still in the app, so finding 4 stays open
+- [ ] 3.4 Chain v2 with shared vectors and SQL. Domain, Room and SQL done in `91fbf99`. Uploading through `append_readings` is not done
+- [ ] 3.5 Clock-skew detection and Keystore interim signing. Server side done (`clock_ahead`, signature required); client not started
+- [ ] 3.6 pgTAP attack tests and client-side JVM tests. Attack tests done; client tests done for the chain
 
-**Gate 3:** not started.
+Proof so far:
+
+```text
+npx supabase test db        Files=4, Tests=232 ... Result: PASS
+npx supabase db advisors --local --fail-on info     No issues found
+Each server protection removed in turn, in a rolled-back transaction: 63 of 63 fail a test, all applied
+Chain vectors: standalone Python, Postgres and Kotlin agree on all 18
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug
+BUILD SUCCESSFUL in 2m 40s
+Debug tests 272 failures 0 errors 0 | Release tests 243 failures 0 errors 0 | core-domain 23 tests, no failures
+```
+
+Known gap: the app can't sync at the moment. The legacy tables are locked and renamed, and the app has not moved to the new functions yet. It still works on one device. The last commit's automated security review did not finish (HTTP 429).
+
+**Gate 3:** not started. A real two-account run needs the dev project (`HANDOFF.md` Q1) and an emulator or phones.
 
 ## Phase 4: Logger as witness
 

@@ -12,6 +12,8 @@ flag, because that is your access decision.
 
 The database also timed out on `list_tables` and `list_migrations`, so the project may be paused.
 
+Nothing has been applied to this project. The migrations are tested on a local database only.
+
 1. Open https://supabase.com/dashboard/project/yjvoxozaoiarwbusyqke and restore the project if it is paused.
 2. Confirm this is the intended dev project. It is not the demo project (`ljqwaqesiszczixbclwg`).
 3. Choose one:
