@@ -15,6 +15,9 @@ if (localPropertiesFile.exists()) {
 def supabaseUrl = localProperties.getProperty('supabase.url', 'https://placeholder-coldchain.supabase.co')
 def supabaseAnonKey = localProperties.getProperty('supabase.anon.key', 'placeholder-anon-key')
 
+// Live tests need a target named explicitly, so they can never pick one up from local.properties.
+def liveTestsEnabled = System.getenv('CCH_LIVE_SUPABASE_URL') && System.getenv('CCH_LIVE_SUPABASE_KEY')
+
 android {
     namespace 'com.coldchain.handshake'
     compileSdk 34
@@ -67,6 +70,20 @@ android {
     packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+
+    testOptions {
+        unitTests.all { test ->
+            if (!liveTestsEnabled) {
+                test.filter.excludeTestsMatching '*LiveSupabaseIntegrationTest'
+                // A dead proxy, so no unit test can reach a real server by accident.
+                test.systemProperty 'http.proxyHost', '127.0.0.1'
+                test.systemProperty 'http.proxyPort', '9'
+                test.systemProperty 'https.proxyHost', '127.0.0.1'
+                test.systemProperty 'https.proxyPort', '9'
+                test.systemProperty 'http.nonProxyHosts', ''
+            }
         }
     }
 }

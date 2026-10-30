@@ -1,5 +1,6 @@
 package com.coldchain.handshake.data.remote
 
+import com.coldchain.handshake.BuildConfig
 import com.coldchain.handshake.data.local.entities.toEntity
 import com.coldchain.handshake.data.remote.dto.RemoteAlertDto
 import com.coldchain.handshake.data.remote.dto.RemoteHandoverDto
@@ -154,7 +155,8 @@ class RemoteDtoMappingTest {
 
     @Test
     fun testSupabaseClientProviderConfiguration() {
-        assertEquals("https://ljqwaqesiszczixbclwg.supabase.co", SupabaseClientProvider.getTargetUrl())
+        val configuredUrl = BuildConfig.SUPABASE_URL.ifBlank { SupabaseClientProvider.PLACEHOLDER_URL }
+        assertEquals(configuredUrl, SupabaseClientProvider.getTargetUrl())
         assertNotNull(SupabaseClientProvider.getClient())
 
         SupabaseClientProvider.initialize(
@@ -165,7 +167,7 @@ class RemoteDtoMappingTest {
         assertEquals("https://my-real-project.supabase.co", SupabaseClientProvider.getTargetUrl())
 
         SupabaseClientProvider.reset()
-        assertEquals("https://ljqwaqesiszczixbclwg.supabase.co", SupabaseClientProvider.getTargetUrl())
+        assertEquals(configuredUrl, SupabaseClientProvider.getTargetUrl())
     }
 
     @Test

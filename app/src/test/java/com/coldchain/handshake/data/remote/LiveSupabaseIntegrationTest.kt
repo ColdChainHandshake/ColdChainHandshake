@@ -35,14 +35,23 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 
 /**
- * LIVE Integration Test Suite executing REAL cloud writes and reads
- * against the live Supabase instance using production SupabaseRemoteDataSource.
+ * LIVE Integration Test Suite executing REAL cloud writes and deletes using production
+ * SupabaseRemoteDataSource.
+ *
+ * Opt-in only. Set CCH_LIVE_SUPABASE_URL and CCH_LIVE_SUPABASE_KEY to a project you own; without
+ * them `app/build.gradle` excludes this class. It asserts that anon can read and write, so it
+ * fails against any database with `0001_lockdown` applied, and it is replaced in Phase 3.
  */
 class LiveSupabaseIntegrationTest {
+
+    private companion object {
+        const val DEMO_PROJECT_REF = "ljqwaqesiszczixbclwg"
+    }
 
     private lateinit var realDataSource: SupabaseRemoteDataSource
     private val testPrefix = "live-test-"
@@ -58,13 +67,22 @@ class LiveSupabaseIntegrationTest {
 
     @Before
     fun setup() {
+        val url = System.getenv("CCH_LIVE_SUPABASE_URL")
+        val key = System.getenv("CCH_LIVE_SUPABASE_KEY")
+        assumeTrue("Live test target not set", !url.isNullOrBlank() && !key.isNullOrBlank())
+        check(!url.contains(DEMO_PROJECT_REF)) { "Live tests must never run against the demo project" }
+
+        SupabaseClientProvider.initialize(url, key)
         realDataSource = SupabaseRemoteDataSource()
         cleanupTestData()
     }
 
     @After
     fun tearDown() {
-        cleanupTestData()
+        if (::realDataSource.isInitialized) {
+            cleanupTestData()
+        }
+        SupabaseClientProvider.reset()
     }
 
     private fun cleanupTestData() = runBlocking {
