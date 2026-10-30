@@ -1,6 +1,8 @@
 package com.coldchain.handshake.repository
 
+import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.crypto.ServerChainHead
+import com.coldchain.handshake.crypto.ShipmentManifest
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.HandoverVerdict
@@ -29,7 +31,30 @@ data class RemoteShipment(
     val origin: String,
     val destination: String,
     val status: ShipmentStatus,
-    val genesisHash: String?
+    val createdAtMs: Long,
+    val journeyStartedAt: Long?
+) {
+
+    /**
+     * Derived from the manifest, so a member never has to take the server's word for where the chain
+     * starts.
+     */
+    val genesisHash: String
+        get() = HashChainService.genesisHash(
+            ShipmentManifest(id, senderId, productProfileId, loggerId, createdAtMs)
+        )
+}
+
+/**
+ * One upload, as the server stored it. [publicKey] is null if the uploader's key can't be read.
+ */
+data class UploadedBatch(
+    val firstSeq: Long,
+    val lastSeq: Long,
+    val headHash: String,
+    val deviceId: String,
+    val signature: String?,
+    val publicKey: String?
 )
 
 data class CustodyState(
@@ -120,6 +145,8 @@ interface ColdChainRemote {
      * every reading after [afterSeq], however many that takes the server to send.
      */
     suspend fun getReadingsAfter(shipmentId: String, afterSeq: Long): Result<List<TemperatureEvent>>
+
+    suspend fun getBatches(shipmentId: String): Result<List<UploadedBatch>>
 
     suspend fun appendReadings(
         shipmentId: String,

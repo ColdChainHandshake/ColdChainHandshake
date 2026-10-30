@@ -2,7 +2,6 @@ package com.coldchain.handshake.repository
 
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.crypto.ServerChainHead
-import com.coldchain.handshake.crypto.ShipmentManifest
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.HandoverVerdict
@@ -26,6 +25,7 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     val confirmations = mutableListOf<HandoverConfirmation>()
     val gpsPoints = mutableListOf<GpsPoint>()
     val signatures = mutableListOf<String>()
+    val batches = mutableMapOf<String, MutableList<UploadedBatch>>()
     val devices = mutableMapOf<String, String>()
     var appendCalls = 0
     var readCalls = 0
@@ -40,10 +40,11 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     var failReads: Throwable? = null
 
     fun seedShipment(id: String, custodian: String = currentUser, logger: String = "LOG-1"): String {
-        val genesis = HashChainService.genesisHash(
-            ShipmentManifest(id, "sender", "profile", logger, 1_700_000_000_000L)
+        val shipment = RemoteShipment(
+            id, "sender", "profile", logger, "A", "B", ShipmentStatus.IN_TRANSIT, CREATED_AT, CREATED_AT
         )
-        shipments[id] = RemoteShipment(id, "sender", "profile", logger, "A", "B", ShipmentStatus.IN_TRANSIT, genesis)
+        val genesis = shipment.genesisHash
+        shipments[id] = shipment
         heads[id] = ServerChainHead(genesis, 0)
         readings[id] = mutableListOf()
         custody[id] = CustodyState(1, custodian)
@@ -72,7 +73,7 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         origin: String,
         destination: String
     ) = call {
-        val created = CreatedShipment(seedShipment(id, currentUser, loggerId), 1_700_000_000_000L, "sender")
+        val created = CreatedShipment(seedShipment(id, currentUser, loggerId), CREATED_AT, "sender")
         custody.remove(id)
         created
     }
@@ -98,6 +99,8 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         readCalls++
         readings[shipmentId].orEmpty().filter { it.seq > afterSeq }
     }
+
+    override suspend fun getBatches(shipmentId: String) = call { batches[shipmentId].orEmpty().toList() }
 
     override suspend fun appendReadings(
         shipmentId: String,
@@ -127,6 +130,8 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
             this.readings.getValue(shipmentId).addAll(readings)
             heads[shipmentId] = running
             signatures += signature
+            batches.getOrPut(shipmentId) { mutableListOf() } +=
+                UploadedBatch(readings.first().seq, running.count, running.headHash, deviceId, signature, devices[deviceId])
             running
         }
 
@@ -178,5 +183,9 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
 
     override suspend fun getLatestGpsPoint(shipmentId: String) = call {
         gpsPoints.filter { it.shipmentId == shipmentId }.maxByOrNull { it.deviceTimestamp }
+    }
+
+    private companion object {
+        const val CREATED_AT = 1_700_000_000_000L
     }
 }
