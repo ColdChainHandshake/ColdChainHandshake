@@ -36,6 +36,9 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     /** When set, the next append is stored but its reply is lost, as a dropped connection would. */
     var loseNextAppendReply = false
 
+    /** When set, fetching readings fails this way while other calls still work. */
+    var failReads: Throwable? = null
+
     fun seedShipment(id: String, custodian: String = currentUser, logger: String = "LOG-1"): String {
         val genesis = HashChainService.genesisHash(
             ShipmentManifest(id, "sender", "profile", logger, 1_700_000_000_000L)
@@ -91,6 +94,7 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     override suspend fun getChainHead(shipmentId: String) = call { heads[shipmentId] }
 
     override suspend fun getReadingsAfter(shipmentId: String, afterSeq: Long) = call {
+        failReads?.let { throw it }
         readCalls++
         readings[shipmentId].orEmpty().filter { it.seq > afterSeq }
     }
@@ -136,7 +140,7 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     override suspend fun confirmHandover(confirmation: HandoverConfirmation) = call {
         val head = heads[confirmation.shipmentId] ?: refuse(RemoteRejection.NOT_ALLOWED, "Unknown shipment.")
         if (confirmation.headHash != head.headHash) refuse(RemoteRejection.STALE_HEAD, "The history has moved on.")
-        if (confirmations.any { it.shipmentId == confirmation.shipmentId && it.headHash == it.headHash && it.deviceId == confirmation.deviceId }) {
+        if (confirmations.any { it.shipmentId == confirmation.shipmentId && it.headHash == confirmation.headHash && it.deviceId == confirmation.deviceId }) {
             refuse(RemoteRejection.ALREADY_CONFIRMED, "Already confirmed.")
         }
         confirmations += confirmation

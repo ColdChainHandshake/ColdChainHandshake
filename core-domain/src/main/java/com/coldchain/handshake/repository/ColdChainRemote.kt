@@ -116,7 +116,8 @@ interface ColdChainRemote {
     suspend fun getChainHead(shipmentId: String): Result<ServerChainHead?>
 
     /**
-     * Fetches only what's new, so watching a shipment doesn't re-download its whole history.
+     * Fetches only what's new, so watching a shipment doesn't re-download its whole history. Returns
+     * every reading after [afterSeq], however many that takes the server to send.
      */
     suspend fun getReadingsAfter(shipmentId: String, afterSeq: Long): Result<List<TemperatureEvent>>
 

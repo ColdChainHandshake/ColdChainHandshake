@@ -111,6 +111,68 @@ class ReadingUploaderTest {
     }
 
     @Test
+    fun anOlderReadingThatDiffersFromTheServerIsNotMarkedAsUploaded() = runBlocking {
+        val events = chain(3)
+        uploader().upload("SHIP-1", events).getOrThrow()
+        val edited = events.map { if (it.seq == 2L) it.copy(currentHash = "f".repeat(64)) else it }
+
+        val failure = uploader().upload("SHIP-1", edited).exceptionOrNull()
+
+        assertEquals(2L, (failure as HistoryConflict).seq)
+    }
+
+    @Test
+    fun aReadingTheServerDoesNotActuallyHoldIsNotMarkedAsUploaded() = runBlocking {
+        val events = chain(3)
+        uploader().upload("SHIP-1", events).getOrThrow()
+        server.readings.getValue("SHIP-1").removeAll { it.seq == 2L }
+
+        val failure = uploader().upload("SHIP-1", events).exceptionOrNull()
+
+        assertEquals(2L, (failure as HistoryConflict).seq)
+    }
+
+    @Test
+    fun aFailedComparisonWithTheServerReportsNothingAsUploaded() = runBlocking {
+        val events = chain(3)
+        uploader().upload("SHIP-1", events).getOrThrow()
+        server.failReads = IllegalStateException("Connection dropped")
+
+        assertTrue(uploader().upload("SHIP-1", events).isFailure)
+    }
+
+    @Test
+    fun aSequenceBelowOneIsRefusedAndNeverSigned() = runBlocking {
+        val invalid = chain(1).single().copy(seq = 0L)
+
+        assertTrue(uploader().upload("SHIP-1", listOf(invalid)).isFailure)
+        assertTrue(signer.signed.isEmpty())
+    }
+
+    @Test
+    fun aReadingThatDoesNotFollowTheServersHeadIsNeverSigned() = runBlocking {
+        val detached = chain(2).drop(1)
+
+        val failure = uploader().upload("SHIP-1", detached).exceptionOrNull()
+
+        assertEquals(2L, (failure as HistoryConflict).seq)
+        assertTrue(signer.signed.isEmpty())
+        assertEquals(0, server.appendCalls)
+    }
+
+    @Test
+    fun aMissingReadingBetweenTheHeadAndTheQueueIsNeverSigned() = runBlocking {
+        val events = chain(4)
+        uploader().upload("SHIP-1", events.take(1)).getOrThrow()
+        signer.signed.clear()
+
+        val failure = uploader().upload("SHIP-1", events.drop(2)).exceptionOrNull()
+
+        assertEquals(3L, (failure as HistoryConflict).seq)
+        assertTrue(signer.signed.isEmpty())
+    }
+
+    @Test
     fun losingCustodyStopsTheUpload() = runBlocking {
         server.custody["SHIP-1"] = CustodyState(2, "someone-else")
 
