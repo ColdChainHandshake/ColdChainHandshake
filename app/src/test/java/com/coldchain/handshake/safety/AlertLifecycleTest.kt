@@ -3,6 +3,7 @@ package com.coldchain.handshake.safety
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.TemperatureEvent
@@ -128,6 +129,55 @@ class AlertLifecycleTest {
         assertEquals("SHIP-1:LOGGER_DISCONNECT:$t0", alert.id)
     }
 
+    @Test
+    fun aDisconnectAlertNotifiesOnce() = runBlocking {
+        engine.handleLoggerDisconnect("SHIP-1", "LOG-1", timestamp = t0)
+        engine.handleLoggerDisconnect("SHIP-1", "LOG-1", timestamp = t0)
+
+        assertEquals(1, notifier.raised.size)
+    }
+
+    @Test
+    fun aGapAlertRecordsWhenTheGapBegan() = runBlocking {
+        engine.processTelemetryAndEnforceSafety(
+            shipment,
+            steadyReadings(t0, 0, 5.0) + steadyReadings(t0 + 60 * minute, 0, 5.0)
+        )
+
+        assertEquals(t0, alerts.savedAlerts.single().excursionStart)
+    }
+
+    @Test
+    fun acknowledgingRecordsWhen() {
+        val acknowledged = AlertEscalationEngine.acknowledgeAlert(alert(), timestamp = t0 + minute)
+
+        assertEquals(t0 + minute, acknowledged.acknowledgedAt)
+    }
+
+    @Test
+    fun theEscalationIntervalIsPinned() {
+        assertEquals(15 * minute, AlertEscalationEngine.ESCALATION_INTERVAL_MS)
+    }
+
+    @Test
+    fun theEngineAppliesTheShipmentsOwnProfile() = runBlocking {
+        val tolerant = shipment.copy(productProfileId = ProductProfiles.FREEZE_TOLERANT.id)
+        val frozen = hotThenSafe(t0, 2 * minute, -3.0)
+
+        val decision = engine.processTelemetryAndEnforceSafety(tolerant, frozen)
+
+        assertFalse(decision.evaluation.hasBreach)
+    }
+
+    @Test
+    fun theEngineMeasuresFromTheJourneyStart() = runBlocking {
+        val started = shipment.copy(journeyStartedAt = t0 - 60 * minute)
+
+        val decision = engine.evaluateShipment(started, steadyReadings(t0, 5 * minute, 5.0))
+
+        assertEquals(TemperatureVerdict.UNKNOWN, decision.evaluation.verdict)
+    }
+
     // Escalation timing
 
     @Test
@@ -199,6 +249,18 @@ class AlertLifecycleTest {
         assertEquals(EscalationLevel.SUPERVISOR, alerts.savedAlerts.single().escalationLevel)
         assertEquals(EscalationLevel.SUPERVISOR, notifier.escalated.single().escalationLevel)
         assertEquals(t0 + 2 * interval, nextCheck)
+    }
+
+    @Test
+    fun aBacklogOfAlertsNotifiesOncePerShipment() = runBlocking {
+        val interval = AlertEscalationEngine.ESCALATION_INTERVAL_MS
+        repeat(3) { alerts.saveAlert(alert().copy(id = "A-$it")) }
+        alerts.saveAlert(alert().copy(id = "B", shipmentId = "SHIP-2"))
+
+        AlertEscalationRunner(alerts, notifier) { t0 + interval }.run()
+
+        assertEquals(listOf("SHIP-1", "SHIP-2"), notifier.escalated.map { it.shipmentId }.sorted())
+        assertTrue(alerts.savedAlerts.all { it.escalationLevel == EscalationLevel.SUPERVISOR })
     }
 
     @Test

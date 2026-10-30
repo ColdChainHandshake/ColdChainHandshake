@@ -13,17 +13,20 @@ class AlertEscalationRunner(
 ) {
 
     /**
-     * Applies every escalation that is due.
+     * Applies every escalation that is due, notifying once per shipment.
      *
      * @return when the next escalation falls due, or null if none is pending.
      */
     suspend fun run(): Long? {
         val openAlerts = alertRepository.getOpenAlerts()
 
-        AlertEscalationEngine.dueEscalations(openAlerts, clock()).forEach { alert ->
-            if (alertRepository.escalateIfUnacknowledged(alert.id, alert.escalationLevel).getOrThrow()) {
-                alertNotifier.onAlertEscalated(alert)
-            }
+        val escalated = AlertEscalationEngine.dueEscalations(openAlerts, clock()).filter { alert ->
+            alertRepository.escalateIfUnacknowledged(alert.id, alert.escalationLevel).getOrThrow()
+        }
+
+        // A backlog after time away must not become hundreds of notifications at once.
+        escalated.groupBy { it.shipmentId }.values.forEach { alerts ->
+            alertNotifier.onAlertEscalated(alerts.maxBy { it.escalationLevel })
         }
 
         return AlertEscalationEngine.nextEscalationAt(alertRepository.getOpenAlerts())

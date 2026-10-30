@@ -58,7 +58,10 @@ class SafetyEngine(
      * - safe history -> true
      * - exactly on a limit -> true
      * - within the product's budget -> true
-     * - past the budget, or a gap in the record -> false
+     * - past the budget, or a gap between readings -> false
+     *
+     * This looks only at the readings given. The handover itself uses
+     * [BreachDetector.evaluateForHandover], which also covers the time since the last reading.
      */
     fun evaluateHandoverTemperatureSafety(shipment: Shipment, events: List<TemperatureEvent>): Boolean {
         return evaluateShipment(shipment, events).evaluation.temperaturePassed
@@ -77,13 +80,17 @@ class SafetyEngine(
      *    If required persistence repositories are unavailable, explicit failures are surfaced
      *    and [SafetyDecision.hasPersistenceFailure] will be true.
      * 5. Returns the resulting [SafetyDecision].
+     *
+     * @param windowEnd The time to evaluate up to. Without it, silence after the last reading can't be
+     *   seen, which is fine for a reading that just arrived and wrong for a timed check.
      */
     suspend fun processTelemetryAndEnforceSafety(
         shipment: Shipment,
         events: List<TemperatureEvent>,
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        windowEnd: Long? = null
     ): SafetyDecision {
-        val decision = evaluateShipment(shipment, events)
+        val decision = evaluateShipment(shipment, events, windowEnd)
         val alertSaveResult = saveNewAlerts(
             AlertEscalationEngine.alertsFor(shipment.id, decision.evaluation, timestamp)
         )

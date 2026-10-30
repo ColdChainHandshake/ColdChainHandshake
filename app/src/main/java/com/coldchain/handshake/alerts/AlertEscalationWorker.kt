@@ -8,11 +8,12 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.safety.AlertEscalationRunner
+import com.coldchain.handshake.safety.LoggerSilenceCheck
 import java.util.concurrent.TimeUnit
 
 /**
- * Applies due escalations, then books itself for the next one. All state is in the stored alerts,
- * so it recovers from process death and reboots.
+ * Looks for loggers that have gone quiet, applies due escalations, then books itself for the next
+ * time either could matter. All state is stored, so it recovers from process death and reboots.
  */
 class AlertEscalationWorker(
     context: Context,
@@ -24,8 +25,13 @@ class AlertEscalationWorker(
             alertRepository = RepositoryProvider.getAlertRepository(applicationContext),
             alertNotifier = AndroidAlertNotifier(applicationContext)
         )
+        val silenceCheck = LoggerSilenceCheck(
+            shipmentRepository = RepositoryProvider.getShipmentRepository(applicationContext),
+            telemetryRepository = RepositoryProvider.getTelemetryRepository(applicationContext),
+            safetyEngine = RepositoryProvider.safetyEngine
+        )
 
-        return runCatching { runner.run() }.fold(
+        return runCatching { listOfNotNull(silenceCheck.run(), runner.run()).minOrNull() }.fold(
             onSuccess = { nextCheck ->
                 nextCheck?.let { AlertEscalationScheduler.checkAt(applicationContext, it) }
                 Result.success()

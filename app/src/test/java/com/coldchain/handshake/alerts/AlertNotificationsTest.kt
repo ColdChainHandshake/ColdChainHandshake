@@ -4,18 +4,27 @@ import android.Manifest
 import android.app.Application
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.Configuration
 import androidx.work.ListenableWorker
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
+import com.coldchain.handshake.models.ProductProfiles
+import com.coldchain.handshake.models.Shipment
+import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.AlertEscalationEngine
 import com.coldchain.handshake.safety.FakeAlertRepository
+import com.coldchain.handshake.safety.FakeShipmentRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -26,6 +35,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -34,6 +44,8 @@ class AlertNotificationsTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val manager = context.getSystemService(NotificationManager::class.java)
     private val alerts = FakeAlertRepository()
+    private val shipments = FakeShipmentRepository()
+    private val telemetry = InMemoryTelemetryRepository()
 
     private fun alert(
         level: EscalationLevel = EscalationLevel.WORKER,
@@ -54,8 +66,11 @@ class AlertNotificationsTest {
 
     @Before
     fun setUp() {
-        WorkManagerTestInitHelper.initializeTestWorkManager(context)
-        RepositoryProvider.initialize(alertRepository = alerts)
+        WorkManagerTestInitHelper.initializeTestWorkManager(
+            context,
+            Configuration.Builder().setExecutor(SynchronousExecutor()).build()
+        )
+        RepositoryProvider.initialize(shipments, telemetry, alerts)
     }
 
     @After
@@ -139,6 +154,80 @@ class AlertNotificationsTest {
         val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
 
         assertEquals(ListenableWorker.Result.retry(), result)
+    }
+
+    @Test
+    fun aCheckBooksTheNextOneForWhenTheAlertFallsDue() = runBlocking {
+        alerts.saveAlert(alert())
+
+        AlertEscalationScheduler.checkNow(context)
+
+        val delay = awaitBookedDelay { it > 0 }
+        assertTrue("booked $delay", delay in 14 * 60_000L..15 * 60_000L)
+    }
+
+    @Test
+    fun checkingNowReplacesACheckBookedForLater() = runBlocking {
+        alerts.saveAlert(alert())
+        AlertEscalationScheduler.checkAt(context, System.currentTimeMillis() + 3_600_000L)
+
+        AlertEscalationScheduler.checkNow(context)
+
+        val delay = awaitBookedDelay { it in 1..15 * 60_000L }
+        assertTrue("booked $delay", delay <= 15 * 60_000L)
+    }
+
+    @Test
+    fun theManifestDeclaresTheNotificationPermission() {
+        val info = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+
+        assertTrue(Manifest.permission.POST_NOTIFICATIONS in info.requestedPermissions.orEmpty())
+    }
+
+    @Test
+    fun beforeAndroid13ANotificationNeedsNoRuntimePermission() {
+        shadowOf(context as Application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val actualSdk = Build.VERSION.SDK_INT
+        ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", 32)
+        try {
+            AndroidAlertNotifier(context).onAlertRaised(alert())
+        } finally {
+            ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", actualSdk)
+        }
+
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+    }
+
+    @Test
+    fun theWorkerRaisesAnAlertForAQuietLoggerAndKeepsWatching() = runBlocking {
+        val thirtyMinutesAgo = System.currentTimeMillis() - 30 * 60_000L
+        shipments.saveShipment(
+            Shipment(
+                "SHIP-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.IN_TRANSIT,
+                ProductProfiles.DEFAULT.id, thirtyMinutesAgo
+            )
+        )
+
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        assertEquals(AlertType.DATA_GAP, alerts.savedAlerts.single().type)
+        assertEquals(1, pendingChecks())
+    }
+
+    /** The test executor runs undelayed work on another thread, so the booking arrives shortly after. */
+    private fun awaitBookedDelay(accept: (Long) -> Boolean): Long {
+        var delay = -1L
+        repeat(200) {
+            delay = WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWork(AlertEscalationScheduler.WORK_NAME)
+                .get()
+                .firstOrNull { it.state == WorkInfo.State.ENQUEUED }
+                ?.initialDelayMillis ?: -1L
+            if (accept(delay)) return delay
+            Thread.sleep(20)
+        }
+        return delay
     }
 
     private fun pendingChecks(): Int =
