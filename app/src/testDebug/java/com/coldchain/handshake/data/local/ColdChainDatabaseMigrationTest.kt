@@ -2,10 +2,7 @@ package com.coldchain.handshake.data.local
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import androidx.room.testing.MigrationTestHelper
-import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
-import androidx.test.platform.app.InstrumentationRegistry
 import com.coldchain.handshake.data.local.entities.toDomain
 import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.HandoverVerdict
@@ -20,7 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
-import org.junit.Rule
+import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -29,21 +26,46 @@ import org.robolectric.annotation.Config
 /**
  * The local database is the audit trail, so an app update must never wipe it. Every future schema
  * version needs a real migration and a test here.
+ *
+ * Old databases are built by hand from the exported schema, because Room's MigrationTestHelper can't
+ * open a Windows path. Opening one through [DatabaseProvider] is still a full check: Room runs the
+ * migration and then refuses to open if the result doesn't match the entities.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ColdChainDatabaseMigrationTest {
 
-    @get:Rule
-    val helper = MigrationTestHelper(
-        InstrumentationRegistry.getInstrumentation(),
-        ColdChainDatabase::class.java
-    )
-
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val dbName = "migration-test.db"
+    private val schemaDir = ColdChainDatabase::class.java.canonicalName!!
 
-    private fun SupportSQLiteDatabase.insertShipment() {
+    private fun schemaFile(version: Int): String =
+        context.assets.open("$schemaDir/$version.json").bufferedReader().use { it.readText() }
+
+    private fun createDatabase(version: Int): SQLiteDatabase {
+        val schema = JSONObject(schemaFile(version)).getJSONObject("database")
+        val file = context.getDatabasePath(dbName).apply { parentFile?.mkdirs() }
+        val database = SQLiteDatabase.openOrCreateDatabase(file, null)
+
+        val entities = schema.getJSONArray("entities")
+        for (i in 0 until entities.length()) {
+            val entity = entities.getJSONObject(i)
+            val table = entity.getString("tableName")
+            database.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", table))
+            val indices = entity.getJSONArray("indices")
+            for (j in 0 until indices.length()) {
+                database.execSQL(indices.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", table))
+            }
+        }
+        val setupQueries = schema.getJSONArray("setupQueries")
+        for (i in 0 until setupQueries.length()) {
+            database.execSQL(setupQueries.getString(i))
+        }
+        database.version = version
+        return database
+    }
+
+    private fun SQLiteDatabase.insertShipment() {
         execSQL(
             """
             INSERT INTO shipments
@@ -69,23 +91,19 @@ class ColdChainDatabaseMigrationTest {
             1 to "f740cf5168238cf469e45dbf7d9daf80",
             2 to "16336bc1a46df29247067f953840fde0"
         )
-        val assets = InstrumentationRegistry.getInstrumentation().context.assets
-        val schemaDir = ColdChainDatabase::class.java.canonicalName!!
-
         recorded.forEach { (version, hash) ->
-            val schema = assets.open("$schemaDir/$version.json").bufferedReader().use { it.readText() }
-            assertTrue("Schema $version has changed", schema.contains("\"identityHash\": \"$hash\""))
+            assertTrue("Schema $version has changed", schemaFile(version).contains("\"identityHash\": \"$hash\""))
         }
         assertEquals(
             "The newest schema needs a recorded hash",
             recorded.keys.max(),
-            assets.list(schemaDir)!!.size
+            context.assets.list(schemaDir)!!.size
         )
     }
 
     @Test
     fun version1DataSurvivesTheMigrationToVersion2() {
-        helper.createDatabase(dbName, 1).apply {
+        createDatabase(1).apply {
             insertShipment()
             execSQL(
                 """
@@ -111,8 +129,6 @@ class ColdChainDatabaseMigrationTest {
             )
             close()
         }
-
-        helper.runMigrationsAndValidate(dbName, 2, true, MIGRATION_1_2).close()
 
         val database = DatabaseProvider.buildDatabase(context, dbName)
         val (shipment, alert, handover) = runBlocking {
@@ -145,7 +161,7 @@ class ColdChainDatabaseMigrationTest {
 
     @Test
     fun rowsFromTheCurrentSchemaSurviveReopening() {
-        helper.createDatabase(dbName, 2).apply {
+        createDatabase(2).apply {
             insertShipment()
             close()
         }
@@ -159,7 +175,7 @@ class ColdChainDatabaseMigrationTest {
 
     @Test
     fun aSchemaWithNoMigrationPathFailsInsteadOfWipingData() {
-        helper.createDatabase(dbName, 2).apply {
+        createDatabase(2).apply {
             insertShipment()
             version = 99
             close()

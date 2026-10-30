@@ -50,7 +50,7 @@ object DebugTools {
             ?: return@withContext false
         database.openHelper.writableDatabase.execSQL(
             "UPDATE temperature_events SET temperature = ? WHERE id = ?",
-            arrayOf(corruptedTemp, latest.id)
+            arrayOf<Any>(corruptedTemp, latest.id)
         )
         database.invalidationTracker.refreshVersionsAsync()
         true
