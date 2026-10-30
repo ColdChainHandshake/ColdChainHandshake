@@ -1018,30 +1018,30 @@ fun TransitScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Simulator Controls Section
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        if (isRunning) {
-                            simulator.stopContinuousSimulation()
-                        } else {
-                            simulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
-                        }
-                    },
-                    modifier = Modifier.weight(1f).height(38.dp)
+            if (DebugTools.ENABLED) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Stream Control",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isRunning) "Pause" else "Resume", fontSize = 12.sp)
-                }
+                    Button(
+                        onClick = {
+                            if (isRunning) {
+                                simulator.stopContinuousSimulation()
+                            } else {
+                                simulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
+                            }
+                        },
+                        modifier = Modifier.weight(1f).height(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Stream Control",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (isRunning) "Pause" else "Resume", fontSize = 12.sp)
+                    }
 
-                if (DebugTools.ENABLED) {
                     OutlinedButton(
                         onClick = {
                             scope.launch {
@@ -1289,7 +1289,7 @@ fun TransitScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Tap Resume or +60s Tick to stream simulated sensor data into Room.",
+                            text = "Readings appear here once the journey starts.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )

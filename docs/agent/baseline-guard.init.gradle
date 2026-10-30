@@ -1,4 +1,5 @@
-// Baseline guard, kept outside the repo. local.properties points BuildConfig at the demo Supabase
+// Reproduces the baseline at f858a87, which has no guard of its own. Later commits have one in
+// app/build.gradle and don't need this. local.properties points BuildConfig at the demo Supabase
 // project, which is out of bounds, so no test JVM may reach it.
 // 1. LiveSupabaseIntegrationTest is excluded by name.
 // 2. All HTTP(S) from the test JVM goes to a dead local proxy, so anything missed fails locally.

@@ -33,6 +33,16 @@ begin
   end loop;
 end $$;
 
+-- Anything added to public later starts with no access either.
+alter default privileges for role postgres in schema public
+  revoke all on tables from anon, authenticated;
+alter default privileges for role postgres in schema public
+  revoke all on sequences from anon, authenticated;
+alter default privileges for role postgres in schema public
+  revoke execute on functions from anon, authenticated;
+alter default privileges for role postgres
+  revoke execute on functions from public;
+
 -- Check: every row should show rls_enabled = true and policies = 0.
 select c.relname as table_name,
        c.relrowsecurity as rls_enabled,

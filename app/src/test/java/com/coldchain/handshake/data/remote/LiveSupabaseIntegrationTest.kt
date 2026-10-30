@@ -70,7 +70,7 @@ class LiveSupabaseIntegrationTest {
         val url = System.getenv("CCH_LIVE_SUPABASE_URL")
         val key = System.getenv("CCH_LIVE_SUPABASE_KEY")
         assumeTrue("Live test target not set", !url.isNullOrBlank() && !key.isNullOrBlank())
-        check(!url.contains(DEMO_PROJECT_REF)) { "Live tests must never run against the demo project" }
+        check(!url.contains(DEMO_PROJECT_REF, ignoreCase = true)) { "Live tests must never run against the demo project" }
 
         SupabaseClientProvider.initialize(url, key)
         realDataSource = SupabaseRemoteDataSource()

@@ -42,9 +42,9 @@ The old APK will stop syncing, which is intended. No data is deleted.
 
 ### 2. Set `JAVA_HOME` and `ANDROID_HOME`
 
-Nothing on this PC could build the app. `JAVA_HOME` was unset, and the path pinned in `gradle.properties` no longer
-exists because the Red Hat Java extension updated itself. The JDKs that are installed don't fit: Oracle 25 is too
-new, and Oracle XE's bundled Java 8 is too old. The build needs JDK 17.
+Nothing on this PC could build the app. `JAVA_HOME` was unset, and `gradle.properties` pointed at a Java folder that
+went away when the Red Hat Java extension updated itself; Claude has removed that line. The JDKs that are installed
+don't fit: Oracle 25 is too new, and Oracle XE's bundled Java 8 is too old. The build needs JDK 17.
 
 Claude put a portable Temurin 17 at `D:\cch-tools\jdk-17.0.20.1+1`. It changed nothing on PATH or in the registry.
 Set both variables once, then open a new terminal:
@@ -58,7 +58,7 @@ If you install Android Studio instead, point `JAVA_HOME` at its `jbr` folder and
 
 ### 3. Free space on C:
 
-C: is 97% full (11 GB free), and the local database images just used 3 GB of it. If it fills up, builds and the
+C: is 98% full (under 9 GB free), and the local database images used 3 GB of it. If it fills up, builds and the
 local database will start failing. Do this before item 4. In order of effect:
 
 1. **Move Docker's data to D:.** Docker Desktop, Settings, Resources, Advanced, Disk image location. Choose a

@@ -37,4 +37,9 @@ alter default privileges for role postgres in schema public
   revoke all on sequences from anon, authenticated;
 
 alter default privileges for role postgres in schema public
-  revoke execute on functions from anon, authenticated, public;
+  revoke execute on functions from anon, authenticated;
+
+-- PUBLIC's EXECUTE on new functions is a global default. A rule scoped to one schema can't remove it,
+-- so this one has no schema.
+alter default privileges for role postgres
+  revoke execute on functions from public;

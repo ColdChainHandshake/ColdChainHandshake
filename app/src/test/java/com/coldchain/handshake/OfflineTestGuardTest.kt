@@ -1,9 +1,10 @@
 package com.coldchain.handshake
 
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.io.IOException
 import java.net.ConnectException
+import java.net.Socket
 import java.net.URL
 
 /**
@@ -14,11 +15,16 @@ class OfflineTestGuardTest {
 
     @Test
     fun outboundHttpsIsBlockedInDefaultTestRuns() {
-        assumeTrue(System.getenv("CCH_LIVE_SUPABASE_URL").isNullOrBlank())
-
         val connection = URL("https://example.com").openConnection().apply { connectTimeout = 3_000 }
         val failure = runCatching { connection.connect() }.exceptionOrNull()
 
         assertTrue("Expected the dead test proxy to refuse this, got: $failure", failure is ConnectException)
+    }
+
+    @Test
+    fun rawSocketsAreBlockedInDefaultTestRuns() {
+        val failure = runCatching { Socket("example.com", 443).close() }.exceptionOrNull()
+
+        assertTrue("Expected the dead test proxy to refuse this, got: $failure", failure is IOException)
     }
 }

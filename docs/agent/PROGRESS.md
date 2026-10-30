@@ -1,6 +1,6 @@
 # Progress
 
-**Next action:** finish Gate 1: lint, clean-clone build, fresh-subagent review.
+**Next action:** Gate 2 review, then Phase 3 task 3.0.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
@@ -60,7 +60,7 @@ Clone git clone, no local.properties, JAVA_HOME and ANDROID_HOME only
      tests 170 failures 0 errors 0 | live ran: False
 ```
 
-**Gate 1:** local criteria met; fresh-subagent review running. The dev-project advisors criterion stays open until `HANDOFF.md` Q1 is answered.
+**Gate 1:** met locally, not tagged. The fresh reviewer failed two criteria (the CI advisors step could never fail, and doc inaccuracies), and also found that anon could execute new functions and that materialized views escaped the tests. All are fixed, see `DECISIONS.md`. `gate-1` waits for the dev-project migration and advisors check, `HANDOFF.md` Q1.
 
 ## Phase 2: Safety logic
 

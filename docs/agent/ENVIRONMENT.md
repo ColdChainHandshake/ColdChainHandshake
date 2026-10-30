@@ -26,7 +26,7 @@ Machine: Windows 11 Home (10.0.26200), Git Bash and PowerShell 5.1.
 
 ## Disk
 
-C: is 97% full (11 GB free of 317 GB, after 3 GB of local database images). D: has 371 GB free. The Gradle
+C: is 98% full (under 9 GB free of 317 GB, after 3 GB of local database images). D: has 371 GB free. The Gradle
 cache, the Android SDK and Docker's data all sit on C:, so large downloads need watching. Tooling Claude adds
 goes on D:. `HANDOFF.md` item 3 covers moving Docker and the Gradle cache.
 

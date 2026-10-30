@@ -34,9 +34,13 @@ export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
 
 PowerShell: set `$env:JAVA_HOME` the same way, then `.\gradlew.bat testDebugUnitTest`.
 
-Default unit tests are offline. `app/build.gradle` excludes `LiveSupabaseIntegrationTest` and points the test JVM at
-a dead proxy. Live tests run only with `CCH_LIVE_SUPABASE_URL` and `CCH_LIVE_SUPABASE_KEY` set to a project you own,
-and they refuse the demo project.
+Default unit tests can't reach a real server by accident. `app/build.gradle` excludes `LiveSupabaseIntegrationTest`
+and points the test JVM at a dead proxy, with Maven Central as the one exception for Robolectric. With
+`CCH_LIVE_SUPABASE_URL` and `CCH_LIVE_SUPABASE_KEY` set to a project you own, only the live test runs. The build
+refuses the demo project.
+
+Tests that use debug-only code live in `src/testDebug`. After changing a Room entity, add a version, a migration and
+a recorded hash in `ColdChainDatabaseMigrationTest`.
 
 Database tests need Docker:
 

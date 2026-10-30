@@ -58,10 +58,42 @@ class ColdChainDatabaseMigrationTest {
         context.deleteDatabase(dbName)
     }
 
+    /**
+     * Room rewrites a schema file whenever the entities change, so a change without a version bump
+     * would otherwise pass unnoticed and crash existing installs. To change the schema, add a version
+     * and a migration, and a hash here. Never edit a hash that is already listed.
+     */
+    @Test
+    fun schemaFilesMatchTheirRecordedHashes() {
+        val recorded = mapOf(
+            1 to "f740cf5168238cf469e45dbf7d9daf80",
+            2 to "16336bc1a46df29247067f953840fde0"
+        )
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        val schemaDir = ColdChainDatabase::class.java.canonicalName!!
+
+        recorded.forEach { (version, hash) ->
+            val schema = assets.open("$schemaDir/$version.json").bufferedReader().use { it.readText() }
+            assertTrue("Schema $version has changed", schema.contains("\"identityHash\": \"$hash\""))
+        }
+        assertEquals(
+            "The newest schema needs a recorded hash",
+            recorded.keys.max(),
+            assets.list(schemaDir)!!.size
+        )
+    }
+
     @Test
     fun version1DataSurvivesTheMigrationToVersion2() {
         helper.createDatabase(dbName, 1).apply {
             insertShipment()
+            execSQL(
+                """
+                INSERT INTO temperature_events
+                    (id, shipmentId, loggerId, timestamp, temperature, previousHash, currentHash, syncStatus)
+                VALUES ('TE-1', 'SHIP-1', 'LOG-1', 1700000000000, 5.5, 'previous', 'current', 'SYNCED')
+                """.trimIndent()
+            )
             execSQL(
                 """
                 INSERT INTO alerts
@@ -90,7 +122,12 @@ class ColdChainDatabaseMigrationTest {
                 database.handoverDao().getHandover("SHIP-1").first()!!.toDomain()
             )
         }
+        val reading = runBlocking { database.temperatureEventDao().getTemperaturesDirect("SHIP-1") }.single()
         database.close()
+
+        assertEquals(5.5, reading.temperature, 0.0)
+        assertEquals("previous", reading.previousHash)
+        assertEquals("current", reading.currentHash)
 
         assertEquals(ShipmentStatus.IN_TRANSIT, shipment.status)
         assertEquals(ProductProfiles.DEFAULT.id, shipment.productProfileId)

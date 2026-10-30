@@ -109,8 +109,11 @@ Set `JAVA_HOME` to the JDK and `ANDROID_HOME` to the SDK, then run these from Gi
 
 From PowerShell, use `.\gradlew.bat` in place of `./gradlew`.
 
-Default unit tests are offline. To sync with a Supabase project, add `supabase.url` and `supabase.anon.key` to
-`local.properties`, which git ignores.
+Default unit tests make no calls to real servers. The one exception is Robolectric, which downloads its Android
+jars from Maven Central on first use.
+
+Cloud sync doesn't work at the moment. The database now denies anonymous access, and sign-in arrives in Phase 3 of
+the rebuild, so the app works on one device until then.
 
 Database tests run against a local Postgres container:
 
