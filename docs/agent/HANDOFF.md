@@ -56,8 +56,6 @@ Set both variables once, then open a new terminal:
 
 If you install Android Studio instead, point `JAVA_HOME` at its `jbr` folder and delete `D:\cch-tools`.
 
-Until task 1.1 is ticked in `PROGRESS.md`, plain Gradle commands still fail on the dead path in `gradle.properties`.
-
 ### 3. Free space on C:
 
 C: is 97% full (11 GB free), and the local database images just used 3 GB of it. If it fills up, builds and the

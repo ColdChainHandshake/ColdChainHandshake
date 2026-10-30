@@ -27,24 +27,18 @@ Needs JDK 17: Android Studio's `jbr`, or Temurin 17. See `docs/agent/ENVIRONMENT
 ```bash
 export JAVA_HOME='<JDK 17 folder>'
 export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
+./gradlew assembleDebug
+./gradlew testDebugUnitTest
+./gradlew lintDebug
 ```
 
-**Do not run a plain `./gradlew testDebugUnitTest` yet.** `local.properties` points at the demo Supabase project and
-`LiveSupabaseIntegrationTest` writes to it. Today the dead `org.gradle.java.home` pin is all that stops that
-command. Until tasks 1.1 and 1.2 are both ticked in `PROGRESS.md`, use this form:
+PowerShell: set `$env:JAVA_HOME` the same way, then `.\gradlew.bat testDebugUnitTest`.
 
-```bash
-GRADLE_ARGS="-Dorg.gradle.java.home=$JAVA_HOME --init-script docs/agent/baseline-guard.init.gradle"
-./gradlew assembleDebug $GRADLE_ARGS
-./gradlew testDebugUnitTest $GRADLE_ARGS
-./gradlew lintDebug $GRADLE_ARGS
-```
+Default unit tests are offline. `app/build.gradle` excludes `LiveSupabaseIntegrationTest` and points the test JVM at
+a dead proxy. Live tests run only with `CCH_LIVE_SUPABASE_URL` and `CCH_LIVE_SUPABASE_KEY` set to a project you own,
+and they refuse the demo project.
 
-The guard sets `ignoreFailures`, so read pass and fail counts from `app/build/test-results/`, not the exit code.
-
-PowerShell: set `$env:JAVA_HOME` the same way, then `.\gradlew.bat <task> <same arguments>`.
-
-Database tests need Docker. They arrive with task 1.3:
+Database tests need Docker:
 
 ```bash
 npx supabase db start      # Postgres only; the full `supabase start` is much larger and C: is short of space
@@ -59,7 +53,7 @@ npx supabase db advisors --local
   - `ui/` screens, `safety/` breach and alert rules, `crypto/` hash chain, `handover/` verdicts.
   - `data/local/` Room, `data/remote/` Supabase, `repository/` interfaces and implementations.
   - `simulator/` generates fake telemetry. It is the app's only data source until the logger arrives in Phase 4.
-- `supabase/` migrations and pgTAP tests, from task 1.3.
+- `supabase/` migrations and pgTAP tests.
 - `docs/` design documents, `docs/agent/` session files.
 - `reference/` third-party code, excluded from the build. Do not change it.
 

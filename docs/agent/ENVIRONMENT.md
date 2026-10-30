@@ -47,9 +47,8 @@ deny and ask rules apply from the next session. The `local.properties` rule was 
 
 ## How to run Gradle on this machine
 
-Set these, then use the commands in `CLAUDE.md`, which explains why a plain test run isn't safe yet.
-
 ```bash
 export JAVA_HOME='D:\cch-tools\jdk-17.0.20.1+1'
 export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
+./gradlew testDebugUnitTest
 ```
