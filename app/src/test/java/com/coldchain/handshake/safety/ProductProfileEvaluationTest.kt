@@ -53,7 +53,66 @@ class ProductProfileEvaluationTest {
         assertTrue(result.excursions.isEmpty())
     }
 
+    @Test
+    fun theSeedLoggingRulesArePinned() {
+        assertEquals(60, strict.loggingIntervalSeconds)
+        assertEquals(3, strict.gapToleranceFactor)
+        assertEquals(5, strict.maxExcursionMinutesHeat)
+    }
+
     // Heat
+
+    @Test
+    fun aShipmentStillHotAtHandoverCountsTheTimeUpToHandover() {
+        val readings = minutely(5.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0)
+        val handover = t0 + 6 * minute + 179_000L
+
+        val result = BreachDetector.evaluateTelemetry(readings, strict, windowEnd = handover)
+
+        assertEquals(TemperatureVerdict.FAIL, result.verdict)
+    }
+
+    @Test
+    fun aHandoverTimeBeforeTheLastReadingCreditsNothing() {
+        val result = BreachDetector.evaluateTelemetry(minutely(5.0, 12.0), strict, windowEnd = t0)
+
+        assertEquals(0L, result.cumulativeBreachDurationMs)
+    }
+
+    @Test
+    fun aSafeTwinAtTheSameTimeCannotHideAHotReading() {
+        val readings = (0..30).flatMap { index ->
+            listOf(
+                reading(index * minute, 12.0, id = "A-$index"),
+                reading(index * minute, 5.0, id = "Z-$index")
+            )
+        }
+
+        val result = BreachDetector.evaluateTelemetry(readings, strict)
+
+        assertEquals(TemperatureVerdict.FAIL, result.verdict)
+    }
+
+    @Test
+    fun aSafeTwinAtTheSameTimeCannotHideAFrozenReading() {
+        val readings = listOf(reading(0, -3.0, id = "A"), reading(0, 5.0, id = "Z"))
+
+        assertEquals(TemperatureVerdict.FAIL, BreachDetector.evaluateTelemetry(readings, strict).verdict)
+    }
+
+    @Test
+    fun heatAndFreezeHaveSeparateBudgets() {
+        val readings = minutely(9.0, 9.0, 9.0, 9.0, 5.0, -3.0, -3.0, -3.0, -3.0, 5.0)
+
+        assertEquals(TemperatureVerdict.PASS, BreachDetector.evaluateTelemetry(readings, tolerant).verdict)
+    }
+
+    @Test
+    fun thePeakIgnoresFrozenReadings() {
+        val result = BreachDetector.evaluateTelemetry(minutely(5.0, -3.0, 5.0), strict)
+
+        assertEquals(null, result.maxExcursionTemperature)
+    }
 
     @Test
     fun heatWithinItsBudgetPasses() {
@@ -181,7 +240,7 @@ class ProductProfileEvaluationTest {
     }
 
     @Test
-    fun timeInsideAGapIsNotCountedAsAnExcursion() {
+    fun aReadingBesideAGapCountsOnlyUpToTheSilenceLimit() {
         val tolerance = strict.loggingIntervalSeconds * strict.gapToleranceFactor * 1_000L
         val readings = listOf(reading(0, 9.0), reading(6 * hour, 5.0))
 
@@ -198,6 +257,32 @@ class ProductProfileEvaluationTest {
         val result = BreachDetector.evaluateTelemetry(readings, strict)
 
         assertEquals(listOf(t0, t0 + 6 * hour), result.excursions.map { it.startTimestamp })
+    }
+
+    @Test
+    fun readingsDatedAfterTheHandoverCannotShowTheLoggerWasRunning() {
+        val readings = steadyReadings(t0, 60 * minute, 5.0)
+        val handover = t0 + 3 * minute
+
+        val result = BreachDetector.evaluateTelemetry(readings, strict, windowEnd = handover)
+
+        assertEquals(TemperatureVerdict.UNKNOWN, result.verdict)
+    }
+
+    @Test
+    fun aSmallClockDifferenceAtHandoverIsAllowed() {
+        val readings = minutely(5.0, 5.0, 5.0)
+
+        val result = BreachDetector.evaluateTelemetry(readings, strict, windowEnd = t0 + minute)
+
+        assertEquals(TemperatureVerdict.PASS, result.verdict)
+    }
+
+    @Test
+    fun anUnreadableTemperatureIsNotAPass() {
+        val readings = minutely(5.0, Double.NaN, 5.0)
+
+        assertEquals(TemperatureVerdict.UNKNOWN, BreachDetector.evaluateTelemetry(readings, strict).verdict)
     }
 
     // Excursions

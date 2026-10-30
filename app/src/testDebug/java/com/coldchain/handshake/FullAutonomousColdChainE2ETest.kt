@@ -296,7 +296,8 @@ class FullAutonomousColdChainE2ETest {
             origin = "Origin",
             destination = "Dest",
             workerId = "W-1",
-            status = ShipmentStatus.IN_TRANSIT
+            status = ShipmentStatus.IN_TRANSIT,
+            journeyStartedAt = 1700000000000L
         )
         shipmentRepo.saveShipment(cleanShipment)
         simulator.attachShipment(cleanShipment, startTimestamp = 1700000000000L)

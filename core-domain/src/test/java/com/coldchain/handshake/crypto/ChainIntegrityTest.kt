@@ -83,6 +83,19 @@ class ChainIntegrityTest {
     }
 
     @Test
+    fun twoReadingsWithTheSameTimeAreNotAValidChain() {
+        val duplicated = HashChainService.buildChain(
+            raw(2).map { it.copy(timestamp = 1_700_000_000_000L) },
+            genesis
+        )
+
+        val result = HashChainService.verifyChain(duplicated, genesis)
+
+        assertFalse(result.valid)
+        assertEquals(IntegrityFailureReason.ORDER_VIOLATION, result.reason)
+    }
+
+    @Test
     fun aChangedTemperatureBreaksTheChain() {
         val edited = chain(3).mapIndexed { index, event -> if (index == 1) event.copy(temperature = 4.0) else event }
 
@@ -169,6 +182,13 @@ class ChainIntegrityTest {
             IntegrityVerificationState.PENDING_SYNC,
             evaluate(emptyList(), head(full), syncComplete = false).state
         )
+    }
+
+    @Test
+    fun anEditShowsEvenWhileTheHistoryIsDownloading() {
+        val edited = chain(3).mapIndexed { index, event -> if (index == 1) event.copy(temperature = 4.0) else event }
+
+        assertEquals(IntegrityVerificationState.TAMPER_DETECTED, evaluate(edited, syncComplete = false).state)
     }
 
     @Test

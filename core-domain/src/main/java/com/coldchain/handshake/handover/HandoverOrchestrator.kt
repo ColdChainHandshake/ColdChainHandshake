@@ -1,9 +1,10 @@
 package com.coldchain.handshake.handover
 
 import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.crypto.IntegrityVerificationState
+import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.models.Handover
 import com.coldchain.handshake.models.HandoverVerdict
-import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
@@ -11,8 +12,10 @@ import com.coldchain.handshake.models.VvmStage
 import com.coldchain.handshake.repository.HandoverRepository
 import com.coldchain.handshake.repository.ShipmentRepository
 import com.coldchain.handshake.repository.TelemetryRepository
+import com.coldchain.handshake.repository.TransactionRunner
 import com.coldchain.handshake.safety.BreachDetector
 import com.coldchain.handshake.safety.ShipmentLifecycle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.firstOrNull
 import java.util.UUID
 
@@ -47,7 +50,8 @@ data class HandoverOrchestratorResult(
 class HandoverOrchestrator(
     private val shipmentRepository: ShipmentRepository,
     private val telemetryRepository: TelemetryRepository,
-    private val handoverRepository: HandoverRepository
+    private val handoverRepository: HandoverRepository,
+    private val transactions: TransactionRunner = TransactionRunner.NONE
 ) {
 
     /**
@@ -62,6 +66,8 @@ class HandoverOrchestrator(
      *   checks themselves found a problem.
      * @param vvmStage Vial monitor stage seen at inspection.
      * @param shakeTest Shake test result seen at inspection.
+     * @param historySynced False if the full history couldn't be fetched. The verdict is then UNKNOWN at
+     *   best, but it can still be recorded.
      * @param handoverId Optional deterministic ID for the handover record (defaults to random UUID).
      * @param timestamp Timestamp of custody handover event. Readings are expected up to this moment.
      * @return [Result] containing [HandoverOrchestratorResult] on success, or failure with diagnostic error.
@@ -74,8 +80,37 @@ class HandoverOrchestrator(
         reason: String? = null,
         vvmStage: VvmStage = VvmStage.NOT_RECORDED,
         shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
+        historySynced: Boolean = true,
         handoverId: String = UUID.randomUUID().toString(),
         timestamp: Long = System.currentTimeMillis()
+    ): Result<HandoverOrchestratorResult> = try {
+        // The whole decision is one transaction, so a breach arriving part-way through can't leave a
+        // PASS on the record beside a quarantined shipment.
+        Result.success(
+            transactions.inTransaction {
+                record(
+                    shipmentId, workerSigned, pharmacistSigned, declaredVerdict, reason,
+                    vvmStage, shakeTest, historySynced, handoverId, timestamp
+                ).getOrThrow()
+            }
+        )
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    private suspend fun record(
+        shipmentId: String,
+        workerSigned: Boolean,
+        pharmacistSigned: Boolean,
+        declaredVerdict: HandoverVerdict?,
+        reason: String?,
+        vvmStage: VvmStage,
+        shakeTest: ShakeTestResult,
+        historySynced: Boolean,
+        handoverId: String,
+        timestamp: Long
     ): Result<HandoverOrchestratorResult> {
         // 1. Obtain the shipment
         val shipment = try {
@@ -83,6 +118,10 @@ class HandoverOrchestrator(
         } catch (e: Exception) {
             return Result.failure(IllegalStateException("Failed to query shipment with id: $shipmentId", e))
         } ?: return Result.failure(IllegalArgumentException("Shipment not found with id: $shipmentId"))
+
+        if (handoverRepository.getHandover(shipmentId).firstOrNull() != null) {
+            return Result.failure(IllegalStateException("A handover is already recorded for this shipment."))
+        }
 
         // 2. The shipment must be somewhere a handover can happen
         val pathToInspection = ShipmentLifecycle.pathToInspection(shipment.status)
@@ -100,17 +139,13 @@ class HandoverOrchestrator(
         )
 
         // 4. Application independently determines integrity and temperature from the actual events
-        val integrityResult = HashChainService.verifyChain(
+        val integrity = ShipmentIntegrityEvaluator.evaluate(
             events,
-            shipment.genesisHash ?: HashChainService.UNBOUND_GENESIS
+            isSyncComplete = historySynced,
+            genesisHash = shipment.genesisHash ?: HashChainService.UNBOUND_GENESIS
         )
-        val integrityPassed = integrityResult.valid
-        val temperature = BreachDetector.evaluateTelemetry(
-            events = events,
-            profile = ProductProfiles.byId(shipment.productProfileId),
-            windowStart = shipment.journeyStartedAt,
-            windowEnd = timestamp
-        )
+        val integrityPassed = integrity.state == IntegrityVerificationState.VERIFIED
+        val temperature = BreachDetector.evaluateForHandover(shipment, events, timestamp)
 
         // 5. Authoritative evaluation via HandoverVerdictEngine
         val evaluation = HandoverVerdictEngine.evaluate(
@@ -119,7 +154,8 @@ class HandoverOrchestrator(
             workerSigned = workerSigned,
             pharmacistSigned = pharmacistSigned,
             vvmStage = vvmStage,
-            shakeTest = shakeTest
+            shakeTest = shakeTest,
+            historyAvailable = integrity.state != IntegrityVerificationState.PENDING_SYNC
         )
         val decision = HandoverVerdictEngine.decide(evaluation, declaredVerdict, reason)
             .getOrElse { return Result.failure(it) }

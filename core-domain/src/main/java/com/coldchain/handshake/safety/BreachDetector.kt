@@ -1,7 +1,9 @@
 package com.coldchain.handshake.safety
 
+import com.coldchain.handshake.crypto.ClockSkewDetector
 import com.coldchain.handshake.models.ProductProfile
 import com.coldchain.handshake.models.ProductProfiles
+import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.TemperatureEvent
 
 /**
@@ -12,10 +14,14 @@ import com.coldchain.handshake.models.TemperatureEvent
  * - Heat and freeze have separate cumulative budgets, and separated excursions accumulate.
  *   A budget of 0 means a single reading past that limit fails, because a final reading proves
  *   no duration at all.
- * - Silence longer than [ProductProfile.maxSilenceMs] is a gap. It makes the verdict
- *   [TemperatureVerdict.UNKNOWN], and is counted neither as safe nor as an excursion.
+ * - Each reading speaks for the time until the next one, or until the end of the window for the last
+ *   one, and never for more than [ProductProfile.maxSilenceMs].
+ * - Silence longer than that is a gap, which makes the verdict [TemperatureVerdict.UNKNOWN]. A reading
+ *   next to a gap is still credited up to the limit, so a hot reading before a gap counts as hot.
+ * - Readings with the same time count as the worst of them, so a safe duplicate can't hide a bad one.
+ * - A reading dated well after the window ends is evidence of a wrong clock, not of a running logger.
  * - A confirmed breach outranks a gap, and no readings at all is never a pass.
- * - Never extrapolates beyond the final recorded event timestamp.
+ * - Without a window, nothing is extrapolated beyond the final recorded event timestamp.
  */
 object BreachDetector {
 
@@ -35,14 +41,18 @@ object BreachDetector {
         windowStart: Long? = null,
         windowEnd: Long? = null
     ): BreachEvaluation {
+        val readable = events.filter { it.temperature.isFinite() }
+
         // Sort telemetry deterministically: timestamp ascending, with ID tie-breaker
-        val sortedEvents = events.sortedWith(
+        val sortedEvents = worstAtEachTime(readable, profile).sortedWith(
             compareBy<TemperatureEvent>({ it.timestamp }, { it.id })
         )
 
-        val excursions = markBreaches(findExcursions(sortedEvents, profile), profile)
+        val excursions = markBreaches(findExcursions(sortedEvents, profile, windowEnd), profile)
         val dataGaps = findDataGaps(sortedEvents, profile, windowStart, windowEnd)
         val hasBreach = excursions.any { it.breached }
+        val datedAfterWindow = windowEnd != null &&
+            sortedEvents.any { it.timestamp > windowEnd + ClockSkewDetector.TOLERANCE_MS }
 
         val heat = excursions.filter { it.type == ExcursionType.HEAT }
         val freeze = excursions.filter { it.type == ExcursionType.FREEZE }
@@ -55,6 +65,7 @@ object BreachDetector {
             verdict = when {
                 hasBreach -> TemperatureVerdict.FAIL
                 sortedEvents.isEmpty() || dataGaps.isNotEmpty() -> TemperatureVerdict.UNKNOWN
+                datedAfterWindow || readable.size < events.size -> TemperatureVerdict.UNKNOWN
                 else -> TemperatureVerdict.PASS
             },
             cumulativeFreezeDurationMs = freeze.sumOf { it.durationMs },
@@ -64,6 +75,38 @@ object BreachDetector {
         )
     }
 
+    /**
+     * Evaluates a shipment for handover: its own rules, from the start of its journey up to now. If
+     * nobody knows when the journey started, nobody can say the readings cover it.
+     */
+    fun evaluateForHandover(
+        shipment: Shipment,
+        events: List<TemperatureEvent>,
+        handoverAt: Long
+    ): BreachEvaluation {
+        val evaluation = evaluateTelemetry(
+            events = events,
+            profile = ProductProfiles.byId(shipment.productProfileId),
+            windowStart = shipment.journeyStartedAt,
+            windowEnd = handoverAt
+        )
+        return if (shipment.journeyStartedAt == null && evaluation.verdict == TemperatureVerdict.PASS) {
+            evaluation.copy(verdict = TemperatureVerdict.UNKNOWN)
+        } else {
+            evaluation
+        }
+    }
+
+    private fun worstAtEachTime(events: List<TemperatureEvent>, profile: ProductProfile): List<TemperatureEvent> =
+        events.groupBy { it.timestamp }.values.map { sameTime ->
+            sameTime.maxWith(
+                compareBy<TemperatureEvent>({ distanceOutOfRange(it.temperature, profile) }, { it.id })
+            )
+        }
+
+    private fun distanceOutOfRange(temperature: Double, profile: ProductProfile): Double =
+        maxOf(temperature - profile.maxC, profile.minC - temperature, 0.0)
+
     private fun classify(temperature: Double, profile: ProductProfile): ExcursionType? = when {
         temperature > profile.maxC -> ExcursionType.HEAT
         temperature < profile.minC -> ExcursionType.FREEZE
@@ -72,9 +115,13 @@ object BreachDetector {
 
     /**
      * Each reading speaks for the time until the next one, but never for more than the product's
-     * silence tolerance, so a gap can't be counted as time spent out of range.
+     * silence tolerance. With a window, the last reading speaks for the time up to its end.
      */
-    private fun findExcursions(sortedEvents: List<TemperatureEvent>, profile: ProductProfile): List<Excursion> {
+    private fun findExcursions(
+        sortedEvents: List<TemperatureEvent>,
+        profile: ProductProfile,
+        windowEnd: Long?
+    ): List<Excursion> {
         val excursions = mutableListOf<Excursion>()
         var current: Excursion? = null
 
@@ -85,7 +132,8 @@ object BreachDetector {
                 current = null
             }
 
-            val elapsed = sortedEvents.getOrNull(index + 1)?.let { it.timestamp - event.timestamp } ?: 0L
+            val nextTimestamp = sortedEvents.getOrNull(index + 1)?.timestamp ?: windowEnd
+            val elapsed = nextTimestamp?.let { (it - event.timestamp).coerceAtLeast(0L) } ?: 0L
             val credited = elapsed.coerceAtMost(profile.maxSilenceMs)
 
             if (type != null) {

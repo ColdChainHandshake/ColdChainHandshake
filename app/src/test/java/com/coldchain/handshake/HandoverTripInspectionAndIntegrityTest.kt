@@ -53,7 +53,8 @@ class HandoverTripInspectionAndIntegrityTest {
         destination = "Regional Pharmacy",
         workerId = "W-COURIER-01",
         loggerId = "LOG-100",
-        status = ShipmentStatus.IN_TRANSIT
+        status = ShipmentStatus.IN_TRANSIT,
+        journeyStartedAt = 1700000000000L
     )
 
     @Test

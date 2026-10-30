@@ -51,7 +51,8 @@ class HandoverOrchestratorTest {
                     origin = "Central Cold Hub",
                     destination = "St. Jude Pharmacy",
                     workerId = "W-14",
-                    status = ShipmentStatus.ARRIVED
+                    status = ShipmentStatus.ARRIVED,
+                    journeyStartedAt = 1700000000000L
                 )
             )
         }
@@ -300,9 +301,9 @@ class HandoverOrchestratorTest {
         assertTrue(result.isSuccess)
         val data = result.getOrThrow()
         assertFalse("Empty chain fails integrity verification", data.handover.integrityVerified)
-        assertEquals(HandoverVerdict.FAIL, data.handover.verdict)
+        assertEquals(HandoverVerdict.UNKNOWN, data.handover.verdict)
         assertEquals(ShipmentStatus.QUARANTINED, data.updatedShipment.status)
-        assertTrue(data.evaluation.failureReasons.contains(HandoverFailureReason.INTEGRITY_FAILED))
+        assertTrue(data.evaluation.failureReasons.contains(HandoverFailureReason.HISTORY_UNAVAILABLE))
     }
 
     @Test

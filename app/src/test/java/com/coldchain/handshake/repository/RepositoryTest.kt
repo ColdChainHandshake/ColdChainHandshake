@@ -63,7 +63,7 @@ class RepositoryTest {
             origin = "Munich Distribution Hub",
             destination = "Clinic Station 4",
             workerId = "WRK-007",
-            status = ShipmentStatus.DISPATCHED
+            status = ShipmentStatus.CREATED
         )
 
         val saveResult = shipmentRepository.saveShipment(shipment)
@@ -77,7 +77,7 @@ class RepositoryTest {
         assertEquals(shipment.origin, retrieved?.origin)
         assertEquals(shipment.destination, retrieved?.destination)
         assertEquals(shipment.workerId, retrieved?.workerId)
-        assertEquals(ShipmentStatus.DISPATCHED, retrieved?.status)
+        assertEquals(ShipmentStatus.CREATED, retrieved?.status)
     }
 
     @Test
@@ -102,7 +102,7 @@ class RepositoryTest {
         )
 
         shipmentRepository.saveShipment(shipment1)
-        shipmentRepository.saveShipment(shipment2)
+        shipmentRepository.adoptRemoteShipment(shipment2)
 
         val list = shipmentRepository.getAllShipments().first()
         assertEquals(2, list.size)
@@ -440,7 +440,7 @@ class FakeHandoverDao : HandoverDao {
         return handovers[shipmentId]
     }
 
-    override suspend fun upsertHandover(handover: HandoverEntity) {
+    override suspend fun insertHandover(handover: HandoverEntity) {
         handovers[handover.shipmentId] = handover
         flow.value = handovers.values.toList()
     }

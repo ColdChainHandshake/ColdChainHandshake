@@ -35,15 +35,19 @@ class HandoverDecisionTest {
     private val handovers = HandoverRepositoryImpl(FakeHandoverDao())
     private val orchestrator = HandoverOrchestrator(shipments, telemetry, handovers)
 
-    private fun shipment(status: ShipmentStatus, profileId: String = ProductProfiles.DEFAULT.id) =
-        Shipment("SHIP-1", "QR", "LOG-1", "A", "B", "W-1", status, profileId)
+    private fun shipment(
+        status: ShipmentStatus,
+        profileId: String = ProductProfiles.DEFAULT.id,
+        journeyStartedAt: Long? = t0
+    ) = Shipment("SHIP-1", "QR", "LOG-1", "A", "B", "W-1", status, profileId, journeyStartedAt)
 
     private suspend fun prepare(
         readings: List<TemperatureEvent>,
         status: ShipmentStatus = ShipmentStatus.ARRIVED,
-        profileId: String = ProductProfiles.DEFAULT.id
+        profileId: String = ProductProfiles.DEFAULT.id,
+        journeyStartedAt: Long? = t0
     ) {
-        shipments.saveShipment(shipment(status, profileId)).getOrThrow()
+        shipments.adoptRemoteShipment(shipment(status, profileId, journeyStartedAt)).getOrThrow()
         val ownReadings = readings.mapIndexed { index, reading -> reading.copy(id = "R-$index", shipmentId = "SHIP-1") }
         telemetry.saveTemperatures(HashChainService.buildChain(ownReadings)).getOrThrow()
     }
@@ -124,6 +128,87 @@ class HandoverDecisionTest {
         assertEquals(HandoverVerdict.UNKNOWN, result.handover.verdict)
     }
 
+    @Test
+    fun aShipmentWhoseJourneyStartIsUnknownCannotPass() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0), journeyStartedAt = null)
+
+        assertEquals(HandoverVerdict.UNKNOWN, handOver().getOrThrow().handover.verdict)
+    }
+
+    @Test
+    fun aFirstReadingLongAfterTheJourneyStartedIsUnknown() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0), journeyStartedAt = t0 - 2 * hour)
+
+        assertEquals(HandoverVerdict.UNKNOWN, handOver().getOrThrow().handover.verdict)
+    }
+
+    @Test
+    fun noReadingsAtAllIsRecordedAsUnknownNotAFailedChain() = runBlocking {
+        prepare(emptyList())
+
+        val result = handOver().getOrThrow()
+
+        assertEquals(HandoverVerdict.UNKNOWN, result.handover.verdict)
+        assertEquals(ShipmentStatus.QUARANTINED, storedStatus())
+    }
+
+    @Test
+    fun aHandoverCanBeRecordedWhenTheHistoryCouldNotBeFetched() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0))
+
+        val result = orchestrator.processHandover(
+            shipmentId = "SHIP-1",
+            workerSigned = true,
+            pharmacistSigned = true,
+            historySynced = false,
+            timestamp = t0 + 11 * minute
+        ).getOrThrow()
+
+        assertEquals(HandoverVerdict.UNKNOWN, result.handover.verdict)
+    }
+
+    @Test
+    fun anEditedChainIsStillAFailWhenTheHistoryCouldNotBeFetched() = runBlocking {
+        prepare(emptyList())
+        val chain = HashChainService.buildChain(
+            steadyReadings(t0, 10 * minute, 5.0).mapIndexed { index, reading ->
+                reading.copy(id = "R-$index", shipmentId = "SHIP-1")
+            }
+        )
+        telemetry.saveTemperatures(
+            chain.mapIndexed { index, event -> if (index == 3) event.copy(temperature = 4.0) else event }
+        ).getOrThrow()
+
+        val result = orchestrator.processHandover(
+            shipmentId = "SHIP-1",
+            workerSigned = true,
+            pharmacistSigned = true,
+            historySynced = false,
+            timestamp = t0 + 11 * minute
+        ).getOrThrow()
+
+        assertEquals(HandoverVerdict.FAIL, result.handover.verdict)
+    }
+
+    @Test
+    fun aSecondHandoverForTheSameShipmentIsRefusedNotSilentlyLost() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0))
+        handOver(declared = HandoverVerdict.UNKNOWN, reason = "Logger damaged").getOrThrow()
+
+        val second = handOver(declared = HandoverVerdict.FAIL, reason = "Seal broken")
+
+        assertTrue(second.isFailure)
+        assertEquals("Logger damaged", handovers.getHandover("SHIP-1").first()?.reason)
+    }
+
+    @Test
+    fun anOutcomeTheShipmentCannotReachWritesNothing() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0), status = ShipmentStatus.QUARANTINED)
+
+        assertTrue(handOver().isFailure)
+        assertNull(handovers.getHandover("SHIP-1").first())
+    }
+
     // Per-product rules
 
     @Test
@@ -157,6 +242,32 @@ class HandoverDecisionTest {
         assertEquals(HandoverVerdict.FAIL, result.handover.verdict)
         assertEquals(VvmStage.STAGE_3, result.handover.vvmStage)
         assertTrue(result.handover.reason!!.contains("vial monitor"))
+    }
+
+    @Test
+    fun aVialMonitorPastTheDiscardPointAlsoFails() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0))
+
+        assertEquals(HandoverVerdict.FAIL, handOver(vvmStage = VvmStage.STAGE_4).getOrThrow().handover.verdict)
+    }
+
+    @Test
+    fun aVerdictStricterThanTheChecksNeedsTheReceiversOwnReason() = runBlocking {
+        prepare(steadyReadings(t0, 3 * minute, 5.0) + steadyReadings(t0 + 60 * minute, 5 * minute, 5.0))
+
+        val result = handOver(at = t0 + 66 * minute, declared = HandoverVerdict.FAIL)
+
+        assertTrue(result.isFailure)
+        assertNull(handovers.getHandover("SHIP-1").first())
+    }
+
+    @Test
+    fun theReceiversOwnReasonIsKeptOverTheComputedOne() = runBlocking {
+        prepare(hotThenSafe(t0, 10 * minute, 11.0))
+
+        val result = handOver(reason = "Box left in the sun").getOrThrow()
+
+        assertEquals("Box left in the sun", result.handover.reason)
     }
 
     @Test

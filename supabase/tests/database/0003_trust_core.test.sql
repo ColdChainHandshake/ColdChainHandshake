@@ -5,7 +5,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(163);
+select plan(164);
 
 \set sender   '''aaaaaaaa-0000-0000-0000-000000000001'''
 \set courier  '''aaaaaaaa-0000-0000-0000-000000000002'''
@@ -256,6 +256,19 @@ select throws_ok(
     :device_courier::uuid
   ),
   'CC009', null, 'a reading dated before the previous one is refused'
+);
+select throws_ok(
+  format(
+    'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
+    'SHIP-1',
+    (select jsonb_build_array(jsonb_build_object(
+       'seq', 3, 'logger_ts', ts, 'temp_centi_c', 500, 'prev_hash', pg_temp.head('SHIP-1'),
+       'hash', pg_temp.hash('SHIP-1', 'LOG-1', 3, ts, 500, pg_temp.head('SHIP-1'))
+     )) from (select (extract(epoch from now()) * 1000)::bigint + 2000 as ts) t),
+    pg_temp.head('SHIP-1'),
+    :device_courier::uuid
+  ),
+  'CC009', null, 'a reading with the same time as the previous one is refused'
 );
 select throws_ok(
   format(

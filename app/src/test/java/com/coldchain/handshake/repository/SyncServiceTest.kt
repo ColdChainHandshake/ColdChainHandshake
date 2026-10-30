@@ -143,7 +143,7 @@ class SyncServiceTest {
             origin = "Origin",
             destination = "Destination",
             workerId = "W-1",
-            status = ShipmentStatus.DISPATCHED
+            status = ShipmentStatus.CREATED
         )
         val event = TemperatureEvent(
             id = "evt-sync-1",
@@ -376,7 +376,7 @@ class SyncServiceTest {
             origin = "Origin",
             destination = "Dest",
             workerId = "WORKER_AUTO",
-            status = ShipmentStatus.DISPATCHED
+            status = ShipmentStatus.CREATED
         )
         val event = TemperatureEvent(
             id = "evt-auto-sync-1",

@@ -31,7 +31,9 @@ import java.util.UUID
  * Requirements:
  * - Normal range: approx 4.0°C to 6.0°C (safe range 2.0°C to 8.0°C).
  * - Heat spike: approx 9.0°C to 11.0°C (>8°C excursion).
- * - Deterministic timestamp progression (+60s simulated per tick).
+ * - With a [wallClock], readings are dated by it and a tick less than a step after the last reading
+ *   adds nothing, so stopping leaves a real gap and no reading is dated in the future. Without one,
+ *   each tick adds a fixed step, which keeps tests deterministic.
  * - All events routed strictly through [TelemetryRepository.saveTemperature].
  * - Telemetry hashed with SHA-256 BEFORE persistence.
  * - Observes [ChaosEngineService] for HEAT_SPIKE scenario activation.
@@ -41,7 +43,8 @@ class TemperatureSimulator(
     private val telemetryRepository: TelemetryRepository,
     private val chaosEngineService: ChaosEngineService? = null,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    private val safetyEngine: SafetyEngine? = null
+    private val safetyEngine: SafetyEngine? = null,
+    private val wallClock: (() -> Long)? = null
 ) {
     private val scope = CoroutineScope(dispatcher)
     private var simulationJob: Job? = null
@@ -100,6 +103,13 @@ class TemperatureSimulator(
         _isMonitorOnly.value = true
         _activeShipment.value = shipment
         _lastPersistenceError.value = null
+    }
+
+    /**
+     * A shipment that has been handed over has stopped moving, so nothing more is recorded for it.
+     */
+    fun onHandedOver(shipment: Shipment) {
+        if (_activeShipment.value?.id == shipment.id) attachShipmentForMonitoring(shipment)
     }
 
     /**
@@ -162,7 +172,12 @@ class TemperatureSimulator(
             } else {
                 _simulatedTimestamp.value
             }
-            val nextTimestamp = baseTimestamp + (simulatedStepDurationSeconds * 1000L)
+            val stepMs = simulatedStepDurationSeconds * 1000L
+            val now = wallClock?.invoke()
+            if (now != null && latestExisting != null && now - latestExisting.timestamp < stepMs) {
+                return@withLock null
+            }
+            val nextTimestamp = now ?: (baseTimestamp + stepMs)
 
             val currentStep = if (latestExisting != null && stepCounter == 0) {
                 existingEvents.size
@@ -202,9 +217,13 @@ class TemperatureSimulator(
                     try {
                         val events = telemetryRepository.getTemperatures(shipment.id).firstOrNull() ?: listOf(hashedEvent)
                         val decision = engine.processTelemetryAndEnforceSafety(shipment, events)
-                        _activeShipment.value = _activeShipment.value?.let {
-                            QuarantineManager.applyQuarantine(it, decision.evaluation)
+                        val quarantineSaved = decision.quarantineSaveResult
+                        if (quarantineSaved?.isSuccess == true) {
+                            _activeShipment.value = _activeShipment.value?.let {
+                                QuarantineManager.applyQuarantine(it, decision.evaluation)
+                            }
                         }
+                        quarantineSaved?.exceptionOrNull()?.let { _lastPersistenceError.value = it.message }
                     } catch (_: Exception) {}
                 }
 

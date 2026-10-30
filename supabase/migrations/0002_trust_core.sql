@@ -564,7 +564,7 @@ begin
       raise exception 'Reading % is not linked to the one before it.', v_seq using errcode = 'CC004';
     end if;
 
-    if v_ts < coalesce(v_prev_ts, v_earliest_ms) or v_ts < v_earliest_ms then
+    if v_ts <= v_prev_ts or v_ts < v_earliest_ms then
       raise exception 'Reading % is back-dated.', v_seq using errcode = 'CC009';
     end if;
 

@@ -4,6 +4,7 @@ import android.content.Context
 import com.coldchain.handshake.alerts.AndroidAlertNotifier
 import com.coldchain.handshake.data.local.ColdChainDatabase
 import com.coldchain.handshake.data.local.DatabaseProvider
+import com.coldchain.handshake.data.local.RoomTransactionRunner
 import com.coldchain.handshake.data.network.AndroidNetworkMonitor
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.debugtools.DebugTools
@@ -53,7 +54,7 @@ object RepositoryProvider {
 
     @Volatile
     private var simulator: TemperatureSimulator? = null
-    private var syncCoordinator: ShipmentHistorySyncCoordinator? = null
+    internal var syncCoordinator: ShipmentHistorySyncCoordinator? = null
 
     val shipmentHistorySyncCoordinator: ShipmentHistorySyncCoordinator
         get() = syncCoordinator ?: synchronized(this) {
@@ -104,7 +105,8 @@ object RepositoryProvider {
             simulator ?: TemperatureSimulator(
                 telemetryRepository = telemetryRepository,
                 chaosEngineService = chaosEngineService,
-                safetyEngine = safetyEngine
+                safetyEngine = safetyEngine,
+                wallClock = System::currentTimeMillis
             ).also { simulator = it }
         }
         set(value) { simulator = value }
@@ -128,7 +130,7 @@ object RepositoryProvider {
             val sEngine = SafetyEngine(aRepo, sRepo, AndroidAlertNotifier(appContext))
             safetyEngineInstance = sEngine
 
-            val hOrchestrator = HandoverOrchestrator(sRepo, tRepo, hRepo)
+            val hOrchestrator = HandoverOrchestrator(sRepo, tRepo, hRepo, RoomTransactionRunner(db))
             handoverOrchestratorInstance = hOrchestrator
 
             val baseNetworkMonitor = AndroidNetworkMonitor(appContext)
@@ -158,7 +160,8 @@ object RepositoryProvider {
                 simulator = TemperatureSimulator(
                     telemetryRepository = tRepo,
                     chaosEngineService = chaosService,
-                    safetyEngine = sEngine
+                    safetyEngine = sEngine,
+                    wallClock = System::currentTimeMillis
                 )
             }
 

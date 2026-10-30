@@ -43,6 +43,15 @@ data class ServerChainHead(
 object ShipmentIntegrityEvaluator {
 
     /**
+     * Missing readings could still be on their way, but these can't be explained by that.
+     */
+    private val PROVEN_BY_THE_READINGS = setOf(
+        IntegrityFailureReason.ORDER_VIOLATION,
+        IntegrityFailureReason.PREVIOUS_HASH_MISMATCH,
+        IntegrityFailureReason.CURRENT_HASH_MISMATCH
+    )
+
+    /**
      * Evaluates a shipment's readings with awareness of whether they have finished arriving.
      *
      * A short history means different things at different times: while a download is running it is
@@ -61,6 +70,10 @@ object ShipmentIntegrityEvaluator {
         serverHead: ServerChainHead? = null
     ): IntegrityEvaluation {
         if (!isSyncComplete) {
+            val partial = events.takeIf { it.isNotEmpty() }?.let { HashChainService.verifyChain(it, genesisHash) }
+            if (partial != null && partial.reason in PROVEN_BY_THE_READINGS) {
+                return tampered(partial, describe(partial))
+            }
             return pending(
                 title = "HISTORY SYNCING",
                 message = "Waiting for complete telemetry history before integrity verification…"
@@ -79,7 +92,7 @@ object ShipmentIntegrityEvaluator {
 
         val result = HashChainService.verifyChain(events, genesisHash)
         if (!result.valid) {
-            return tampered(result, "${result.reason?.name ?: "CORRUPTION"}: ${result.corruptedEventId ?: result.message}")
+            return tampered(result, describe(result))
         }
 
         if (serverHead != null) {
@@ -111,6 +124,8 @@ object ShipmentIntegrityEvaluator {
             isEligibleForHandover = true
         )
     }
+
+    private fun describe(result: IntegrityResult) = "${result.reason?.name ?: "CORRUPTION"}: ${result.corruptedEventId ?: result.message}"
 
     private fun pending(title: String, message: String) = IntegrityEvaluation(
         state = IntegrityVerificationState.PENDING_SYNC,

@@ -97,7 +97,7 @@ object HashChainService {
      *
      * Verification rules:
      * 1. Chain must not be empty (EMPTY_CHAIN).
-     * 2. Events must be in chronological sequence (ORDER_VIOLATION).
+     * 2. Each event must be strictly later than the one before it (ORDER_VIOLATION).
      * 3. First event previousHash must equal [genesisHash] (INVALID_GENESIS).
      * 4. Sequence numbers must run from 1 with no gaps (SEQUENCE_GAP).
      * 5. Each subsequent event.previousHash must match the preceding event.currentHash (PREVIOUS_HASH_MISMATCH).
@@ -116,7 +116,7 @@ object HashChainService {
 
         // 1. Chronological order check
         for (i in 1 until events.size) {
-            if (events[i].timestamp < events[i - 1].timestamp) {
+            if (events[i].timestamp <= events[i - 1].timestamp) {
                 return IntegrityResult(
                     valid = false,
                     corruptedEventId = events[i].id,

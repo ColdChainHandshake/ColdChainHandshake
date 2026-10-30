@@ -12,6 +12,7 @@ import com.coldchain.handshake.safety.TemperatureVerdict
 enum class HandoverFailureReason(val description: String) {
     TEMPERATURE_FAILED("Temperature went out of range"),
     TEMPERATURE_UNKNOWN("The readings have a gap, so the temperature during that time is unknown"),
+    HISTORY_UNAVAILABLE("The readings could not be fetched, so the record can't be checked"),
     INTEGRITY_FAILED("The reading history failed verification"),
     WORKER_SIGNATURE_MISSING("The courier has not confirmed"),
     PHARMACIST_SIGNATURE_MISSING("The receiver has not confirmed"),
@@ -48,11 +49,18 @@ data class HandoverDecision(
  * Rules:
  * - Any failed check yields [HandoverVerdict.FAIL], and a temperature gap with nothing else wrong
  *   yields [HandoverVerdict.UNKNOWN]. Only a clean result yields [HandoverVerdict.PASS].
+ * - Being unable to get the history at all yields [HandoverVerdict.UNKNOWN], not a failed check: a
+ *   receiver must be able to record what they found even when the cloud can't be reached.
  * - The vial monitor and the shake test are independent of the logger, and either can fail a
  *   handover on its own. Leaving them unrecorded does not.
  * - Returns ALL applicable failure reasons without stopping at the first failure.
  */
 object HandoverVerdictEngine {
+
+    private val UNKNOWN_REASONS = setOf(
+        HandoverFailureReason.TEMPERATURE_UNKNOWN,
+        HandoverFailureReason.HISTORY_UNAVAILABLE
+    )
 
     fun evaluate(
         temperature: TemperatureVerdict,
@@ -60,7 +68,8 @@ object HandoverVerdictEngine {
         workerSigned: Boolean,
         pharmacistSigned: Boolean,
         vvmStage: VvmStage = VvmStage.NOT_RECORDED,
-        shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE
+        shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
+        historyAvailable: Boolean = true
     ): HandoverEvaluation {
         val failureReasons = mutableListOf<HandoverFailureReason>()
 
@@ -70,7 +79,9 @@ object HandoverVerdictEngine {
         if (temperature == TemperatureVerdict.UNKNOWN) {
             failureReasons.add(HandoverFailureReason.TEMPERATURE_UNKNOWN)
         }
-        if (!integrityPassed) {
+        if (!historyAvailable) {
+            failureReasons.add(HandoverFailureReason.HISTORY_UNAVAILABLE)
+        } else if (!integrityPassed) {
             failureReasons.add(HandoverFailureReason.INTEGRITY_FAILED)
         }
         if (!workerSigned) {
@@ -88,7 +99,7 @@ object HandoverVerdictEngine {
 
         val verdict = when {
             failureReasons.isEmpty() -> HandoverVerdict.PASS
-            failureReasons.all { it == HandoverFailureReason.TEMPERATURE_UNKNOWN } -> HandoverVerdict.UNKNOWN
+            failureReasons.all { it in UNKNOWN_REASONS } -> HandoverVerdict.UNKNOWN
             else -> HandoverVerdict.FAIL
         }
 
@@ -123,7 +134,8 @@ object HandoverVerdictEngine {
         val givenReason = reason?.trim()?.takeIf { it.isNotEmpty() }
         val computedReason = evaluation.failureReasons.takeIf { it.isNotEmpty() }
             ?.joinToString("; ") { it.description }
-        val recordedReason = givenReason ?: computedReason
+        // The checks can only explain what they found, not a stricter verdict the receiver chose.
+        val recordedReason = givenReason ?: computedReason.takeIf { verdict == evaluation.verdict }
 
         if (verdict != HandoverVerdict.PASS && recordedReason == null) {
             return Result.failure(IllegalArgumentException("A $verdict handover needs a reason."))

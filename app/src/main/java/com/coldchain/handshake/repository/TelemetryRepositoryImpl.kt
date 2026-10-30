@@ -16,14 +16,23 @@ class TelemetryRepositoryImpl(
 ) : TelemetryRepository {
 
     override suspend fun saveTemperature(event: TemperatureEvent): Result<Unit> = runCatching {
+        requireReadable(event)
         // Enforce append-only insertion preserving incoming ID, timestamp, and hash-chain attributes.
         temperatureEventDao.insertEvent(event.toEntity())
     }
 
     override suspend fun saveTemperatures(events: List<TemperatureEvent>): Result<Unit> = runCatching {
         if (events.isEmpty()) return@runCatching
+        events.forEach(::requireReadable)
         temperatureEventDao.insertEvents(events.map { it.toEntity() })
         Unit
+    }
+
+    /**
+     * Room stores NaN as NULL, so the insert would be skipped while the save still reported success.
+     */
+    private fun requireReadable(event: TemperatureEvent) {
+        require(event.temperature.isFinite()) { "Reading ${event.id} has no usable temperature." }
     }
 
     override fun getTemperatures(shipmentId: String): Flow<List<TemperatureEvent>> {

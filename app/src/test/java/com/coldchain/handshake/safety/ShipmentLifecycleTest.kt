@@ -134,16 +134,59 @@ class ShipmentLifecycleTest {
     }
 
     @Test
-    fun aReceiverCanImportAShipmentAtItsCurrentStatus() = runBlocking {
+    fun aNewShipmentMustStartAsCreated() = runBlocking {
         val repository = ShipmentRepositoryImpl(FakeShipmentDao())
 
-        assertTrue(repository.saveShipment(shipment(IN_TRANSIT)).isSuccess)
+        val result = repository.saveShipment(shipment(ACCEPTED))
+
+        assertTrue(result.exceptionOrNull() is IllegalTransitionException)
+        assertEquals(null, repository.getShipment("SHIP-1").first())
+    }
+
+    @Test
+    fun aReceiverCanImportAShipmentAtTheStatusTheServerGives() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+
+        assertTrue(repository.adoptRemoteShipment(shipment(IN_TRANSIT)).isSuccess)
+    }
+
+    @Test
+    fun adoptingKeepsWhatThisDeviceAlreadyKnows() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.adoptRemoteShipment(
+            shipment(IN_TRANSIT).copy(journeyStartedAt = 1_000L, genesisHash = "a".repeat(64))
+        ).getOrThrow()
+
+        repository.adoptRemoteShipment(shipment(ARRIVED)).getOrThrow()
+
+        val stored = repository.getShipment("SHIP-1").first()
+        assertEquals(1_000L, stored?.journeyStartedAt)
+        assertEquals("a".repeat(64), stored?.genesisHash)
+    }
+
+    @Test
+    fun aShipmentsProductCannotChangeOnceItExists() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.saveShipment(shipment(CREATED)).getOrThrow()
+
+        val result = repository.saveShipment(shipment(CREATED).copy(productProfileId = "another"))
+
+        assertTrue(result.isFailure)
+        assertEquals(shipment(CREATED).productProfileId, repository.getShipment("SHIP-1").first()?.productProfileId)
+    }
+
+    @Test
+    fun aShipmentsLoggerCannotChangeOnceItIsMoving() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.adoptRemoteShipment(shipment(IN_TRANSIT)).getOrThrow()
+
+        assertTrue(repository.saveShipment(shipment(IN_TRANSIT).copy(loggerId = "LOG-2")).isFailure)
     }
 
     @Test
     fun aDeviceCanCatchUpWithAStatusRecordedElsewhere() = runBlocking {
         val repository = ShipmentRepositoryImpl(FakeShipmentDao())
-        repository.saveShipment(shipment(IN_TRANSIT)).getOrThrow()
+        repository.adoptRemoteShipment(shipment(IN_TRANSIT)).getOrThrow()
 
         val result = repository.adoptRemoteShipment(shipment(ACCEPTED))
 
@@ -154,7 +197,7 @@ class ShipmentLifecycleTest {
     @Test
     fun aDeviceCannotBeMovedBackwardsByARemoteStatus() = runBlocking {
         val repository = ShipmentRepositoryImpl(FakeShipmentDao())
-        repository.saveShipment(shipment(IN_TRANSIT)).getOrThrow()
+        repository.adoptRemoteShipment(shipment(IN_TRANSIT)).getOrThrow()
         repository.adoptRemoteShipment(shipment(ACCEPTED)).getOrThrow()
 
         val result = repository.adoptRemoteShipment(shipment(IN_TRANSIT))
