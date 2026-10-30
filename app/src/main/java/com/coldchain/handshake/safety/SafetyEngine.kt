@@ -1,6 +1,7 @@
 package com.coldchain.handshake.safety
 
 import com.coldchain.handshake.models.Alert
+import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.TemperatureEvent
@@ -19,7 +20,8 @@ import com.coldchain.handshake.repository.ShipmentRepository
  */
 class SafetyEngine(
     private val alertRepository: AlertRepository? = null,
-    private val shipmentRepository: ShipmentRepository? = null
+    private val shipmentRepository: ShipmentRepository? = null,
+    private val alertNotifier: AlertNotifier = AlertNotifier.NONE
 ) {
 
     /**
@@ -65,15 +67,16 @@ class SafetyEngine(
     /**
      * Orchestrates end-to-end safety evaluation and repository persistence:
      * 1. Evaluates temperature history via [BreachDetector].
-     * 2. If a breach is detected:
-     *    - Creates and persists a [com.coldchain.handshake.models.AlertType.TEMPERATURE_BREACH] alert
-     *      starting at [com.coldchain.handshake.models.EscalationLevel.WORKER], unacknowledged.
-     *    - Applies quarantine transition to [com.coldchain.handshake.models.ShipmentStatus.QUARANTINED]
-     *      (preserving all other Shipment fields) and persists to [ShipmentRepository].
-     * 3. Surfaces persistence results on [SafetyDecision] so failures are never silently swallowed.
+     * 2. Persists an alert for each breached excursion and data gap that has none yet, starting at
+     *    [com.coldchain.handshake.models.EscalationLevel.WORKER], and notifies. Existing alerts are
+     *    left exactly as they are, so a repeat evaluation can't undo an acknowledgement.
+     * 3. If a breach is detected, applies quarantine transition to
+     *    [com.coldchain.handshake.models.ShipmentStatus.QUARANTINED] (preserving all other Shipment
+     *    fields) and persists to [ShipmentRepository].
+     * 4. Surfaces persistence results on [SafetyDecision] so failures are never silently swallowed.
      *    If required persistence repositories are unavailable, explicit failures are surfaced
      *    and [SafetyDecision.hasPersistenceFailure] will be true.
-     * 4. Returns the resulting [SafetyDecision].
+     * 5. Returns the resulting [SafetyDecision].
      */
     suspend fun processTelemetryAndEnforceSafety(
         shipment: Shipment,
@@ -81,18 +84,12 @@ class SafetyEngine(
         timestamp: Long = System.currentTimeMillis()
     ): SafetyDecision {
         val decision = evaluateShipment(shipment, events)
+        val alertSaveResult = saveNewAlerts(
+            AlertEscalationEngine.alertsFor(shipment.id, decision.evaluation, timestamp)
+        )
 
         if (decision.evaluation.hasBreach) {
-            // 1. Create and persist breach alert
-            val alert = AlertEscalationEngine.createBreachAlert(
-                shipmentId = shipment.id,
-                breachEvaluation = decision.evaluation,
-                timestamp = timestamp
-            )
-            val alertSaveResult = alertRepository?.saveAlert(alert)
-                ?: Result.failure(IllegalStateException("AlertRepository is required to persist breach alerts"))
-
-            // 2. Quarantine shipment and persist if status changed
+            // Quarantine shipment and persist if status changed
             val quarantinedShipment = QuarantineManager.applyQuarantine(shipment, decision.evaluation)
             val quarantineSaveResult = if (quarantinedShipment.status != shipment.status) {
                 shipmentRepository?.saveShipment(quarantinedShipment)
@@ -107,7 +104,21 @@ class SafetyEngine(
             )
         }
 
-        return decision
+        return decision.copy(alertSaveResult = alertSaveResult)
+    }
+
+    private suspend fun saveNewAlerts(alerts: List<Alert>): Result<Unit>? {
+        if (alerts.isEmpty()) return null
+        val repo = alertRepository
+            ?: return Result.failure(IllegalStateException("AlertRepository is required to persist breach alerts"))
+
+        return runCatching {
+            alerts.forEach { alert ->
+                if (repo.saveAlertIfAbsent(alert).getOrThrow()) {
+                    alertNotifier.onAlertRaised(alert)
+                }
+            }
+        }
     }
 
     /**
@@ -173,15 +184,8 @@ class SafetyEngine(
         timestamp: Long = System.currentTimeMillis()
     ): Alert? {
         val evaluation = evaluateShipment(shipment, events).evaluation
-        return if (evaluation.hasBreach) {
-            AlertEscalationEngine.createBreachAlert(
-                shipmentId = shipment.id,
-                breachEvaluation = evaluation,
-                timestamp = timestamp
-            )
-        } else {
-            null
-        }
+        return AlertEscalationEngine.alertsFor(shipment.id, evaluation, timestamp)
+            .firstOrNull { it.type != AlertType.DATA_GAP }
     }
 
     /**

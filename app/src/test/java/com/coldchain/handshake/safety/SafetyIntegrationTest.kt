@@ -119,7 +119,7 @@ class SafetyIntegrationTest {
         assertEquals("Disk I/O error writing alert", decision.alertSaveResult!!.exceptionOrNull()?.message)
 
         // Also test escalation persistence failure throws rather than silently swallowing
-        val testAlert = AlertEscalationEngine.createBreachAlert("SHIP-777", decision.evaluation)
+        val testAlert = AlertEscalationEngine.alertsFor("SHIP-777", decision.evaluation, baseTime).single()
         try {
             safetyEngine.escalateAlert(testAlert)
             fail("Expected exception when alert repository fails to save")
@@ -212,7 +212,8 @@ class SafetyIntegrationTest {
         assertEquals(TemperatureVerdict.UNKNOWN, decision.evaluation.verdict)
         assertFalse(decision.evaluation.temperaturePassed)
         assertFalse(decision.shouldQuarantine)
-        assertTrue(fakeAlertRepo.savedAlerts.isEmpty())
+        // Finding 6: the gap is reported, but it is not a breach.
+        assertEquals(listOf(AlertType.DATA_GAP), fakeAlertRepo.savedAlerts.map { it.type })
         assertEquals(ShipmentStatus.IN_TRANSIT, fakeShipmentRepo.getShipment("SHIP-777").first()?.status)
     }
 
@@ -395,7 +396,7 @@ class SafetyIntegrationTest {
         assertEquals("ShipmentRepository is required to persist shipment quarantine", decision.quarantineSaveResult!!.exceptionOrNull()?.message)
 
         // 2. escalateAlert must throw IllegalStateException rather than silently succeed
-        val alert = AlertEscalationEngine.createBreachAlert(sampleShipment.id, decision.evaluation)
+        val alert = AlertEscalationEngine.alertsFor(sampleShipment.id, decision.evaluation, baseTime).single()
         try {
             pureEngine.escalateAlert(alert)
             fail("Expected IllegalStateException when calling escalateAlert without AlertRepository")

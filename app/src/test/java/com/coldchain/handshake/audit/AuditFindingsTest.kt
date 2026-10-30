@@ -93,7 +93,7 @@ class AuditFindingsTest {
     }
 
     @Test
-    fun finding5_everyTickAfterABreachCreatesAnotherBreachAlert() = runTest {
+    fun finding5_oneExcursionCreatesOneAlert() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val alerts = FakeAlertRepository()
         val shipments = FakeShipmentRepository()
@@ -114,7 +114,6 @@ class AuditFindingsTest {
         repeat(20) { sim.tickOnce(60) }         // 20 normal minutes after cooling down
 
         val breachAlerts = alerts.savedAlerts.count { it.type == AlertType.TEMPERATURE_BREACH }
-        println("TEMPERATURE_BREACH alerts created for one excursion: $breachAlerts")
-        assertTrue("one excursion produced $breachAlerts alerts", breachAlerts > 15)
+        assertEquals(1, breachAlerts)
     }
 }

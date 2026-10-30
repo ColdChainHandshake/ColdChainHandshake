@@ -388,6 +388,27 @@ class FakeAlertDao : AlertDao {
         flow.value = alerts.values.toList()
     }
 
+    override suspend fun insertAlertIfAbsent(alert: AlertEntity): Long {
+        if (alert.id in alerts) return -1L
+        upsertAlert(alert)
+        return alerts.size.toLong()
+    }
+
+    override suspend fun getOpenAlerts(): List<AlertEntity> {
+        return alerts.values.filter { !it.acknowledged }.sortedBy { it.timestamp }
+    }
+
+    override suspend fun escalateIfUnacknowledged(
+        id: String,
+        level: EscalationLevel,
+        pendingStatus: SyncStatus,
+        timestamp: Long
+    ): Int {
+        val alert = alerts[id]?.takeIf { !it.acknowledged } ?: return 0
+        upsertAlert(alert.copy(escalationLevel = level, syncStatus = pendingStatus, lastModifiedTimestamp = timestamp))
+        return 1
+    }
+
     override suspend fun getPendingAlerts(): List<AlertEntity> {
         return alerts.values.filter { it.syncStatus != SyncStatus.SYNCED }
     }

@@ -1,6 +1,7 @@
 package com.coldchain.handshake.safety
 
 import com.coldchain.handshake.models.Alert
+import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.repository.AlertRepository
 import com.coldchain.handshake.repository.ShipmentRepository
@@ -17,6 +18,9 @@ class FakeAlertRepository : AlertRepository {
     var shouldFail: Boolean = false
     var failureException: Throwable = RuntimeException("Alert repository write failure")
 
+    /** Runs straight after the open alerts are read, to simulate a change arriving at that moment. */
+    var onOpenAlertsRead: () -> Unit = {}
+
     override suspend fun saveAlert(alert: Alert): Result<Unit> {
         if (shouldFail) {
             return Result.failure(failureException)
@@ -29,6 +33,29 @@ class FakeAlertRepository : AlertRepository {
         }
         alertsFlow.value = savedAlerts.toList()
         return Result.success(Unit)
+    }
+
+    override suspend fun saveAlertIfAbsent(alert: Alert): Result<Boolean> {
+        if (shouldFail) {
+            return Result.failure(failureException)
+        }
+        if (savedAlerts.any { it.id == alert.id }) {
+            return Result.success(false)
+        }
+        saveAlert(alert)
+        return Result.success(true)
+    }
+
+    override suspend fun escalateIfUnacknowledged(alertId: String, level: EscalationLevel): Result<Boolean> {
+        val alert = savedAlerts.firstOrNull { it.id == alertId && !it.acknowledged } ?: return Result.success(false)
+        saveAlert(alert.copy(escalationLevel = level))
+        return Result.success(true)
+    }
+
+    override suspend fun getOpenAlerts(): List<Alert> {
+        val open = savedAlerts.filter { !it.acknowledged }
+        onOpenAlertsRead()
+        return open
     }
 
     override fun getActiveAlerts(shipmentId: String): Flow<List<Alert>> {

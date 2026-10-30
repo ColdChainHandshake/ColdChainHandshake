@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.SensorsOff
 import androidx.compose.material.icons.filled.Warning
@@ -288,6 +290,8 @@ private fun ShipmentAlertCard(
 
     val typeIcon = when (alert.type) {
         AlertType.TEMPERATURE_BREACH -> Icons.Default.Warning
+        AlertType.FREEZE_BREACH -> Icons.Default.AcUnit
+        AlertType.DATA_GAP -> Icons.Default.HelpOutline
         AlertType.LOGGER_DISCONNECT -> Icons.Default.SensorsOff
         AlertType.OPERATIONAL_WARNING -> Icons.Default.NotificationsActive
     }

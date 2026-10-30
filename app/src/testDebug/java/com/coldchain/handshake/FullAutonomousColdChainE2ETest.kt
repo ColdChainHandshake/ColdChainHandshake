@@ -478,6 +478,20 @@ class E2EAlertRepository : AlertRepository {
         return Result.success(Unit)
     }
 
+    override suspend fun saveAlertIfAbsent(alert: Alert): Result<Boolean> {
+        if (alerts.any { it.id == alert.id }) return Result.success(false)
+        saveAlert(alert)
+        return Result.success(true)
+    }
+
+    override suspend fun escalateIfUnacknowledged(alertId: String, level: EscalationLevel): Result<Boolean> {
+        val alert = alerts.firstOrNull { it.id == alertId && !it.acknowledged } ?: return Result.success(false)
+        saveAlert(alert.copy(escalationLevel = level))
+        return Result.success(true)
+    }
+
+    override suspend fun getOpenAlerts(): List<Alert> = alerts.filter { !it.acknowledged }
+
     override fun getActiveAlerts(shipmentId: String): Flow<List<Alert>> {
         return flow.map { list -> list.filter { it.shipmentId == shipmentId && !it.acknowledged } }
     }

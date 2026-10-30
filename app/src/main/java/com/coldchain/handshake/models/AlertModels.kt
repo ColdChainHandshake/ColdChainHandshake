@@ -5,6 +5,8 @@ package com.coldchain.handshake.models
  */
 enum class AlertType {
     TEMPERATURE_BREACH,
+    FREEZE_BREACH,
+    DATA_GAP,
     LOGGER_DISCONNECT,
     OPERATIONAL_WARNING
 }
@@ -28,5 +30,7 @@ data class Alert(
     val message: String,
     val timestamp: Long,
     val escalationLevel: EscalationLevel,
-    val acknowledged: Boolean
+    val acknowledged: Boolean,
+    val excursionStart: Long? = null,
+    val acknowledgedAt: Long? = null
 )

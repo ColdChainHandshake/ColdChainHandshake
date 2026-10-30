@@ -206,7 +206,7 @@ class TemperatureSimulator(
                 safetyEngine?.let { engine ->
                     try {
                         val events = telemetryRepository.getTemperatures(shipment.id).firstOrNull() ?: listOf(hashedEvent)
-                        val decision = engine.processTelemetryAndEnforceSafety(shipment, events, nextTimestamp)
+                        val decision = engine.processTelemetryAndEnforceSafety(shipment, events)
                         if (decision.shouldQuarantine) {
                             _activeShipment.value = _activeShipment.value?.copy(status = ShipmentStatus.QUARANTINED)
                         }

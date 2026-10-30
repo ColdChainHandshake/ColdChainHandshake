@@ -1,5 +1,6 @@
 package com.coldchain.handshake.safety
 
+import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
 import org.junit.Assert.assertEquals
@@ -9,20 +10,14 @@ import org.junit.Test
 
 class AlertEscalationEngineTest {
 
+    private fun breachAlert(hotMs: Long = 301_000L, temperature: Double = 9.5): Alert {
+        val evaluation = BreachDetector.evaluateTelemetry(hotThenSafe(1_700_000_000_000L, hotMs, temperature))
+        return AlertEscalationEngine.alertsFor("SHIP-001", evaluation, 1_700_000_000_000L).single()
+    }
+
     @Test
     fun createBreachAlertInitializesAtWorkerTierUnacknowledged() {
-        val evaluation = BreachEvaluation(
-            hasBreach = true,
-            cumulativeBreachDurationMs = 320_000L,
-            maxExcursionTemperature = 10.4,
-            excursionIntervalCount = 1
-        )
-
-        val alert = AlertEscalationEngine.createBreachAlert(
-            shipmentId = "SHIP-001",
-            breachEvaluation = evaluation,
-            timestamp = 1_700_000_000_000L
-        )
+        val alert = breachAlert(hotMs = 320_000L, temperature = 10.4)
 
         assertEquals("SHIP-001", alert.shipmentId)
         assertEquals(AlertType.TEMPERATURE_BREACH, alert.type)
@@ -34,11 +29,7 @@ class AlertEscalationEngineTest {
 
     @Test
     fun deterministicEscalationFollowsWorkerSupervisorPharmacistChain() {
-        val evaluation = BreachEvaluation(
-            hasBreach = true,
-            cumulativeBreachDurationMs = 301_000L,
-        )
-        val initialAlert = AlertEscalationEngine.createBreachAlert("SHIP-001", evaluation)
+        val initialAlert = breachAlert()
         assertEquals(EscalationLevel.WORKER, initialAlert.escalationLevel)
 
         // Step 1: Worker -> Supervisor
@@ -57,11 +48,7 @@ class AlertEscalationEngineTest {
 
     @Test
     fun acknowledgeAlertUpdatesAcknowledgedField() {
-        val evaluation = BreachEvaluation(
-            hasBreach = true,
-            cumulativeBreachDurationMs = 305_000L,
-        )
-        val alert = AlertEscalationEngine.createBreachAlert("SHIP-001", evaluation)
+        val alert = breachAlert()
         assertFalse(alert.acknowledged)
 
         val acknowledgedAlert = AlertEscalationEngine.acknowledgeAlert(alert)
