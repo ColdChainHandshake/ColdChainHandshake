@@ -6,13 +6,15 @@ Machine: Windows 11 Home (10.0.26200), Git Bash and PowerShell 5.1.
 |---|---|---|
 | Android Studio / JBR | **not installed** | The JBR path the prompt assumes does not exist |
 | System `java` | Oracle 25.0.2 | Too new for Gradle 8.2 and Kotlin 1.9.10 |
+| Other Java on the machine | Java 8 in Oracle XE, JRE 25.0.4.1 in the Red Hat extension | Neither fits; AGP 8.2 needs 17 |
 | `JAVA_HOME` | **unset** | |
 | Pinned `org.gradle.java.home` | **dead path** | Red Hat Java extension moved from 1.56.0 (JRE 21) to 1.58.0 (JRE 25) |
 | JDK used for this work | Temurin 17.0.20.1+1 | Portable, `D:\cch-tools\jdk-17.0.20.1+1`, SHA-256 checked against the Adoptium API. PATH and registry untouched |
 | `ANDROID_HOME` | **unset** | SDK is at `%LOCALAPPDATA%\Android\Sdk` |
 | SDK platforms / build-tools | android-34 / 34.0.0 | |
 | Emulator, system images, AVDs | **none** | `emulator/` and `system-images/` are absent |
-| `adb devices` | no devices | adb itself works |
+| SDK command-line tools | **none** | No `sdkmanager`. The `android` CLI installs SDK packages instead |
+| `adb devices` | no devices | adb works but is not on PATH: `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` |
 | Node / npm | 24.7.0 / 11.5.1 | |
 | Docker | Desktop 28.3.3, running | Data lives on C: (see disk below) |
 | `gh` | signed in, scopes `repo`, `workflow`, `read:org`, `gist` | |
@@ -24,8 +26,9 @@ Machine: Windows 11 Home (10.0.26200), Git Bash and PowerShell 5.1.
 
 ## Disk
 
-C: is 96% full (14 GB free of 317 GB). D: has 371 GB free. The Gradle cache, the Android SDK and Docker's
-data all sit on C:, so large downloads need watching. New tooling goes on D:.
+C: is 97% full (11 GB free of 317 GB, after 3 GB of local database images). D: has 371 GB free. The Gradle
+cache, the Android SDK and Docker's data all sit on C:, so large downloads need watching. Tooling Claude adds
+goes on D:. `HANDOFF.md` item 3 covers moving Docker and the Gradle cache.
 
 ## MCP servers and skills
 
@@ -44,8 +47,9 @@ deny and ask rules apply from the next session. The `local.properties` rule was 
 
 ## How to run Gradle on this machine
 
+Set these, then use the commands in `CLAUDE.md`, which explains why a plain test run isn't safe yet.
+
 ```bash
 export JAVA_HOME='D:\cch-tools\jdk-17.0.20.1+1'
 export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
-./gradlew testDebugUnitTest
 ```

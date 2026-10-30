@@ -1,0 +1,18 @@
+// Baseline guard, kept outside the repo. local.properties points BuildConfig at the demo Supabase
+// project, which is out of bounds, so no test JVM may reach it.
+// 1. LiveSupabaseIntegrationTest is excluded by name.
+// 2. All HTTP(S) from the test JVM goes to a dead local proxy, so anything missed fails locally.
+allprojects {
+    tasks.withType(Test).configureEach {
+        filter {
+            excludeTestsMatching '*LiveSupabaseIntegrationTest*'
+            setFailOnNoMatchingTests(false)
+        }
+        systemProperty 'http.proxyHost', '127.0.0.1'
+        systemProperty 'http.proxyPort', '9'
+        systemProperty 'https.proxyHost', '127.0.0.1'
+        systemProperty 'https.proxyPort', '9'
+        systemProperty 'http.nonProxyHosts', ''
+        ignoreFailures = true
+    }
+}

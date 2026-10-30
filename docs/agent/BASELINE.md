@@ -8,7 +8,7 @@
 | `origin/main` after `git fetch` | `f858a87` |
 | Ahead / behind | 0 / 0 |
 | Working branch | `rebuild/trust-core`, from `main` |
-| Uncommitted at start | Tool setup only (`.claude/`, `.mcp.json`, kit zip), kept on `local-snapshot-20261030` |
+| Uncommitted at start | Tool setup only (`.claude/`, `.mcp.json`, kit zip), kept on `local-snapshot-20261030` and still on disk. The second snapshot commit adds three files that ignore rules hid from the first |
 | Stashes | none |
 | Tracked files | 244 |
 | Main Kotlin | 63 files, 8,378 lines |
@@ -18,12 +18,12 @@
 
 ## Tests
 
-Command (the init script is kept outside the repo, see `DECISIONS.md`):
+Command (the run used a scratch copy of the same script):
 
 ```bash
 ./gradlew testDebugUnitTest --no-daemon --console=plain --continue \
   -Dorg.gradle.java.home='D:/cch-tools/jdk-17.0.20.1+1' \
-  --init-script baseline-guard.init.gradle
+  --init-script docs/agent/baseline-guard.init.gradle
 ```
 
 Last lines: `BUILD SUCCESSFUL in 3m 50s`, `25 actionable tasks: 25 executed`.
@@ -44,7 +44,8 @@ overrides it with `-D`.
 
 ## Findings 1 to 16 against the local code
 
-`HEAD` is the reviewed commit, and each finding was also confirmed by reading the code. All 16 stand.
+The starting commit `f858a87` is the reviewed commit, and each finding was also confirmed by reading the code.
+All 16 stand.
 
 | # | Status | Evidence |
 |---|---|---|
@@ -62,7 +63,7 @@ overrides it with `-D`.
 | 12 | Confirmed | `TransitScreen.kt:437-447` builds an `IN_TRANSIT` shipment from QR text |
 | 13 | Confirmed | `HandoverOrchestrator.kt:57` takes `temperaturePassed` from the caller |
 | 14 | Confirmed | `HandoverEntity.kt:16` unique index on `shipmentId` |
-| 15 | Confirmed | No `ViewModel` under `ui/`; `RepositoryProvider.kt:31` global object; `:144` and `TemperatureSimulator.kt:45` uncancelled scopes; `TemperatureEventDao.kt:63` demo corruption method in production code |
+| 15 | Confirmed | No `ViewModel` under `ui/`; `RepositoryProvider.kt:31` global object; scopes at `:144` (cancelled only from `reset()`, which only tests reach), `TemperatureSimulator.kt:45` and `ChaosAwareNetworkMonitor.kt:30` are never cancelled in production; `TemperatureEventDao.kt:63` demo corruption method in production code |
 | 16 | Confirmed | `gradle.properties:1`; `LiveSupabaseIntegrationTest`; `app/build.gradle:25` targetSdk 34; no `.github/`; `README.md` ends inside a code block |
 
 ## Differences from the brief
@@ -73,10 +74,15 @@ These don't change the findings, but they affect the plan:
    `local.properties` points at the demo project and a plain `./gradlew testDebugUnitTest` would write to and
    delete from it. That same assertion fails on any clean clone.
 2. **Four tables have no committed schema.** `shipments`, `temperature_events`, `alerts` and `handovers` were
-   created by hand. `0000_legacy_schema` rebuilds them from `RemoteDtos.kt`, so local tests have real tables.
+   created by hand. Task 1.3 has to rebuild them from `RemoteDtos.kt`, or the local database has nothing to lock
+   down.
 3. **`testDataSourceGracefulFailureWithPlaceholder` attempts a real connection** to a placeholder host, so the
    default suite is not fully offline. Phase 1 has to fix this too.
 4. **The audit test uses its own numbers.** See the mapping in `DECISIONS.md`.
 5. **The Supabase MCP server is read-only.** See `HANDOFF.md`, Q1.
 6. **Dev database not reachable yet.** The security advisors returned an empty list, but `list_tables` and
    `list_migrations` timed out, so that empty list is not evidence that the project is clean.
+7. **Clean-clone problems the review did not list.** `gradlew` is committed without its executable bit, so
+   `./gradlew` fails on Linux CI, and there is no `.gitattributes` to keep it LF. Phase 1 fixes both.
+8. **Task order is unsafe as written.** Task 1.1 removes the dead Java pin, the only thing stopping a plain test
+   run from reaching the demo project. Task 1.2 adds the guard. They swap, see `DECISIONS.md`.

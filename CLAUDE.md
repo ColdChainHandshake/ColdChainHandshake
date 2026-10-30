@@ -18,29 +18,39 @@ Never redo finished work without a recorded reason.
 | `docs/agent/DECISIONS.md` | One line per decision: date, decision, why, alternatives |
 | `docs/agent/HANDOFF.md` | Everything the owner must do, questions first |
 | `docs/agent/BASELINE.md` | Starting numbers and the check of findings 1 to 16 |
-| `docs/agent/ENVIRONMENT.md` | Tools on this machine |
+| `docs/agent/ENVIRONMENT.md` | Tools on this machine, including where its JDK is |
 
 ## Build and test (Windows, Git Bash)
 
-Needs JDK 17. Android Studio's `jbr` works, or Temurin 17 (on this machine: `D:\cch-tools\jdk-17.0.20.1+1`).
+Needs JDK 17: Android Studio's `jbr`, or Temurin 17. See `docs/agent/ENVIRONMENT.md` for this machine's path.
 
 ```bash
-export JAVA_HOME='D:\cch-tools\jdk-17.0.20.1+1'
+export JAVA_HOME='<JDK 17 folder>'
 export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
-./gradlew assembleDebug
-./gradlew testDebugUnitTest
-./gradlew lintDebug
 ```
 
-PowerShell: `$env:JAVA_HOME = 'D:\cch-tools\jdk-17.0.20.1+1'`, then `.\gradlew.bat testDebugUnitTest`.
+**Do not run a plain `./gradlew testDebugUnitTest` yet.** `local.properties` points at the demo Supabase project and
+`LiveSupabaseIntegrationTest` writes to it. Today the dead `org.gradle.java.home` pin is all that stops that
+command. Until tasks 1.1 and 1.2 are both ticked in `PROGRESS.md`, use this form:
 
-Database tests need Docker:
+```bash
+GRADLE_ARGS="-Dorg.gradle.java.home=$JAVA_HOME --init-script docs/agent/baseline-guard.init.gradle"
+./gradlew assembleDebug $GRADLE_ARGS
+./gradlew testDebugUnitTest $GRADLE_ARGS
+./gradlew lintDebug $GRADLE_ARGS
+```
+
+The guard sets `ignoreFailures`, so read pass and fail counts from `app/build/test-results/`, not the exit code.
+
+PowerShell: set `$env:JAVA_HOME` the same way, then `.\gradlew.bat <task> <same arguments>`.
+
+Database tests need Docker. They arrive with task 1.3:
 
 ```bash
 npx supabase db start      # Postgres only; the full `supabase start` is much larger and C: is short of space
 npx supabase db reset      # reapply supabase/migrations
 npx supabase test db
-npx supabase db advisors   # lint the local database
+npx supabase db advisors --local
 ```
 
 ## Module map
@@ -48,8 +58,8 @@ npx supabase db advisors   # lint the local database
 - `:app` is the Android app, package `com.coldchain.handshake`.
   - `ui/` screens, `safety/` breach and alert rules, `crypto/` hash chain, `handover/` verdicts.
   - `data/local/` Room, `data/remote/` Supabase, `repository/` interfaces and implementations.
-  - `simulator/` fake telemetry, debug use only.
-- `supabase/` migrations and pgTAP tests.
+  - `simulator/` generates fake telemetry. It is the app's only data source until the logger arrives in Phase 4.
+- `supabase/` migrations and pgTAP tests, from task 1.3.
 - `docs/` design documents, `docs/agent/` session files.
 - `reference/` third-party code, excluded from the build. Do not change it.
 

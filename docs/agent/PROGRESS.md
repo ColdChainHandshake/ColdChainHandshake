@@ -1,19 +1,19 @@
 # Progress
 
-**Next action:** Phase 1, task 1.1.
+**Next action:** Phase 1, task 1.2, then 1.1 (order swapped, see `DECISIONS.md`).
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
 ## Phase 0: Recon and safety net
 
-- [x] 0.1 Inventory the folder. Done, no commit needed (`docs/agent/BASELINE.md`)
-- [x] 0.2 Snapshot uncommitted items. Done, branch `local-snapshot-20261030` at `8549c99`
+- [x] 0.1 Inventory the folder. Done in `4f0257b` (`docs/agent/BASELINE.md`)
+- [x] 0.2 Snapshot uncommitted items. Done, branch `local-snapshot-20261030` (two commits)
 - [x] 0.3 Fetch, compare, create `rebuild/trust-core`. Done, `f858a87` on both sides, 0 ahead and 0 behind
-- [x] 0.4 Environment check. Done (`docs/agent/ENVIRONMENT.md`, `docs/agent/HANDOFF.md`)
-- [x] 0.5 Baseline build and tests. Done, see below
-- [x] 0.6 Run `AuditFindingsTest`. Done, 5 of 5 pass (bugs present)
-- [x] 0.7 Re-verify findings 1 to 16. Done, all stand (`docs/agent/BASELINE.md`)
-- [x] 0.8 Create `CLAUDE.md`. Done
+- [x] 0.4 Environment check. Done in `720856f` (`docs/agent/ENVIRONMENT.md`, `docs/agent/HANDOFF.md`)
+- [x] 0.5 Baseline build and tests. Done in `4f0257b`, see below
+- [x] 0.6 Run `AuditFindingsTest`. Done in `4f0257b`, 5 of 5 pass (bugs present)
+- [x] 0.7 Re-verify findings 1 to 16. Done in `4f0257b`, all stand (`docs/agent/BASELINE.md`)
+- [x] 0.8 Create `CLAUDE.md`. Done in `720856f`
 
 Proof for 0.5 and 0.6:
 
@@ -24,15 +24,15 @@ TOTAL 164 failures 0 errors 0 skipped 0
 live test classes in results: []
 ```
 
-**Gate 0:** pending fresh-subagent review.
+**Gate 0:** the fresh reviewer failed criteria 3 and 5 (unsafe and broken commands, emulator steps that couldn't run). Both are fixed in the commit that follows this review, and the other six criteria and the counting claim passed.
 
 ## Phase 1: Unblock and lock down
 
-- [ ] 1.1 Remove `org.gradle.java.home`
-- [ ] 1.2 Make the live test opt-in, keep default tests offline
-- [ ] 1.3 `supabase init`, `0001_lockdown`, pgTAP (files drafted, not yet run)
-- [ ] 1.3b Apply to dev project. Blocked: read-only MCP, `HANDOFF.md` Q1
-- [ ] 1.4 Lockdown guidance in `HANDOFF.md`. Done in draft, kept current
+- [ ] 1.2 Make the live test opt-in, keep default tests offline (runs first)
+- [ ] 1.1 Remove `org.gradle.java.home`, then replace the interim commands in `CLAUDE.md`
+- [ ] 1.3 `supabase init`, `0001_lockdown`, pgTAP
+- [ ] 1.3b Apply to dev project. Status: `blocked`, read-only MCP, `HANDOFF.md` Q1
+- [x] 1.4 Lockdown guidance in `HANDOFF.md`. Done in `720856f`
 - [ ] 1.5 Room schema export, no destructive fallback, migration test
 - [ ] 1.6 Move demo corruption and chaos paths to the debug source set
 - [ ] 1.7 GitHub Actions workflow

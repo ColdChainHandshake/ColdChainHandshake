@@ -17,8 +17,15 @@ The database also timed out on `list_tables` and `list_migrations`, so the proje
 3. Choose one:
    - **Let Claude apply migrations:** delete `&read_only=true` from the URL in `.mcp.json`, then start a new
      Claude Code session. Gate 1 and Gate 3 can then finish without you.
-   - **Keep it read-only:** run `npx supabase link --project-ref yjvoxozaoiarwbusyqke` and then
-     `npx supabase db push` yourself after each phase. Claude then checks the result with `get_advisors`.
+   - **Keep it read-only:** run these yourself after each phase, and Claude checks the result with `get_advisors`:
+
+     ```powershell
+     npx supabase login
+     npx supabase link --project-ref yjvoxozaoiarwbusyqke
+     npx supabase db push
+     ```
+
+     `link` asks for the database password, which you can reset in the project's database settings.
 
 ## Do these first
 
@@ -33,35 +40,66 @@ handovers. Claude is not allowed to touch that project.
 
 The old APK will stop syncing, which is intended. No data is deleted.
 
-### 2. Keep or replace the JDK
+### 2. Set `JAVA_HOME` and `ANDROID_HOME`
 
-Nothing on this PC could run the build: `JAVA_HOME` was unset, the only JDK is Oracle 25, and the path pinned in
-`gradle.properties` no longer exists (the Red Hat Java extension updated itself). Claude put a portable
-Temurin 17 at `D:\cch-tools\jdk-17.0.20.1+1`. It changed nothing on PATH or in the registry.
+Nothing on this PC could build the app. `JAVA_HOME` was unset, and the path pinned in `gradle.properties` no longer
+exists because the Red Hat Java extension updated itself. The JDKs that are installed don't fit: Oracle 25 is too
+new, and Oracle XE's bundled Java 8 is too old. The build needs JDK 17.
 
-Either way, set `JAVA_HOME` once so builds work outside Claude's sessions:
+Claude put a portable Temurin 17 at `D:\cch-tools\jdk-17.0.20.1+1`. It changed nothing on PATH or in the registry.
+Set both variables once, then open a new terminal:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('JAVA_HOME', 'D:\cch-tools\jdk-17.0.20.1+1', 'User')
+[Environment]::SetEnvironmentVariable('ANDROID_HOME', "$env:LOCALAPPDATA\Android\Sdk", 'User')
 ```
 
 If you install Android Studio instead, point `JAVA_HOME` at its `jbr` folder and delete `D:\cch-tools`.
 
-### 3. Install an emulator (needed for Gate 3 and Gate 5)
+Until task 1.1 is ticked in `PROGRESS.md`, plain Gradle commands still fail on the dead path in `gradle.properties`.
 
-The SDK has no emulator or system images, and Claude does not install tools beyond project dependencies. This
-is about 5 GB on C:, which has only 14 GB free, so see item 4 first. The two-account flow and the rotation,
-background and process-death checks can't be run without an emulator or a connected phone.
+### 3. Free space on C:
+
+C: is 97% full (11 GB free), and the local database images just used 3 GB of it. If it fills up, builds and the
+local database will start failing. Do this before item 4. In order of effect:
+
+1. **Move Docker's data to D:.** Docker Desktop, Settings, Resources, Advanced, Disk image location. Choose a
+   folder on D: and click Apply.
+2. **Move the Gradle cache to D:.** Run this, then open a new terminal. The cache rebuilds itself.
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('GRADLE_USER_HOME', 'D:\gradle-home', 'User')
+   ```
+
+3. **See what else is there.** `docker system df` shows image space. Several images belong to your other projects,
+   so remove only what you recognise with `docker image rm <name>`.
+
+### 4. Install an emulator (needed for Gate 3 and Gate 5)
+
+The SDK has no emulator or system images, and Claude does not install tools beyond project dependencies. The
+two-account flow and the rotation, background and process-death checks can't be run without one.
+
+The Android SDK's own `sdkmanager` isn't installed here, so use the `android` CLI, which is:
 
 ```powershell
-$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-& "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "emulator" "system-images;android-36;google_apis;x86_64"
+android sdk install emulator
+android emulator create
+android emulator list
+android emulator start <name from the list>
 ```
 
-If `cmdline-tools` is missing, install it from Android Studio's SDK Manager, or plug in a phone with USB
-debugging enabled instead, which is enough for most of these checks.
+`android emulator create` is taken from the CLI's help and has not been run on this PC. It downloads a system
+image of several GB onto C:, which is why item 3 comes first.
 
-### 4. Free space on C:
+A phone is a simpler alternative: enable USB debugging, plug it in, and accept the prompt. That covers most of
+these checks, and `adb devices` will list it. `adb` is not on PATH; it is at
+`%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`.
 
-C: is 96% full (14 GB free). The Gradle cache, the Android SDK and Docker's data all live there. If it fills up,
-builds and the local database will start failing.
+### 5. Optional: install `actionlint`
+
+Claude can only check the GitHub Actions workflow as valid YAML. `actionlint` checks it properly, and Claude will
+use it if it is on PATH.
+
+```powershell
+scoop install actionlint
+```
