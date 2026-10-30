@@ -53,9 +53,14 @@ Proof:
      Debug tests 170 failures 0 errors 0 | Release tests 157 failures 0 errors 0
      ./gradlew assembleRelease assembleDebug    BUILD SUCCESSFUL in 11m 38s
      release classes named ChaosScreen, InMemoryChaos*, ChaosAwareNetwork*: 0
+Lint ./gradlew lintDebug     failed first on PermissionImpliesUnsupportedChromeOsHardware, fixed in ced35bd
+     BUILD SUCCESSFUL in 36s (warnings only; dependency versions and kapt are Phase 3 work)
+Clone git clone, no local.properties, JAVA_HOME and ANDROID_HOME only
+     ./gradlew testDebugUnitTest    BUILD SUCCESSFUL in 6m 5s
+     tests 170 failures 0 errors 0 | live ran: False
 ```
 
-**Gate 1:** not started.
+**Gate 1:** local criteria met; fresh-subagent review running. The dev-project advisors criterion stays open until `HANDOFF.md` Q1 is answered.
 
 ## Phase 2: Safety logic
 
