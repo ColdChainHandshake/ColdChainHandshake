@@ -49,7 +49,7 @@ All 16 stand.
 
 | # | Status | Evidence |
 |---|---|---|
-| 1 | Confirmed | `supabase_shipment_custody.sql:20`, `supabase_shipment_locations.sql:22` `GRANT ALL` to anon; `SupabaseRemoteDataSource.kt:37-82` uses upsert everywhere |
+| 1 | Confirmed | At `f858a87`: `supabase_shipment_custody.sql:20`, `supabase_shipment_locations.sql:22` `GRANT ALL` to anon; `SupabaseRemoteDataSource.kt:37-82` uses upsert everywhere |
 | 2 | Confirmed | `HashChainService.kt:20` `GENESIS`, `:33` pipe-joined canonical form; proved by `finding1` and `finding2` in the audit test |
 | 3 | Confirmed | `MIN_SAFE_TEMPERATURE` is defined in `SafetyModels.kt:16` and never read in `BreachDetector.kt`; proved by `finding3` |
 | 4 | Confirmed | `HandoverScreen.kt:200-201` default-checked booleans; `SupabaseRemoteDataSource.transferCustodyWithConfirmation` upserts with last write winning |
