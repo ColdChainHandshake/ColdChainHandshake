@@ -5,7 +5,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(140);
+select plan(163);
 
 \set sender   '''aaaaaaaa-0000-0000-0000-000000000001'''
 \set courier  '''aaaaaaaa-0000-0000-0000-000000000002'''
@@ -359,6 +359,19 @@ select is(
   false,
   'a reading dated in the past is not flagged'
 );
+select lives_ok(
+  format(
+    'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
+    'SHIP-1',
+    (select jsonb_build_array(jsonb_build_object(
+       'seq', 4, 'logger_ts', ts, 'temp_centi_c', 500, 'prev_hash', pg_temp.head('SHIP-1'),
+       'hash', pg_temp.hash('SHIP-1', 'LOG-1', 4, ts, 500, pg_temp.head('SHIP-1'))
+     )) from (select (extract(epoch from now()) * 1000)::bigint + 5000 as ts) t),
+    pg_temp.head('SHIP-1'),
+    :device_courier::uuid
+  ),
+  'an honest reading can follow one with a bad clock'
+);
 
 -- Handover ----------------------------------------------------------------------------------------
 
@@ -461,9 +474,9 @@ select lives_ok(
     'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
     'SHIP-1',
     (select jsonb_build_array(jsonb_build_object(
-       'seq', 4, 'logger_ts', ts, 'temp_centi_c', 1500, 'prev_hash', pg_temp.head('SHIP-1'),
-       'hash', pg_temp.hash('SHIP-1', 'LOG-1', 4, ts, 1500, pg_temp.head('SHIP-1'))
-     )) from (select (extract(epoch from now()) * 1000)::bigint + 3660000 as ts) t),
+       'seq', 5, 'logger_ts', ts, 'temp_centi_c', 1500, 'prev_hash', pg_temp.head('SHIP-1'),
+       'hash', pg_temp.hash('SHIP-1', 'LOG-1', 5, ts, 1500, pg_temp.head('SHIP-1'))
+     )) from (select (extract(epoch from now()) * 1000)::bigint + 6000 as ts) t),
     pg_temp.head('SHIP-1'),
     :device_courier::uuid
   ),
@@ -489,7 +502,7 @@ select pg_temp.act_as(:courier);
 select throws_ok(
   format(
     'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
-    'SHIP-1', pg_temp.batch('SHIP-1', 5, array[500], pg_temp.head('SHIP-1')), pg_temp.head('SHIP-1'), :device_courier::uuid
+    'SHIP-1', pg_temp.batch('SHIP-1', 6, array[500], pg_temp.head('SHIP-1')), pg_temp.head('SHIP-1'), :device_courier::uuid
   ),
   'CC002', null, 'a former custodian cannot append'
 );
@@ -498,7 +511,7 @@ select pg_temp.act_as(:receiver);
 select throws_ok(
   format(
     'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
-    'SHIP-1', pg_temp.batch('SHIP-1', 5, array[500], pg_temp.head('SHIP-1')), pg_temp.head('SHIP-1'), :device_receiver::uuid
+    'SHIP-1', pg_temp.batch('SHIP-1', 6, array[500], pg_temp.head('SHIP-1')), pg_temp.head('SHIP-1'), :device_receiver::uuid
   ),
   'CC007', null, 'nothing can be added once a shipment is accepted'
 );
@@ -506,8 +519,8 @@ select throws_ok(
 select pg_temp.act_as(:sender);
 select is(
   (select count(*) from public.handover_confirmations where shipment_id = 'SHIP-1' and leg = 1),
-  3::bigint,
-  'the sender can read every confirmation'
+  4::bigint,
+  'every confirmation stays on the record, including the one made on older history'
 );
 select is(
   (select count(distinct device_id) from public.handover_confirmations where shipment_id = 'SHIP-1'),
@@ -515,8 +528,9 @@ select is(
   'each confirmation records its own device'
 );
 select is(
-  (select head_hash from public.handover_confirmations where shipment_id = 'SHIP-1' and user_id = :receiver::uuid),
-  pg_temp.head('SHIP-1'),
+  (select count(*) from public.handover_confirmations
+   where shipment_id = 'SHIP-1' and user_id = :receiver::uuid and head_hash = pg_temp.head('SHIP-1')),
+  1::bigint,
   'a confirmation records the history it was made on'
 );
 select isnt(
@@ -576,6 +590,28 @@ select is(
 );
 select is(pg_temp.custodian('SHIP-2'), :courier2::uuid, 'quarantine does not move custody by itself');
 
+-- New readings arrive, and the receiver changes their mind to PASS on the newer history.
+select pg_temp.act_as(:courier2);
+select lives_ok(
+  format(
+    'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
+    'SHIP-2', pg_temp.batch('SHIP-2', 2, array[500], pg_temp.head('SHIP-2')), pg_temp.head('SHIP-2'), :device_courier2::uuid
+  ),
+  'setup: readings continue under quarantine'
+);
+select pg_temp.act_as(:receiver);
+select is(
+  public.confirm_handover('SHIP-2', 2, :device_receiver::uuid, pg_temp.head('SHIP-2'), null, 'PASS') ->> 'status',
+  'QUARANTINED',
+  'a later PASS does not undo a quarantine'
+);
+select is(
+  (select count(*) from public.handover_confirmations
+   where shipment_id = 'SHIP-2' and leg = 2 and user_id = :receiver::uuid and verdict = 'FAIL'),
+  1::bigint,
+  'a later PASS does not erase the FAIL'
+);
+
 select pg_temp.act_as(:courier2);
 select is(
   public.confirm_handover('SHIP-2', 2, :device_courier2::uuid, pg_temp.head('SHIP-2'), :receiver::uuid) ->> 'state',
@@ -583,6 +619,39 @@ select is(
   'custody can still pass once the courier confirms'
 );
 select is(pg_temp.status('SHIP-2'), 'QUARANTINED', 'the shipment stays quarantined');
+
+-- Quarantine doesn't depend on who confirms first. Here a courier fails the leg before being named.
+select pg_temp.act_as(:sender);
+select lives_ok(
+  $$ select public.create_shipment('SHIP-4', 'vaccine-2-8-freeze-sensitive', 'LOG-1', 'A', 'B') $$,
+  'setup: a fourth shipment'
+);
+select lives_ok($$ select public.add_shipment_member('SHIP-4', 'courier@example.test', 'courier') $$, 'setup: first courier');
+select lives_ok($$ select public.add_shipment_member('SHIP-4', 'courier2@example.test', 'courier') $$, 'setup: next courier');
+select lives_ok($$ select public.dispatch_shipment('SHIP-4') $$, 'setup: dispatched');
+select pg_temp.act_as(:courier);
+select lives_ok(format('select public.start_custody(%L, %L)', 'SHIP-4', :device_courier::uuid), 'setup: picked up');
+
+select pg_temp.act_as(:courier2);
+select is(
+  public.confirm_handover('SHIP-4', 1, :device_courier2::uuid, pg_temp.head('SHIP-4'), null, 'FAIL', 'Box crushed') ->> 'status',
+  'IN_TRANSIT',
+  'a courier who has not been named cannot quarantine a shipment'
+);
+
+select pg_temp.act_as(:courier);
+select lives_ok(
+  format(
+    'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
+    'SHIP-4', pg_temp.batch('SHIP-4', 1, array[500], pg_temp.head('SHIP-4')), pg_temp.head('SHIP-4'), :device_courier::uuid
+  ),
+  'setup: the history moves on'
+);
+select is(
+  public.confirm_handover('SHIP-4', 1, :device_courier::uuid, pg_temp.head('SHIP-4'), :courier2::uuid) ->> 'status',
+  'QUARANTINED',
+  'naming someone who has already failed the leg quarantines, even on older history'
+);
 select is(
   (select reason from public.handover_confirmations where shipment_id = 'SHIP-2' and verdict = 'FAIL'),
   'Seal broken',
@@ -682,9 +751,14 @@ select throws_ok(
 
 select pg_temp.act_as(:courier);
 select is(
-  public.record_alert('SHIP-3', 'FREEZE_BREACH', 1, 'Frozen'),
+  public.record_alert('SHIP-3', 'FREEZE_BREACH', 1, 'Frozen') ->> 'id',
   'SHIP-3:FREEZE_BREACH:1',
   'the server builds the alert ID'
+);
+select is(
+  (select reported_by from public.alerts where id = 'SHIP-3:FREEZE_BREACH:1'),
+  :courier::uuid,
+  'an alert records who reported it'
 );
 
 select pg_temp.act_as(:outsider);
@@ -720,9 +794,10 @@ select is(
 );
 
 select pg_temp.act_as(:courier);
-select lives_ok(
-  $$ select public.record_alert('SHIP-3', 'FREEZE_BREACH', 1, 'Frozen again') $$,
-  'recording the same alert again is harmless'
+select is(
+  public.record_alert('SHIP-3', 'FREEZE_BREACH', 1, 'Frozen again') ->> 'created',
+  'false',
+  'recording the same alert again says it already existed'
 );
 select isnt(
   (select acknowledged_at from public.alerts where id = 'SHIP-3:FREEZE_BREACH:1'),
@@ -738,6 +813,64 @@ select is(
 select throws_ok(
   $$ select public.record_alert('SHIP-3', 'FREEZE_BREACH', null, 'No time') $$,
   'CC006', null, 'an alert needs a start time'
+);
+
+-- A custodian who confirmed older history has not confirmed what is there now.
+
+select pg_temp.act_as(:sender);
+select lives_ok(
+  $$ select public.create_shipment('SHIP-5', 'vaccine-2-8-freeze-sensitive', 'LOG-1', 'A', 'B') $$,
+  'setup: a fifth shipment'
+);
+select lives_ok($$ select public.add_shipment_member('SHIP-5', 'courier@example.test', 'courier') $$, 'setup: its courier');
+select lives_ok($$ select public.add_shipment_member('SHIP-5', 'receiver@example.test', 'receiver') $$, 'setup: its receiver');
+select lives_ok($$ select public.dispatch_shipment('SHIP-5') $$, 'setup: dispatched');
+
+select pg_temp.act_as(:courier);
+select lives_ok(format('select public.start_custody(%L, %L)', 'SHIP-5', :device_courier::uuid), 'setup: picked up');
+select is(
+  public.confirm_handover('SHIP-5', 1, :device_courier::uuid, pg_temp.head('SHIP-5'), :receiver::uuid) ->> 'state',
+  'WAITING',
+  'the custodian confirms the history as it stands'
+);
+
+-- One batch: a reading with a bad clock, then an honest one right after it.
+select lives_ok(
+  format(
+    'select public.append_readings(%L, %L::jsonb, %L, %L, ''signature'')',
+    'SHIP-5',
+    (select jsonb_build_array(
+       jsonb_build_object('seq', 1, 'logger_ts', ahead, 'temp_centi_c', 500, 'prev_hash', g, 'hash', h1),
+       jsonb_build_object('seq', 2, 'logger_ts', honest, 'temp_centi_c', 500, 'prev_hash', h1,
+         'hash', pg_temp.hash('SHIP-5', 'LOG-1', 2, honest, 500, h1))
+     )
+     from (
+       select g, ahead, honest, pg_temp.hash('SHIP-5', 'LOG-1', 1, ahead, 500, g) as h1
+       from (
+         select pg_temp.head('SHIP-5') as g,
+                (extract(epoch from now()) * 1000)::bigint + 3600000 as ahead,
+                (extract(epoch from now()) * 1000)::bigint + 1000 as honest
+       ) a
+     ) b),
+    pg_temp.head('SHIP-5'),
+    :device_courier::uuid
+  ),
+  'an honest reading can follow a bad clock within one batch'
+);
+
+select pg_temp.act_as(:receiver);
+select is(
+  public.confirm_handover('SHIP-5', 1, :device_receiver::uuid, pg_temp.head('SHIP-5'), null, 'PASS') ->> 'state',
+  'WAITING',
+  'a custodian''s confirmation of older history no longer counts'
+);
+select is(pg_temp.custodian('SHIP-5'), :courier::uuid, 'custody stays with the courier');
+
+select pg_temp.act_as(:courier);
+select is(
+  public.confirm_handover('SHIP-5', 1, :device_courier::uuid, pg_temp.head('SHIP-5'), :receiver::uuid) ->> 'state',
+  'TRANSFERRED',
+  'custody moves once the custodian confirms the current history'
 );
 
 -- Accounts and roles ------------------------------------------------------------------------------

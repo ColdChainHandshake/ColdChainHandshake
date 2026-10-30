@@ -146,8 +146,7 @@ create table public.handover_confirmations (
     check (vvm_stage in ('NOT_RECORDED', 'STAGE_1', 'STAGE_2', 'STAGE_3', 'STAGE_4')),
   shake_test text not null default 'NOT_DONE' check (shake_test in ('NOT_DONE', 'PASSED', 'FAILED')),
   server_time timestamptz not null default now(),
-  primary key (shipment_id, leg, user_id),
-  unique (shipment_id, leg, device_id)
+  primary key (shipment_id, leg, user_id, head_hash)
 );
 
 create index handover_confirmations_user_id_idx on public.handover_confirmations (user_id);
@@ -165,11 +164,13 @@ create table public.alerts (
   message text not null,
   acknowledged_by uuid references auth.users (id),
   acknowledged_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  reported_by uuid references auth.users (id)
 );
 
 create index alerts_shipment_id_idx on public.alerts (shipment_id);
 create index alerts_acknowledged_by_idx on public.alerts (acknowledged_by);
+create index alerts_reported_by_idx on public.alerts (reported_by);
 
 create table public.gps_points (
   id uuid primary key,
@@ -534,9 +535,13 @@ begin
     raise exception 'A batch holds between 1 and 1000 readings.' using errcode = 'CC006';
   end if;
 
+  -- A reading flagged as dated in the future doesn't count here, or one bad clock would make every
+  -- honest reading after it look back-dated.
   select r.logger_ts into v_prev_ts
   from public.readings r
-  where r.shipment_id = p_shipment_id and r.seq = v_head.last_seq;
+  where r.shipment_id = p_shipment_id and not r.clock_ahead
+  order by r.seq desc
+  limit 1;
 
   v_earliest_ms := (extract(epoch from v_shipment.created_at) * 1000)::bigint - private.clock_tolerance_ms();
 
@@ -580,7 +585,9 @@ begin
 
     v_running_head := v_hash;
     v_running_seq := v_seq;
-    v_prev_ts := v_ts;
+    if v_ts <= v_now_ms + private.clock_tolerance_ms() then
+      v_prev_ts := v_ts;
+    end if;
   end loop;
 
   update public.chain_heads h
@@ -622,7 +629,6 @@ declare
   v_role text;
   v_current_leg integer;
   v_is_custodian boolean;
-  v_mine public.handover_confirmations;
   v_releasing public.handover_confirmations;
   v_receiving public.handover_confirmations;
 begin
@@ -673,48 +679,45 @@ begin
     end if;
   end if;
 
-  select c.* into v_mine
-  from public.handover_confirmations c
-  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_uid;
-
-  if v_mine.head_hash = p_head_hash then
+  if exists (
+    select 1 from public.handover_confirmations c
+    where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_uid and c.head_hash = p_head_hash
+  ) then
     raise exception 'You have already confirmed this history.' using errcode = 'CC008';
   end if;
 
-  -- A confirmation of older history no longer counts, so its owner confirms again.
+  -- Each confirmation is a new row and none is ever changed, so an earlier verdict stays on the record
+  -- after its owner confirms again on newer history.
   insert into public.handover_confirmations (
     shipment_id, leg, user_id, role, device_id, head_hash, to_user, verdict, reason, vvm_stage, shake_test
   ) values (
     p_shipment_id, p_leg, v_uid, v_role, p_device_id, p_head_hash, p_to_user,
     p_verdict, p_reason, p_vvm_stage, p_shake_test
-  )
-  on conflict (shipment_id, leg, user_id) do update set
-    device_id = excluded.device_id,
-    head_hash = excluded.head_hash,
-    to_user = excluded.to_user,
-    verdict = excluded.verdict,
-    reason = excluded.reason,
-    vvm_stage = excluded.vvm_stage,
-    shake_test = excluded.shake_test,
-    server_time = now();
+  );
 
   select c.* into v_releasing
   from public.handover_confirmations c
-  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_custodian;
+  where c.shipment_id = p_shipment_id and c.leg = p_leg
+    and c.user_id = v_custodian and c.head_hash = v_head.head_hash;
 
-  if not v_is_custodian and p_verdict <> 'PASS'
-     and (v_role = 'receiver' or v_releasing.to_user = v_uid) then
+  -- Checked on every confirmation, against everything said on this leg, so the outcome is the same
+  -- whoever confirms first. A later PASS doesn't undo this: nothing moves a shipment out of quarantine
+  -- except a replacement request.
+  if exists (
+    select 1 from public.handover_confirmations c
+    where c.shipment_id = p_shipment_id and c.leg = p_leg and c.verdict <> 'PASS'
+      and (c.role = 'receiver' or c.user_id = v_releasing.to_user)
+  ) then
     update public.shipments s set status = 'QUARANTINED'
     where s.id = p_shipment_id and s.status = 'IN_TRANSIT';
   end if;
 
   select c.* into v_receiving
   from public.handover_confirmations c
-  where c.shipment_id = p_shipment_id and c.leg = p_leg and c.user_id = v_releasing.to_user;
+  where c.shipment_id = p_shipment_id and c.leg = p_leg
+    and c.user_id = v_releasing.to_user and c.head_hash = v_head.head_hash;
 
-  if v_receiving.user_id is null
-     or v_releasing.head_hash <> v_head.head_hash
-     or v_receiving.head_hash <> v_head.head_hash then
+  if v_receiving.user_id is null then
     return jsonb_build_object(
       'state', 'WAITING',
       'status', (select s.status from public.shipments s where s.id = p_shipment_id)
@@ -723,10 +726,7 @@ begin
 
   perform private.transfer_custody(p_shipment_id, p_leg, v_receiving.user_id, v_receiving.device_id);
 
-  if v_receiving.verdict <> 'PASS' then
-    update public.shipments s set status = 'QUARANTINED'
-    where s.id = p_shipment_id and s.status = 'IN_TRANSIT';
-  elsif v_receiving.role = 'receiver' then
+  if v_receiving.role = 'receiver' then
     update public.shipments s set status = 'ACCEPTED'
     where s.id = p_shipment_id and s.status = 'IN_TRANSIT';
   end if;
@@ -747,10 +747,11 @@ create function public.record_alert(
   p_type text,
   p_excursion_start bigint,
   p_message text
-) returns text
+) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   v_id text := p_shipment_id || ':' || p_type || ':' || p_excursion_start;
+  v_created boolean;
 begin
   if not private.is_member(p_shipment_id) then
     raise exception 'You are not on this shipment.' using errcode = 'CC002';
@@ -760,12 +761,14 @@ begin
     raise exception 'An alert needs the time its event began.' using errcode = 'CC006';
   end if;
 
-  -- An alert ID identifies one event, so seeing it again changes nothing.
-  insert into public.alerts (id, shipment_id, type, excursion_start, message)
-  values (v_id, p_shipment_id, p_type, p_excursion_start, p_message)
+  -- An alert ID identifies one event, so seeing it again changes nothing. The first report stands, and
+  -- the record shows who made it.
+  insert into public.alerts (id, shipment_id, type, excursion_start, message, reported_by)
+  values (v_id, p_shipment_id, p_type, p_excursion_start, p_message, (select auth.uid()))
   on conflict (id) do nothing;
 
-  return v_id;
+  v_created := found;
+  return jsonb_build_object('id', v_id, 'created', v_created);
 end
 $$;
 
