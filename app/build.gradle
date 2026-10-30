@@ -73,18 +73,31 @@ android {
         }
     }
 
+    sourceSets {
+        // Robolectric sees the variant's merged assets, not the test source set's.
+        debug.assets.srcDirs += files("$projectDir/schemas".toString())
+    }
+
     testOptions {
+        unitTests.includeAndroidResources = true
         unitTests.all { test ->
             if (!liveTestsEnabled) {
                 test.filter.excludeTestsMatching '*LiveSupabaseIntegrationTest'
-                // A dead proxy, so no unit test can reach a real server by accident.
+                // A dead proxy, so no unit test can reach a real server by accident. Maven Central
+                // is the one exception, because Robolectric downloads its Android jars from there.
                 test.systemProperty 'http.proxyHost', '127.0.0.1'
                 test.systemProperty 'http.proxyPort', '9'
                 test.systemProperty 'https.proxyHost', '127.0.0.1'
                 test.systemProperty 'https.proxyPort', '9'
-                test.systemProperty 'http.nonProxyHosts', ''
+                test.systemProperty 'http.nonProxyHosts', 'repo1.maven.org'
             }
         }
+    }
+}
+
+kapt {
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas".toString())
     }
 }
 
@@ -137,6 +150,8 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
     testImplementation "androidx.room:room-testing:$room_version"
+    testImplementation 'org.robolectric:robolectric:4.13'
+    testImplementation 'androidx.test:core:1.5.0'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     debugImplementation 'androidx.compose.ui:ui-tooling'

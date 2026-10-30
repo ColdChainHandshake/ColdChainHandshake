@@ -28,7 +28,7 @@ import com.coldchain.handshake.data.local.dao.ChaosEventDao
         ChaosEventEntity::class
     ],
     version = 1,
-    exportSchema = false
+    exportSchema = true
 )
 @TypeConverters(RoomTypeConverters::class)
 abstract class ColdChainDatabase : RoomDatabase() {

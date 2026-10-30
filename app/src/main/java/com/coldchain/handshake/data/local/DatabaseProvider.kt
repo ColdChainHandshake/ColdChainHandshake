@@ -23,13 +23,12 @@ object DatabaseProvider {
         }
     }
 
-    private fun buildDatabase(context: Context): ColdChainDatabase {
+    internal fun buildDatabase(context: Context, name: String = DATABASE_NAME): ColdChainDatabase {
         return Room.databaseBuilder(
             context,
             ColdChainDatabase::class.java,
-            DATABASE_NAME
+            name
         )
-            .fallbackToDestructiveMigration()
             .build()
     }
 
