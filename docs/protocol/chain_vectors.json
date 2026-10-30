@@ -1,0 +1,166 @@
+{
+  "chain_version": 2,
+  "note": "Generated from CANONICAL_ENCODING.md by a standalone script, not by the app or the database.",
+  "genesis": [
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "sender_id": "11111111-1111-1111-1111-111111111111",
+      "product_profile_id": "vaccine-2-8-freeze-sensitive",
+      "logger_id": "LOG-1",
+      "created_at_ms": 1700000000000,
+      "expected_hash": "89f314eda360a310c15e3389b28d4ae5111dbb27bb26ab7503a6cb47b6bf9c74"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "sender_id": "11111111-1111-1111-1111-111111111111",
+      "product_profile_id": "vaccine-2-8-freeze-sensitive",
+      "logger_id": "LOG-✓",
+      "created_at_ms": 1700000000000,
+      "expected_hash": "2515fc6a4706e37a533d2b09555560f356dfaa1fbc21bd6936a99ea392f72943"
+    },
+    {
+      "shipment_id": "AB",
+      "sender_id": "11111111-1111-1111-1111-111111111111",
+      "product_profile_id": "vaccine-2-8-freeze-sensitive",
+      "logger_id": "C",
+      "created_at_ms": 1,
+      "expected_hash": "8aaa79a6ce6dc76bc54862b58d40641f2378548124bbdaee4f0816c20c2e0283"
+    },
+    {
+      "shipment_id": "A",
+      "sender_id": "11111111-1111-1111-1111-111111111111",
+      "product_profile_id": "vaccine-2-8-freeze-sensitive",
+      "logger_id": "BC",
+      "created_at_ms": 1,
+      "expected_hash": "76f27d7a79edcbe53196bb1fcb8cb1aee88790d49fa41dca820f01ff84c6ea22"
+    }
+  ],
+  "readings": [
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 1,
+      "logger_ts": 1700000060000,
+      "temp_centi_c": 500,
+      "prev_hash": "89f314eda360a310c15e3389b28d4ae5111dbb27bb26ab7503a6cb47b6bf9c74",
+      "expected_hash": "647dc6c1be22d610e63fc79a71a826f048659c2fbdcacdc176a741f528e33315"
+    },
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 2,
+      "logger_ts": 1700000120000,
+      "temp_centi_c": 200,
+      "prev_hash": "647dc6c1be22d610e63fc79a71a826f048659c2fbdcacdc176a741f528e33315",
+      "expected_hash": "bb14fa126ac81f3ea191bbd65e9bbff21f56c8e7ccd9f61789358cbc26e65a88"
+    },
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 3,
+      "logger_ts": 1700000180000,
+      "temp_centi_c": 800,
+      "prev_hash": "bb14fa126ac81f3ea191bbd65e9bbff21f56c8e7ccd9f61789358cbc26e65a88",
+      "expected_hash": "9ff445dffbd31caf44a70558c66bb2a3478f18f8dbde028e899a1a570038eead"
+    },
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 4,
+      "logger_ts": 1700000240000,
+      "temp_centi_c": -350,
+      "prev_hash": "9ff445dffbd31caf44a70558c66bb2a3478f18f8dbde028e899a1a570038eead",
+      "expected_hash": "5d73497baf612c54ac91e549c198ded72acd8b8a0860fb944399d076d6049c2e"
+    },
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 5,
+      "logger_ts": 1700000300000,
+      "temp_centi_c": 1150,
+      "prev_hash": "5d73497baf612c54ac91e549c198ded72acd8b8a0860fb944399d076d6049c2e",
+      "expected_hash": "9be6e33882739a04f2b18c3589238c22de48ec218bd323ee65f80a8fd6df94ed"
+    },
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 6,
+      "logger_ts": 1700000360000,
+      "temp_centi_c": -2147483648,
+      "prev_hash": "9be6e33882739a04f2b18c3589238c22de48ec218bd323ee65f80a8fd6df94ed",
+      "expected_hash": "f49ec679fd242d9ee2c6e9c34a5e20d2b18b0893c87eca812c8055ea91c51e1e"
+    },
+    {
+      "shipment_id": "SHIP-VECTOR-1",
+      "logger_id": "LOG-1",
+      "seq": 7,
+      "logger_ts": 1700000420000,
+      "temp_centi_c": 2147483647,
+      "prev_hash": "f49ec679fd242d9ee2c6e9c34a5e20d2b18b0893c87eca812c8055ea91c51e1e",
+      "expected_hash": "d63fb14cd4a2c4be841e0e8f3ff356341f43c13678fde211b2be484a30a9892a"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 1,
+      "logger_ts": 1700000060000,
+      "temp_centi_c": 500,
+      "prev_hash": "2515fc6a4706e37a533d2b09555560f356dfaa1fbc21bd6936a99ea392f72943",
+      "expected_hash": "cba6da384801098087b582bc76579bbd5a63fcb0ec141c851ff3e2a960fec2d3"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 2,
+      "logger_ts": 1700000120000,
+      "temp_centi_c": 200,
+      "prev_hash": "cba6da384801098087b582bc76579bbd5a63fcb0ec141c851ff3e2a960fec2d3",
+      "expected_hash": "288a36e85379a28c6c668042ca4981c5a2550758c8173ce91b5182bf3a26ed42"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 3,
+      "logger_ts": 1700000180000,
+      "temp_centi_c": 800,
+      "prev_hash": "288a36e85379a28c6c668042ca4981c5a2550758c8173ce91b5182bf3a26ed42",
+      "expected_hash": "d53b0ee3f56d90942d9b4c0e7b753d853a0aa1b8c0305c50b16429020cd43aa5"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 4,
+      "logger_ts": 1700000240000,
+      "temp_centi_c": -350,
+      "prev_hash": "d53b0ee3f56d90942d9b4c0e7b753d853a0aa1b8c0305c50b16429020cd43aa5",
+      "expected_hash": "4fac74e029bcaff5eae8b4694abe925c268e60f94280ef35be60d1f3e992492a"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 5,
+      "logger_ts": 1700000300000,
+      "temp_centi_c": 1150,
+      "prev_hash": "4fac74e029bcaff5eae8b4694abe925c268e60f94280ef35be60d1f3e992492a",
+      "expected_hash": "3a22cf63f5d654e416518fe78cc9c0ad651be6c9b84c7bb32b8dcea769dc0b04"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 6,
+      "logger_ts": 1700000360000,
+      "temp_centi_c": -2147483648,
+      "prev_hash": "3a22cf63f5d654e416518fe78cc9c0ad651be6c9b84c7bb32b8dcea769dc0b04",
+      "expected_hash": "5c8328c5d861aaa742551240fd2052db6e5c749348fbbbf9db080c27def02c0e"
+    },
+    {
+      "shipment_id": "SHIP-é-€",
+      "logger_id": "LOG-✓",
+      "seq": 7,
+      "logger_ts": 1700000420000,
+      "temp_centi_c": 2147483647,
+      "prev_hash": "5c8328c5d861aaa742551240fd2052db6e5c749348fbbbf9db080c27def02c0e",
+      "expected_hash": "8ee007b9c6026354db5e285e77212303f43cdcc0c169e76cca156582f2c582aa"
+    }
+  ]
+}

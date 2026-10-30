@@ -2,36 +2,60 @@
 -- list of names, and at each kind of access, because the checks in 0001_lockdown.test.sql only see anon
 -- and PUBLIC through information_schema, which leaves out materialized views.
 --
--- When Phase 3 grants authenticated its access, each grant goes on the allow-list in the test it
--- affects. Anon stays empty.
+-- Each grant to authenticated is on an allow-list here, so adding one is a deliberate change to this
+-- file. Anon has none.
 
 begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(12);
+select plan(15);
 
 -- Privileges on every table-like object, including views and materialized views.
 select is_empty(
   $$ select c.relname, r.role
      from pg_class c
      join pg_namespace n on n.oid = c.relnamespace
-     cross join (values ('anon'), ('authenticated'), ('public')) as r(role)
+     cross join (values ('anon'), ('public')) as r(role)
      where n.nspname = 'public'
        and c.relkind in ('r', 'p', 'v', 'm', 'f')
        and has_table_privilege(r.role, c.oid, 'select, insert, update, delete, truncate, references, trigger') $$,
-  'no client role holds any table privilege on anything in public'
+  'anon and PUBLIC hold no table privilege on anything in public'
 );
 
 select is_empty(
   $$ select c.relname, r.role
      from pg_class c
      join pg_namespace n on n.oid = c.relnamespace
-     cross join (values ('anon'), ('authenticated'), ('public')) as r(role)
+     cross join (values ('anon'), ('public')) as r(role)
      where n.nspname = 'public'
        and c.relkind in ('r', 'p', 'v', 'm', 'f')
        and has_any_column_privilege(r.role, c.oid, 'select, insert, update, references') $$,
-  'no client role holds a column grant on anything in public'
+  'anon and PUBLIC hold no column grant on anything in public'
+);
+
+select is_empty(
+  $$ select c.relname
+     from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+       and c.relkind in ('r', 'p', 'v', 'm', 'f')
+       and (has_table_privilege('authenticated', c.oid, 'insert, update, delete, truncate, references, trigger')
+            or has_any_column_privilege('authenticated', c.oid, 'insert, update, references')) $$,
+  'authenticated can write nothing directly: every write goes through a function'
+);
+
+select bag_eq(
+  $$ select c.relname::text
+     from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+       and c.relkind in ('r', 'p', 'v', 'm', 'f')
+       and has_any_column_privilege('authenticated', c.oid, 'select') $$,
+  $$ values ('profiles'), ('devices'), ('product_profiles'), ('shipments'), ('shipment_members'),
+            ('chain_heads'), ('readings'), ('reading_batches'), ('custody_events'),
+            ('handover_confirmations'), ('alerts'), ('gps_points') $$,
+  'authenticated can read exactly the allow-listed tables'
 );
 
 select is_empty(
@@ -46,13 +70,38 @@ select is_empty(
 );
 
 select is_empty(
-  $$ select p.proname, r.role
+  $$ select p.oid::regprocedure::text, r.role
      from pg_proc p
      join pg_namespace n on n.oid = p.pronamespace
-     cross join (values ('anon'), ('authenticated'), ('public')) as r(role)
-     where n.nspname = 'public'
+     cross join (values ('anon'), ('public')) as r(role)
+     where n.nspname in ('public', 'private')
        and has_function_privilege(r.role, p.oid, 'execute') $$,
-  'no client role can execute a function in public'
+  'anon and PUBLIC can execute no function in public or private'
+);
+
+select bag_eq(
+  $$ select p.oid::regprocedure::text
+     from pg_proc p
+     join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname in ('public', 'private')
+       and has_function_privilege('authenticated', p.oid, 'execute') $$,
+  $$ values
+       ('complete_profile(text,text)'),
+       ('register_device(uuid,text)'),
+       ('create_shipment(text,text,text,text,text)'),
+       ('add_shipment_member(text,text,text)'),
+       ('dispatch_shipment(text)'),
+       ('start_custody(text,uuid)'),
+       ('request_replacement(text)'),
+       ('append_readings(text,jsonb,text,uuid,text)'),
+       ('confirm_handover(text,integer,uuid,text,text,text,text)'),
+       ('record_alert(text,text,text,bigint,text)'),
+       ('escalate_alert(text,text)'),
+       ('acknowledge_alert(text)'),
+       ('append_gps_points(text,uuid,jsonb)'),
+       ('private.is_member(text)'),
+       ('private.shares_shipment(uuid)') $$,
+  'authenticated can execute exactly the allow-listed functions'
 );
 
 select is_empty(
