@@ -64,14 +64,29 @@ Clone git clone, no local.properties, JAVA_HOME and ANDROID_HOME only
 
 ## Phase 2: Safety logic
 
-- [ ] 2.1 `ProductProfile`, per-shipment selection, seed the freeze-sensitive profile
-- [ ] 2.2 Heat and freeze evaluation; gaps produce UNKNOWN
-- [ ] 2.3 Alerts on state change, deterministic IDs, timed escalation, notifications
-- [ ] 2.4 Lifecycle state machine
-- [ ] 2.5 PASS, FAIL and UNKNOWN handovers, VVM and shake test, orchestrator recomputes the verdict
-- [ ] 2.6 Flip audit tests into regression tests
+- [x] 2.1 `ProductProfile`, per-shipment selection, seed the freeze-sensitive profile. Done in `14ebab9`, stored in `cff7532`, picker in `fcf04f9`
+- [x] 2.2 Heat and freeze evaluation; gaps produce UNKNOWN. Done in `14ebab9`
+- [x] 2.3 Alerts on state change, deterministic IDs, timed escalation, notifications. Done in `be3d59b` (rules) and `e21b382` (Android)
+- [x] 2.4 Lifecycle state machine. Done in `5972000`
+- [x] 2.5 PASS, FAIL and UNKNOWN handovers, VVM and shake test, orchestrator recomputes the verdict. Done in `cff7532` (rules) and `fcf04f9` (screen)
+- [x] 2.6 Flip audit tests into regression tests. Done in `fcf04f9`. The two chain tests stay in `AuditFindingsTest` until Phase 3
 
-**Gate 2:** not started.
+Proof:
+
+```text
+./gradlew testDebugUnitTest testReleaseUnitTest lintDebug
+BUILD SUCCESSFUL in 3m 3s
+Debug tests 263 failures 0 errors 0 skipped 0 | live: False
+Release tests 241 failures 0 errors 0 skipped 0 | live: False
+./gradlew assembleRelease        BUILD SUCCESSFUL (at fcf04f9)
+npx supabase test db             Files=2, Tests=47 ... Result: PASS
+npx supabase db advisors --local --fail-on info     No issues found
+Review mutations replayed in rolled-back transactions: 13 of 13 caught
+```
+
+Not proven yet: nothing has run on a phone or emulator. Screens are checked by Robolectric and the compiler only, and WorkManager timing by its test harness. The CI workflow has never run on GitHub.
+
+**Gate 2:** domain and screen work done; fresh-subagent review running.
 
 ## Phase 3: Toolchain upgrade and server trust
 
