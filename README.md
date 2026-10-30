@@ -80,3 +80,43 @@ HANDOVER
 PASS / FAIL
    ↓
 HASH VERIFICATION
+```
+
+---
+
+# ⚠️ Status
+
+This is a prototype and is not fit for real vaccine or medicine stock.
+
+The temperature readings are simulated, and the rebuild described in `docs/agent/MASTER_PROMPT.md` is in progress on
+the `rebuild/trust-core` branch. Until it finishes, parts of this page describe the demo rather than guarantees: the
+hash chain and the handover confirmations do not yet stop a determined courier from changing the record.
+
+---
+
+# 🛠️ Build and test
+
+You need JDK 17, either Android Studio's `jbr` folder or [Temurin 17](https://adoptium.net/), and the Android SDK.
+Docker is needed for the database tests only.
+
+Set `JAVA_HOME` to the JDK and `ANDROID_HOME` to the SDK, then run these from Git Bash:
+
+```bash
+./gradlew assembleDebug
+./gradlew testDebugUnitTest
+./gradlew lintDebug
+```
+
+From PowerShell, use `.\gradlew.bat` in place of `./gradlew`.
+
+Default unit tests are offline. To sync with a Supabase project, add `supabase.url` and `supabase.anon.key` to
+`local.properties`, which git ignores.
+
+Database tests run against a local Postgres container:
+
+```bash
+npx supabase db start
+npx supabase test db
+```
+
+Fault injection (the Chaos tab) exists only in debug builds.
