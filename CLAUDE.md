@@ -28,7 +28,7 @@ Needs JDK 17: Android Studio's `jbr`, or Temurin 17. See `docs/agent/ENVIRONMENT
 export JAVA_HOME='<JDK 17 folder>'
 export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
 ./gradlew assembleDebug
-./gradlew testDebugUnitTest
+./gradlew :core-domain:test testDebugUnitTest
 ./gradlew lintDebug
 ```
 
@@ -53,15 +53,17 @@ npx supabase db advisors --local
 
 ## Module map
 
+- `:core-domain` is pure Kotlin with no Android: `models/`, `safety/`, `crypto/`, `handover/` and the repository
+  interfaces. Rules live here. Package names match the app's.
 - `:app` is the Android app, package `com.coldchain.handshake`.
-  - `ui/` screens, `safety/` breach and alert rules, `crypto/` hash chain, `handover/` verdicts.
-  - `data/local/` Room, `data/remote/` Supabase, `repository/` interfaces and implementations.
+  - `ui/` screens, `alerts/` notifications and the escalation worker.
+  - `data/local/` Room, `data/remote/` Supabase, `repository/` implementations.
   - `simulator/` generates fake telemetry. It is the app's only data source until the logger arrives in Phase 4.
 - `supabase/` migrations and pgTAP tests.
 - `docs/` design documents, `docs/agent/` session files.
 - `reference/` third-party code, excluded from the build. Do not change it.
 
-Planned: `:core-domain` (pure Kotlin) in Phase 2 or 3, and `firmware/` in Phase 4.
+Planned: `firmware/` in Phase 4.
 
 ## Rules that matter most
 

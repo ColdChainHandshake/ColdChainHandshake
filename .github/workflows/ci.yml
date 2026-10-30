@@ -26,7 +26,7 @@ jobs:
 
       # testReleaseUnitTest and assembleRelease prove that release builds without the debug tools.
       - name: Unit tests, lint and release build
-        run: ./gradlew testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --continue
+        run: ./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --continue
 
       # Room rewrites these files during the build, so a difference means the schema changed
       # without being committed.
