@@ -20,7 +20,11 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
+import com.coldchain.handshake.repository.AccountState
+import com.coldchain.handshake.repository.FakeAccountRepository
+import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.ui.navigation.Screen
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -46,6 +50,8 @@ class AppSmokeTest {
 
     @get:Rule
     val compose = createEmptyComposeRule()
+
+    private val ready = AccountState.Ready("user-1", "ana@example.com", UserProfile("Ana", MemberRole.COURIER))
 
     @Before
     fun setUp() {
@@ -97,7 +103,44 @@ class AppSmokeTest {
     }
 
     @Test
+    fun someoneSignedOutCanOnlySeeSignIn() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Send Code")).fetchSemanticsNodes().isNotEmpty() }
+
+            assertTrue(Screen.bottomNavItems.none { screen ->
+                compose.onAllNodes(hasText(screen.title) and isSelectable()).fetchSemanticsNodes().isNotEmpty()
+            })
+        }
+    }
+
+    @Test
+    fun signingOutReturnsToSignIn() {
+        val account = FakeAccountRepository(ready)
+        RepositoryProvider.accountRepo = account
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNode(hasText("Sign Out")).performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("Send Code")).fetchSemanticsNodes().isNotEmpty() }
+        }
+
+        assertTrue(account.signedOut)
+    }
+
+    @Test
+    fun aPhoneThatBelongsToSomeoneElseSaysSo() {
+        RepositoryProvider.accountRepo = FakeAccountRepository(
+            ready.copy(deviceProblem = "This phone is registered to another account.")
+        )
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNode(hasText("This phone is registered to another account.")).assertExists()
+        }
+    }
+
+    @Test
     fun theAppStartsAndEveryTabOpens() {
+        RepositoryProvider.accountRepo = FakeAccountRepository(ready)
+
         ActivityScenario.launch(MainActivity::class.java).use {
             Screen.bottomNavItems.forEach { screen ->
                 val tab = hasText(screen.title) and isSelectable()

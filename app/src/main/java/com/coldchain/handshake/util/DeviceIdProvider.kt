@@ -4,13 +4,17 @@ import android.content.Context
 import java.util.UUID
 
 /**
- * Provides a persistent unique device identity for shipment custody tracking.
- * Stored locally in SharedPreferences across application restarts.
- * This is NOT authentication; it serves solely for physical custody ownership tracking.
+ * Names this install to the server, which is why it's a UUID. A name proves nothing alone: the
+ * device's key does that, and the two are registered together.
+ *
+ * It stays the same when someone signs out, so one phone can't confirm both sides of a handover by
+ * switching accounts. The server refuses a device already registered to someone else.
  */
 object DeviceIdProvider {
     private const val PREFS_NAME = "coldchain_device_prefs"
-    private const val KEY_DEVICE_ID = "device_id"
+
+    // Earlier versions kept a shorter ID under "device_id", which the server can't accept.
+    private const val KEY_DEVICE_ID = "device_uuid"
 
     @Volatile
     private var cachedDeviceId: String? = null
@@ -20,7 +24,7 @@ object DeviceIdProvider {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         var id = prefs.getString(KEY_DEVICE_ID, null)
         if (id.isNullOrBlank()) {
-            id = "DEV-" + UUID.randomUUID().toString().take(8).uppercase()
+            id = UUID.randomUUID().toString()
             prefs.edit().putString(KEY_DEVICE_ID, id).apply()
         }
         cachedDeviceId = id

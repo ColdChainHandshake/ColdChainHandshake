@@ -6,7 +6,13 @@ import com.coldchain.handshake.data.local.ColdChainDatabase
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.local.RoomTransactionRunner
 import com.coldchain.handshake.data.network.AndroidNetworkMonitor
+import com.coldchain.handshake.data.local.SharedPreferencesProfileCache
+import com.coldchain.handshake.data.remote.SupabaseAccountRepository
+import com.coldchain.handshake.data.remote.SupabaseClientProvider
+import com.coldchain.handshake.data.remote.SupabaseColdChainRemote
 import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import com.coldchain.handshake.data.security.KeystoreDeviceSigner
+import com.coldchain.handshake.util.DeviceIdProvider
 import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.models.ChaosScenarioType
@@ -44,6 +50,12 @@ object RepositoryProvider {
     private var syncServiceInstance: SyncService? = null
 
     @Volatile
+    internal var accountRepo: AccountRepository? = null
+
+    @Volatile
+    internal var remoteService: ColdChainRemote? = null
+
+    @Volatile
     private var chaosService: ChaosEngineService = DebugTools.createChaosService()
 
     @Volatile
@@ -78,6 +90,10 @@ object RepositoryProvider {
 
     val handoverRepository: HandoverRepository
         get() = handoverRepo ?: throw IllegalStateException("RepositoryProvider not initialized. Call initialize(context) first.")
+
+    /** Stays signed out until [initialize] connects it, which is what code without a server sees. */
+    val accountRepository: AccountRepository
+        get() = accountRepo ?: AccountRepository.NONE
 
     val syncService: SyncService
         get() = syncServiceInstance ?: throw IllegalStateException("RepositoryProvider not initialized. Call initialize(context) first.")
@@ -139,6 +155,20 @@ object RepositoryProvider {
 
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             syncScope = scope
+
+            val deviceId = DeviceIdProvider.getDeviceId(appContext)
+            val remote = remoteService ?: SupabaseColdChainRemote(SupabaseClientProvider.getClient())
+            remoteService = remote
+            if (accountRepo == null) {
+                accountRepo = SupabaseAccountRepository(
+                    client = SupabaseClientProvider.getClient(),
+                    remote = remote,
+                    signer = KeystoreDeviceSigner("cch-device-$deviceId"),
+                    deviceId = { deviceId },
+                    profileCache = SharedPreferencesProfileCache(appContext),
+                    scope = scope
+                )
+            }
 
             val coordinator = ShipmentHistorySyncCoordinator(
                 telemetryRepository = tRepo,
@@ -270,6 +300,8 @@ object RepositoryProvider {
             syncScope?.cancel()
             syncScope = null
             database = null
+            accountRepo = null
+            remoteService = null
             shipmentRepo = null
             telemetryRepo = null
             alertRepo = null

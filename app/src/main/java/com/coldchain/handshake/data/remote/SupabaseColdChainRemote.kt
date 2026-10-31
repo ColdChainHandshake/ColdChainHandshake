@@ -22,7 +22,8 @@ import io.github.jan.supabase.postgrest.exception.PostgrestRestException
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -289,14 +290,13 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
      * A CC code means the server understood and refused, which callers must not treat as a dropped
      * connection and retry.
      */
-    private inline fun <T> call(block: () -> T): Result<T> = try {
+    private suspend inline fun <T> call(block: () -> T): Result<T> = try {
         Result.success(block())
-    } catch (e: CancellationException) {
-        throw e
     } catch (e: PostgrestRestException) {
         val code = e.code
         Result.failure(if (code != null && code.startsWith("CC")) RemoteRejection(code, e.error) else e)
     } catch (e: Exception) {
+        currentCoroutineContext().ensureActive()
         Result.failure(e)
     }
 

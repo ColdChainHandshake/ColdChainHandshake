@@ -14,7 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.repository.RepositoryProvider
-import com.coldchain.handshake.ui.navigation.AppNavigation
+import com.coldchain.handshake.ui.navigation.AppRoot
 import com.coldchain.handshake.ui.theme.ColdChainTheme
 
 class MainActivity : ComponentActivity() {
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavigation()
+                    AppRoot()
                 }
             }
         }
