@@ -5,6 +5,7 @@ import com.coldchain.handshake.models.TemperatureEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class ClockSkewDetectorTest {
 
@@ -23,6 +24,18 @@ class ClockSkewDetectorTest {
         seq = seq,
         receivedAt = receivedAt
     )
+
+    @Test
+    fun theToleranceIsTheServersOwn() {
+        val migration = listOf(File("../supabase/migrations/0002_trust_core.sql"), File("supabase/migrations/0002_trust_core.sql"))
+            .first { it.exists() }
+            .readText()
+        val serverMs = Regex("""clock_tolerance_ms\(\) returns bigint\s+language sql immutable set search_path = '' as 'select (\d+)::bigint'""")
+            .find(migration)!!.groupValues[1].toLong()
+
+        assertEquals(serverMs, ClockSkewDetector.TOLERANCE_MS)
+        assertEquals(5 * 60_000L, ClockSkewDetector.TOLERANCE_MS)
+    }
 
     @Test
     fun honestReadingsHaveNoIssues() {

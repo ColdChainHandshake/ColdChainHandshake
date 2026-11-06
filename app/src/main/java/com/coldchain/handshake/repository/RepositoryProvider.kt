@@ -22,6 +22,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -68,6 +71,11 @@ object RepositoryProvider {
     @Volatile
     private var simulator: TemperatureSimulator? = null
     internal var syncCoordinator: ShipmentHistorySyncCoordinator? = null
+
+    private val _localOwnerProblem = MutableStateFlow<String?>(null)
+
+    /** Why the last person to sign in was signed straight out again, if they were. */
+    val localOwnerProblem: StateFlow<String?> = _localOwnerProblem.asStateFlow()
 
     /** This install's name to the server. Tests set it; [initialize] reads it from the phone. */
     @Volatile
@@ -212,15 +220,24 @@ object RepositoryProvider {
             )
 
             // Someone signing in after another person's session ended without a sign-out, for example
-            // when it expired, mustn't see that person's records.
+            // when it expired, mustn't see that person's records. If any of those still have to reach the
+            // server, they're evidence: the new session is refused until their owner sends them.
             scope.launch {
                 val owner = appContext.getSharedPreferences(OWNER_PREFS, Context.MODE_PRIVATE)
                 account.state.collect { state ->
-                    if (state is AccountState.Ready) {
-                        val previous = owner.getString(KEY_OWNER, null)
-                        if (previous != null && previous != state.userId) forgetLocalData()
-                        owner.edit().putString(KEY_OWNER, state.userId).apply()
+                    if (state !is AccountState.Ready) return@collect
+                    val previous = owner.getString(KEY_OWNER, null)
+                    if (previous != null && previous != state.userId) {
+                        if (countUnsent(db) > 0) {
+                            _localOwnerProblem.value = "This phone holds another person's records that haven't " +
+                                "reached the server. They need to sign in here and send them first."
+                            account.signOut()
+                            return@collect
+                        }
+                        forgetLocalData()
                     }
+                    _localOwnerProblem.value = null
+                    owner.edit().putString(KEY_OWNER, state.userId).apply()
                 }
             }
 

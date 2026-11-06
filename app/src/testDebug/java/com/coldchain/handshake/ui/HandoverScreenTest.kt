@@ -281,6 +281,20 @@ class HandoverScreenTest {
         assertTrue(RepositoryProvider.temperatureSimulator.isMonitorOnly.value)
     }
 
+    @Test
+    fun aServerShipmentCannotBeConfirmedBySomeoneSignedOut() {
+        runBlocking {
+            server.appendReadings("SHIP-1", readings(genesisHash = genesis), genesis, "courier-phone", "s").getOrThrow()
+            val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
+            RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(opened)
+        }
+        compose.setContent { if (showing) HandoverScreen() }
+
+        await("Sign in to confirm this shipment. It's on the server.")
+
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
     // On the server
 
     @Test

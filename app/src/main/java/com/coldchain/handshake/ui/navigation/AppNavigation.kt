@@ -52,6 +52,7 @@ fun AppRoot() {
     val scope = rememberCoroutineScope()
     var localOnly by rememberSaveable { mutableStateOf(false) }
     var signOutProblem by remember { mutableStateOf<String?>(null) }
+    val ownerProblem by RepositoryProvider.localOwnerProblem.collectAsState()
 
     val current = state
     when {
@@ -76,7 +77,8 @@ fun AppRoot() {
         current is AccountState.Loading -> AccountLoadingScreen()
         else -> SignInScreen(
             account = account,
-            onUseWithoutAccount = if (DebugTools.ENABLED) ({ localOnly = true }) else null
+            onUseWithoutAccount = if (DebugTools.ENABLED) ({ localOnly = true }) else null,
+            notice = ownerProblem
         )
     }
 }

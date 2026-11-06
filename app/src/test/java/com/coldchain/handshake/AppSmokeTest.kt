@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.startup.InitializationProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.data.local.DatabaseProvider
@@ -68,6 +69,9 @@ class AppSmokeTest {
     @Test
     fun theFirstLaunchAsksForNotificationsAndChecksForAlerts() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        // Only a check booked by this launch counts.
+        WorkManager.getInstance(context).cancelAllWork().result.get()
+        WorkManager.getInstance(context).pruneWork().result.get()
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitForIdle()
@@ -80,7 +84,7 @@ class AppSmokeTest {
         val checks = WorkManager.getInstance(context)
             .getWorkInfosForUniqueWork(AlertEscalationScheduler.WORK_NAME)
             .get()
-        assertTrue(checks.isNotEmpty())
+        assertTrue("checks: ${checks.map { it.state }}", checks.any { it.state != WorkInfo.State.CANCELLED })
     }
 
     @Test

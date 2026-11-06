@@ -7,6 +7,7 @@ import com.coldchain.handshake.data.local.dao.TemperatureEventDao
 import com.coldchain.handshake.data.local.entities.toDomain
 import com.coldchain.handshake.data.network.NetworkMonitor
 import com.coldchain.handshake.models.EscalationLevel
+import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.SyncStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -165,6 +166,15 @@ class SyncServiceImpl(
         for (entity in handoverDao.getPendingHandovers()) {
             val handover = entity.toDomain()
             if (!isOnServer(handover.shipmentId)) continue
+
+            // A PASS has to be made on the history the server holds at the time, which nobody reviewed here.
+            // Anything else is sent against the current head on purpose, because it can only hold a
+            // shipment back, and tying it to the old head would lose the finding once readings move on.
+            if (handover.verdict == HandoverVerdict.PASS) {
+                _lastRejection.value = "A PASS recorded without the server can't be sent. Confirm again while connected."
+                handoverDao.updateSyncStatus(handover.id, SyncStatus.REJECTED, System.currentTimeMillis())
+                continue
+            }
 
             val result = runCatching {
                 val head = remote.getChainHead(handover.shipmentId).getOrThrow()

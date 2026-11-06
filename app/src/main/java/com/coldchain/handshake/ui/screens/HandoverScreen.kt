@@ -218,7 +218,10 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
     val monitorOnly by RepositoryProvider.temperatureSimulator.isMonitorOnly.collectAsState()
     val isCustodian = onServer && (custody?.let { it.custodianId == me?.userId } ?: !monitorOnly)
     val myRole = if (members.isEmpty()) me?.profile?.role else members.firstOrNull { it.userId == me?.userId }?.role
-    val canRecord = !onServer || (!isCustodian && (myRole == MemberRole.COURIER || myRole == MemberRole.RECEIVER))
+    // A shipment on the server is only ever confirmed there, by someone signed in.
+    val needsSignIn = me == null && shipment?.genesisHash != null
+    val canRecord = !needsSignIn &&
+        (!onServer || (!isCustodian && (myRole == MemberRole.COURIER || myRole == MemberRole.RECEIVER)))
 
     // Historical Last Recorded Location
     var lastRecordedLocation by remember { mutableStateOf<GpsPoint?>(null) }
@@ -760,6 +763,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         // 8. WHO CONFIRMS
         HandoverParties(
             onServer = onServer,
+            needsSignIn = needsSignIn,
             isCustodian = isCustodian,
             myUserId = me?.userId,
             myRole = myRole,
@@ -1084,6 +1088,7 @@ private fun describeOutcome(outcome: HandoverOutcome): String = when (outcome.st
 @Composable
 private fun HandoverParties(
     onServer: Boolean,
+    needsSignIn: Boolean,
     isCustodian: Boolean,
     myUserId: String?,
     myRole: MemberRole?,
@@ -1104,7 +1109,9 @@ private fun HandoverParties(
             Text(text = "WHO CONFIRMS", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
 
-            if (!onServer) {
+            if (needsSignIn) {
+                Text("Sign in to confirm this shipment. It's on the server.", style = MaterialTheme.typography.bodySmall)
+            } else if (!onServer) {
                 Text(
                     "Local only. On a real handover the courier and the receiver each confirm on their own " +
                         "phone, and the server moves custody.",

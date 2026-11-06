@@ -63,7 +63,11 @@ private fun ErrorLine(message: String?) {
  * @param onUseWithoutAccount Offered only where working without a server is allowed, which is debug.
  */
 @Composable
-fun SignInScreen(account: AccountRepository, onUseWithoutAccount: (() -> Unit)? = null) {
+fun SignInScreen(
+    account: AccountRepository,
+    onUseWithoutAccount: (() -> Unit)? = null,
+    notice: String? = null
+) {
     val scope = rememberCoroutineScope()
     var email by rememberSaveable { mutableStateOf("") }
     var code by rememberSaveable { mutableStateOf("") }
@@ -83,6 +87,7 @@ fun SignInScreen(account: AccountRepository, onUseWithoutAccount: (() -> Unit)? 
     }
 
     AccountColumn("Sign in") {
+        ErrorLine(notice)
         if (!codeSent) {
             Text("Enter your email and we'll send you a code.")
             OutlinedTextField(

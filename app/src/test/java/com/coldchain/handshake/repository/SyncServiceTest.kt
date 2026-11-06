@@ -296,6 +296,18 @@ class SyncServiceTest {
     }
 
     @Test
+    fun aPassRecordedWithoutTheServerIsNeverSent() = runBlocking {
+        shipmentOnServer()
+        server.currentUser = "receiver"
+        handovers.saveHandover(handover(HandoverVerdict.PASS)).getOrThrow()
+
+        service().syncPendingData().getOrThrow()
+
+        assertTrue(server.confirmations.isEmpty())
+        assertEquals(SyncStatus.REJECTED, db.handoverDao().getHandoverDirect("SHIP-1")?.syncStatus)
+    }
+
+    @Test
     fun aConfirmationTheServerAlreadyHasCountsAsSent() = runBlocking {
         shipmentOnServer()
         server.currentUser = "receiver"

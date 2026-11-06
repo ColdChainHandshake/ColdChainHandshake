@@ -1,5 +1,6 @@
 package com.coldchain.handshake.safety
 
+import com.coldchain.handshake.crypto.ClockSkewDetector
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
@@ -267,6 +268,22 @@ class ProductProfileEvaluationTest {
         val result = BreachDetector.evaluateTelemetry(readings, strict, windowEnd = handover)
 
         assertEquals(TemperatureVerdict.UNKNOWN, result.verdict)
+    }
+
+    @Test
+    fun aReadingDatedExactlyTheToleranceAfterHandoverIsAllowed() {
+        val readings = minutely(5.0, 5.0, 5.0)
+        val lastReading = readings.maxOf { it.timestamp }
+
+        val atLimit = BreachDetector.evaluateTelemetry(
+            readings, strict, windowEnd = lastReading - ClockSkewDetector.TOLERANCE_MS
+        )
+        val pastLimit = BreachDetector.evaluateTelemetry(
+            readings, strict, windowEnd = lastReading - ClockSkewDetector.TOLERANCE_MS - 1
+        )
+
+        assertEquals(TemperatureVerdict.PASS, atLimit.verdict)
+        assertEquals(TemperatureVerdict.UNKNOWN, pastLimit.verdict)
     }
 
     @Test
