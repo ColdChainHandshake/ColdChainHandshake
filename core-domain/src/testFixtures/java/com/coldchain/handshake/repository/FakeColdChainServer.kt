@@ -1,5 +1,6 @@
 package com.coldchain.handshake.repository
 
+import com.coldchain.handshake.crypto.ClockSkewDetector
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.crypto.ServerChainHead
 import com.coldchain.handshake.models.Alert
@@ -173,14 +174,24 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
             }
             if (head.headHash != expectedPrevHead) refuse(RemoteRejection.STALE_HEAD, "The history has moved on.")
 
+            // As append_readings: later than the reading before, and no more than the clock tolerance before the
+            // shipment was created. The server leaves readings dated in the future out of "the reading before";
+            // this fake has no clock, so it treats none as future.
+            var previousTs = this.readings.getValue(shipmentId).maxOfOrNull { it.timestamp }
+            val earliest = shipments[shipmentId]?.createdAtMs?.minus(ClockSkewDetector.TOLERANCE_MS)
+
             var running = head
             for (reading in readings) {
                 if (reading.seq != running.count + 1) refuse(RemoteRejection.SEQUENCE, "Sequence gap.")
                 if (reading.previousHash != running.headHash) refuse(RemoteRejection.HASH, "Wrong link.")
+                val backDated = previousTs?.let { reading.timestamp <= it } == true ||
+                    earliest?.let { reading.timestamp < it } == true
+                if (backDated) refuse(RemoteRejection.CLOCK, "Reading ${reading.seq} is back-dated.")
                 if (HashChainService.createHash(reading, reading.previousHash) != reading.currentHash) {
                     refuse(RemoteRejection.HASH, "Hash mismatch.")
                 }
                 running = ServerChainHead(reading.currentHash, reading.seq)
+                previousTs = reading.timestamp
             }
 
             this.readings.getValue(shipmentId).addAll(readings)
