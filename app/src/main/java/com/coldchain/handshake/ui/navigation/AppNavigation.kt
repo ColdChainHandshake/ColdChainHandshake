@@ -53,6 +53,7 @@ fun AppRoot() {
     var localOnly by rememberSaveable { mutableStateOf(false) }
     var signOutProblem by remember { mutableStateOf<String?>(null) }
     val ownerProblem by RepositoryProvider.localOwnerProblem.collectAsState()
+    val confirmedOwner by RepositoryProvider.confirmedOwner.collectAsState()
 
     val current = state
     when {
@@ -61,6 +62,8 @@ fun AppRoot() {
             actionLabel = "Sign In",
             onAction = { localOnly = false }
         )
+        // Until this phone's records are checked against the person signing in, nothing of them shows.
+        current is AccountState.Ready && confirmedOwner != current.userId -> AccountLoadingScreen()
         current is AccountState.Ready -> AppNavigation(
             statusLine = signOutProblem
                 ?: current.deviceProblem

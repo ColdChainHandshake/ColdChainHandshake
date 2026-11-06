@@ -72,6 +72,7 @@ class LocalOwnerTest {
 
         withTimeout(5_000) { while (!account.signedOut) delay(20) }
         assertNotNull(RepositoryProvider.localOwnerProblem.value)
+        assertEquals(null, RepositoryProvider.confirmedOwner.value)
         assertEquals(3, RepositoryProvider.telemetryRepository.getTemperatures("SHIP-1").first().size)
     }
 
@@ -81,9 +82,9 @@ class LocalOwnerTest {
 
         signIn("someone-new")
 
-        withTimeout(5_000) {
-            while (RepositoryProvider.shipmentRepository.getAllShipments().first().isNotEmpty()) delay(20)
-        }
+        withTimeout(5_000) { RepositoryProvider.confirmedOwner.first { it == "someone-new" } }
+
+        assertTrue(RepositoryProvider.shipmentRepository.getAllShipments().first().isEmpty())
         assertFalse(account.signedOut)
         assertTrue(RepositoryProvider.telemetryRepository.getTemperatures("SHIP-1").first().isEmpty())
     }
@@ -93,7 +94,7 @@ class LocalOwnerTest {
         leaveReadings(SyncStatus.PENDING)
 
         signIn("previous-person")
-        delay(300)
+        withTimeout(5_000) { RepositoryProvider.confirmedOwner.first { it == "previous-person" } }
 
         assertFalse(account.signedOut)
         assertEquals(3, RepositoryProvider.telemetryRepository.getTemperatures("SHIP-1").first().size)

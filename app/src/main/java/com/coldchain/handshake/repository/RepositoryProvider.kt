@@ -77,6 +77,11 @@ object RepositoryProvider {
     /** Why the last person to sign in was signed straight out again, if they were. */
     val localOwnerProblem: StateFlow<String?> = _localOwnerProblem.asStateFlow()
 
+    private val _confirmedOwner = MutableStateFlow<String?>(null)
+
+    /** The signed-in person this phone's records have been checked against. The app opens only for them. */
+    val confirmedOwner: StateFlow<String?> = _confirmedOwner.asStateFlow()
+
     /** This install's name to the server. Tests set it; [initialize] reads it from the phone. */
     @Volatile
     internal var deviceIdValue: String? = null
@@ -178,7 +183,7 @@ object RepositoryProvider {
             val sEngine = SafetyEngine(aRepo, sRepo, AndroidAlertNotifier(appContext))
             safetyEngineInstance = sEngine
 
-            val hOrchestrator = HandoverOrchestrator(sRepo, tRepo, hRepo, RoomTransactionRunner(db))
+            val hOrchestrator = handoverOrchestratorFor(db, sRepo, tRepo, hRepo)
             handoverOrchestratorInstance = hOrchestrator
 
             val baseNetworkMonitor = AndroidNetworkMonitor(appContext)
@@ -225,10 +230,14 @@ object RepositoryProvider {
             scope.launch {
                 val owner = appContext.getSharedPreferences(OWNER_PREFS, Context.MODE_PRIVATE)
                 account.state.collect { state ->
-                    if (state !is AccountState.Ready) return@collect
+                    if (state !is AccountState.Ready) {
+                        _confirmedOwner.value = null
+                        return@collect
+                    }
                     val previous = owner.getString(KEY_OWNER, null)
                     if (previous != null && previous != state.userId) {
                         if (countUnsent(db) > 0) {
+                            _confirmedOwner.value = null
                             _localOwnerProblem.value = "This phone holds another person's records that haven't " +
                                 "reached the server. They need to sign in here and send them first."
                             account.signOut()
@@ -238,6 +247,7 @@ object RepositoryProvider {
                     }
                     _localOwnerProblem.value = null
                     owner.edit().putString(KEY_OWNER, state.userId).apply()
+                    _confirmedOwner.value = state.userId
                 }
             }
 
@@ -272,6 +282,17 @@ object RepositoryProvider {
             }
         }
     }
+
+    /**
+     * The app's own orchestrator. A handover runs in one database transaction, so a breach arriving
+     * part-way can't leave a PASS beside a quarantined shipment.
+     */
+    internal fun handoverOrchestratorFor(
+        db: ColdChainDatabase,
+        shipments: ShipmentRepository,
+        telemetry: TelemetryRepository,
+        handovers: HandoverRepository
+    ) = HandoverOrchestrator(shipments, telemetry, handovers, RoomTransactionRunner(db))
 
     /**
      * Ends the session and clears what this phone holds, so the next person to sign in can't see it.
@@ -385,6 +406,8 @@ object RepositoryProvider {
             syncScope?.cancel()
             syncScope = null
             database = null
+            _confirmedOwner.value = null
+            _localOwnerProblem.value = null
             accountRepo = null
             remoteService = null
             deviceIdValue = null

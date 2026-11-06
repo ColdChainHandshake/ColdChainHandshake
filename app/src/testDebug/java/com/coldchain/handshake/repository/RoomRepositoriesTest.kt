@@ -195,16 +195,44 @@ class RoomRepositoriesTest {
     }
 
     @Test
-    fun aHandoverThatCannotFinishLeavesNoRecordBehind() = runBlocking {
+    fun theAppsOwnOrchestratorRecordsAHandoverInOneTransaction() = runBlocking {
         readyForHandover()
+        // Refused only at the last step, after the record and the inspection are written, so they're
+        // what the transaction has to undo.
         val refusing = object : ShipmentRepository by shipments {
             override suspend fun saveShipment(shipment: Shipment) =
-                Result.failure<Unit>(IllegalStateException("A breach arrived first."))
+                if (shipment.status == ShipmentStatus.QUARANTINED) {
+                    Result.failure(IllegalStateException("A breach arrived first."))
+                } else {
+                    shipments.saveShipment(shipment)
+                }
+        }
+        val orchestrator = RepositoryProvider.handoverOrchestratorFor(database, refusing, telemetry, handovers)
+
+        assertTrue(handOver(orchestrator, HandoverVerdict.UNKNOWN, "Logger damaged").isFailure)
+
+        assertNull(handovers.getHandover("SHIP-1").first())
+        assertEquals(ShipmentStatus.ARRIVED, shipments.getShipment("SHIP-1").first()?.status)
+    }
+
+    @Test
+    fun aHandoverThatCannotFinishLeavesNoRecordBehind() = runBlocking {
+        readyForHandover()
+        // Refused only at the last step, after the record and the inspection are written, so they're
+        // what the transaction has to undo.
+        val refusing = object : ShipmentRepository by shipments {
+            override suspend fun saveShipment(shipment: Shipment) =
+                if (shipment.status == ShipmentStatus.QUARANTINED) {
+                    Result.failure(IllegalStateException("A breach arrived first."))
+                } else {
+                    shipments.saveShipment(shipment)
+                }
         }
         val orchestrator = HandoverOrchestrator(refusing, telemetry, handovers, RoomTransactionRunner(database))
 
         assertTrue(handOver(orchestrator, HandoverVerdict.UNKNOWN, "Logger damaged").isFailure)
 
         assertNull(handovers.getHandover("SHIP-1").first())
+        assertEquals(ShipmentStatus.ARRIVED, shipments.getShipment("SHIP-1").first()?.status)
     }
 }

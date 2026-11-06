@@ -18,7 +18,8 @@ import com.coldchain.handshake.models.TemperatureEvent
  *   one, and never for more than [ProductProfile.maxSilenceMs].
  * - Silence longer than that is a gap, which makes the verdict [TemperatureVerdict.UNKNOWN]. A reading
  *   next to a gap is still credited up to the limit, so a hot reading before a gap counts as hot.
- * - Readings with the same time count as the worst of them, so a safe duplicate can't hide a bad one.
+ * - Readings with the same time count as the worst of them in each direction, so a safe or opposite
+ *   twin can't hide a bad one.
  * - A reading dated well after the window ends is evidence of a wrong clock, not of a running logger.
  * - A confirmed breach outranks a gap, and no readings at all is never a pass.
  * - Without a window, nothing is extrapolated beyond the final recorded event timestamp.
@@ -43,12 +44,18 @@ object BreachDetector {
     ): BreachEvaluation {
         val readable = events.filter { it.temperature.isFinite() }
 
-        // Sort telemetry deterministically: timestamp ascending, with ID tie-breaker
-        val sortedEvents = worstAtEachTime(readable, profile).sortedWith(
-            compareBy<TemperatureEvent>({ it.timestamp }, { it.id })
-        )
+        // Heat and freeze are read as separate series, each with one reading per timestamp, so a twin
+        // at the same time can hide neither and every reading keeps its full time.
+        val heatSeries = seriesFor(readable, profile, ExcursionType.HEAT)
+        val freezeSeries = seriesFor(readable, profile, ExcursionType.FREEZE)
+        val sortedEvents = heatSeries
 
-        val excursions = markBreaches(findExcursions(sortedEvents, profile, windowEnd), profile)
+        val excursions = markBreaches(
+            (findExcursions(heatSeries, profile, windowEnd).filter { it.type == ExcursionType.HEAT } +
+                findExcursions(freezeSeries, profile, windowEnd).filter { it.type == ExcursionType.FREEZE })
+                .sortedBy { it.startTimestamp },
+            profile
+        )
         val dataGaps = findDataGaps(sortedEvents, profile, windowStart, windowEnd)
         val hasBreach = excursions.any { it.breached }
         val datedAfterWindow = windowEnd != null &&
@@ -97,12 +104,23 @@ object BreachDetector {
         }
     }
 
-    private fun worstAtEachTime(events: List<TemperatureEvent>, profile: ProductProfile): List<TemperatureEvent> =
-        events.groupBy { it.timestamp }.values.map { sameTime ->
-            sameTime.maxWith(
-                compareBy<TemperatureEvent>({ distanceOutOfRange(it.temperature, profile) }, { it.id })
-            )
-        }
+    /**
+     * One reading per timestamp, sorted. Where readings share a time, the worst one in [direction]
+     * stands for it, or any other if none is out of range that way.
+     */
+    private fun seriesFor(
+        events: List<TemperatureEvent>,
+        profile: ProductProfile,
+        direction: ExcursionType
+    ): List<TemperatureEvent> {
+        val worst = compareBy<TemperatureEvent>({ distanceOutOfRange(it.temperature, profile) }, { it.id })
+        return events.groupBy { it.timestamp }.values
+            .map { sameTime ->
+                sameTime.filter { classify(it.temperature, profile) == direction }.maxWithOrNull(worst)
+                    ?: sameTime.minWith(worst)
+            }
+            .sortedWith(compareBy({ it.timestamp }, { it.id }))
+    }
 
     private fun distanceOutOfRange(temperature: Double, profile: ProductProfile): Double =
         maxOf(temperature - profile.maxC, profile.minC - temperature, 0.0)

@@ -102,6 +102,27 @@ class ProductProfileEvaluationTest {
     }
 
     @Test
+    fun aHotTwinCannotHideAFrozenReading() {
+        // The heat is within its budget, but this profile allows no freezing at all.
+        val readings = listOf(reading(0, 12.0, id = "A"), reading(0, -0.5, id = "Z"), reading(minute, 5.0, id = "B"))
+
+        assertEquals(TemperatureVerdict.FAIL, BreachDetector.evaluateTelemetry(readings, strict).verdict)
+    }
+
+    @Test
+    fun aHotReadingTwinnedWithAFrozenOneKeepsItsTime() {
+        val readings = (0..6).flatMap { index ->
+            listOf(reading(index * minute, 12.0, id = "A-$index"), reading(index * minute, -0.5, id = "Z-$index"))
+        } + reading(7 * minute, 5.0, id = "B")
+
+        val result = BreachDetector.evaluateTelemetry(readings, tolerant)
+
+        assertEquals(TemperatureVerdict.FAIL, result.verdict)
+        assertEquals(7 * minute, result.cumulativeFreezeDurationMs)
+        assertEquals(7 * minute, result.cumulativeBreachDurationMs - result.cumulativeFreezeDurationMs)
+    }
+
+    @Test
     fun heatAndFreezeHaveSeparateBudgets() {
         val readings = minutely(9.0, 9.0, 9.0, 9.0, 5.0, -3.0, -3.0, -3.0, -3.0, 5.0)
 
