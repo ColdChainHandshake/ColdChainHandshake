@@ -44,6 +44,10 @@ it, so a change later means changing those tests too. Each line is a choice Clau
    reading `n` is logger record `start + n`.
 10. **Key enrolment:** the sender records the logger's public key when creating the shipment, so the courier never
     supplies it.
+11. **Minimum Bluetooth MTU (not in the protocol yet):** a signed batch header is 145 bytes, and Bluetooth's default
+    MTU of 23 leaves 20 bytes per notification, too few for even one 22-byte record. The C++ tests assume the logger
+    sends nothing below an MTU of 148, so the phone must ask for a larger one (Android allows up to 517). The other
+    choice is to split the header across several notifications.
 
 Reply with "signed off" or with the numbers you want changed.
 
