@@ -264,6 +264,17 @@ class AlertLifecycleTest {
     }
 
     @Test
+    fun aShipmentsSingleNotificationShowsItsHighestLevel() = runBlocking {
+        val interval = AlertEscalationEngine.ESCALATION_INTERVAL_MS
+        alerts.saveAlert(alert(createdAt = t0).copy(id = "NEWER"))
+        alerts.saveAlert(alert(createdAt = t0 - interval).copy(id = "OLDER"))
+
+        AlertEscalationRunner(alerts, notifier) { t0 + interval }.run()
+
+        assertEquals(EscalationLevel.PHARMACIST, notifier.escalated.single().escalationLevel)
+    }
+
+    @Test
     fun theRunnerDoesNotOverwriteAnAcknowledgementMadeWhileItRan() = runBlocking {
         val interval = AlertEscalationEngine.ESCALATION_INTERVAL_MS
         alerts.saveAlert(alert())
