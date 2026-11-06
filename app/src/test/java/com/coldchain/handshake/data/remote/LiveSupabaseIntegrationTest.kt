@@ -103,12 +103,14 @@ class LiveSupabaseIntegrationTest {
         val userId: String get() = client.auth.currentUserOrNull()!!.id
     }
 
+    // Readings 20 s apart, ending just before now. The server refuses one dated more than 5 minutes before the
+    // shipment was created, which the first real run of this test showed for a minute's spacing.
     private fun chain(genesis: String, shipmentId: String, count: Int): List<TemperatureEvent> {
         val now = System.currentTimeMillis()
         return HashChainService.buildChain(
             (count downTo 1).map { back ->
                 TemperatureEvent(
-                    "TE-$back", shipmentId, "LOG-$run", now - back * 60_000L, 5.0, "", "", SyncStatus.PENDING
+                    "TE-$back", shipmentId, "LOG-$run", now - back * 20_000L, 5.0, "", "", SyncStatus.PENDING
                 )
             },
             genesis
