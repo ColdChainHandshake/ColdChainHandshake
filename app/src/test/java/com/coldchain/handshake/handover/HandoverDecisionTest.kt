@@ -139,7 +139,10 @@ class HandoverDecisionTest {
     fun aJourneyStartAfterTheHandoverCannotPass() = runBlocking {
         prepare(steadyReadings(t0, 10 * minute, 5.0), journeyStartedAt = t0 + 12 * minute)
 
-        assertEquals(HandoverVerdict.UNKNOWN, handOver(at = t0 + 11 * minute).getOrThrow().handover.verdict)
+        val handover = handOver(at = t0 + 11 * minute).getOrThrow().handover
+
+        assertEquals(HandoverVerdict.UNKNOWN, handover.verdict)
+        assertFalse("an UNKNOWN needs a reason", handover.reason.isNullOrBlank())
     }
 
     @Test

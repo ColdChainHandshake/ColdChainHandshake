@@ -2,6 +2,8 @@ package com.coldchain.handshake.safety
 
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.models.SyncStatus
+import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.models.ShipmentStatus.ACCEPTED
 import com.coldchain.handshake.models.ShipmentStatus.ARRIVED
 import com.coldchain.handshake.models.ShipmentStatus.CREATED
@@ -216,6 +218,27 @@ class ShipmentLifecycleTest {
         assertTrue(repository.saveShipment(shipment(ARRIVED)).isFailure)
         assertEquals(1_000L, repository.getShipment("SHIP-1").first()?.journeyStartedAt)
         assertTrue(repository.saveShipment(shipment(ARRIVED).copy(journeyStartedAt = 1_000L)).isSuccess)
+    }
+
+    @Test
+    fun aBreachAfterTheJourneyStartedStillQuarantines() = runBlocking {
+        // The start is locked, so the safety engine's save must carry it. This is the path Start Journey takes.
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        val t0 = 1_700_000_000_000L
+        repository.saveShipment(shipment(CREATED)).getOrThrow()
+        repository.saveShipment(shipment(DISPATCHED)).getOrThrow()
+        repository.saveShipment(shipment(IN_TRANSIT).copy(journeyStartedAt = t0)).getOrThrow()
+        val moving = repository.getShipment("SHIP-1").first()!!
+        val hot = (0..10).map { i ->
+            TemperatureEvent("H-$i", "SHIP-1", "LOG-1", t0 + i * 60_000L, 12.0, "", "", SyncStatus.PENDING)
+        }
+
+        val decision = SafetyEngine(FakeAlertRepository(), repository)
+            .processTelemetryAndEnforceSafety(moving, hot, timestamp = t0 + 11 * 60_000L)
+
+        assertEquals(true, decision.quarantineSaveResult?.isSuccess)
+        assertEquals(QUARANTINED, repository.getShipment("SHIP-1").first()?.status)
+        assertEquals(t0, repository.getShipment("SHIP-1").first()?.journeyStartedAt)
     }
 
     @Test

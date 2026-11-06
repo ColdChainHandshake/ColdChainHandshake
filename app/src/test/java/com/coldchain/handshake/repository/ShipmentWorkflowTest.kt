@@ -29,6 +29,23 @@ class ShipmentWorkflowTest {
     }
 
     @Test
+    fun openingGivesTheCopyThisPhoneKeptNotJustTheServers() = runBlocking {
+        // A phone keeps the earlier of two journey starts, so the copy the screens work with must be the stored
+        // one, or the next save made from it is refused for changing the start.
+        val kept = ShipmentRepositoryImpl(FakeShipmentDao())
+        val opener = ShipmentWorkflow(server, kept) { "device-1" }
+        server.seedShipment("SHIP-1")
+        val first = opener.open("SHIP-1").getOrThrow()
+        server.shipments["SHIP-1"] =
+            server.shipments.getValue("SHIP-1").copy(journeyStartedAt = first.journeyStartedAt!! + 600_000L)
+
+        val reopened = opener.open("SHIP-1").getOrThrow()
+
+        assertEquals(first.journeyStartedAt, reopened.journeyStartedAt)
+        assertEquals(kept.getShipment("SHIP-1").first(), reopened)
+    }
+
+    @Test
     fun theQrCodeOnlyNamesTheShipment() = runBlocking {
         assertEquals("SHIP-9", workflow.create(draft).getOrThrow().qrCode)
     }

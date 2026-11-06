@@ -2,6 +2,7 @@ package com.coldchain.handshake.repository
 
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
+import kotlinx.coroutines.flow.first
 
 data class ShipmentDraft(
     val id: String,
@@ -79,6 +80,10 @@ class ShipmentWorkflow(
             journeyStartedAt = found.journeyStartedAt,
             genesisHash = found.genesisHash
         )
-        return shipments.adoptRemoteShipment(shipment).map { shipment }
+        // The stored copy, not the server's: adopting keeps the earlier of two journey starts, and screens save
+        // from whatever this returns.
+        return shipments.adoptRemoteShipment(shipment).mapCatching {
+            shipments.getShipment(shipment.id).first() ?: shipment
+        }
     }
 }
