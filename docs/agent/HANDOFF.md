@@ -122,9 +122,35 @@ lists it as `device`.
 
 **How many devices Gate 3 needs.** The run uses three accounts: sender, courier and receiver. A phone stays with the
 first account that signs in on it, and the courier and receiver must be on different phones. So it needs three
-devices, or two with one extra step: after the sender has dispatched, clear the app's storage on that phone
-(Settings, Apps, Cold Chain Handshake, Storage, Clear storage), then sign in there as the courier. Two emulators side
-by side need about 16 GB of RAM, so one emulator plus your phone is the easier pair.
+devices, or two with the extra "Clear storage" steps below. Two emulators side by side need about 16 GB of RAM, so
+one emulator plus your phone is the easier pair.
+
+#### The Gate 3 run (after items 3, 4 and 5)
+
+You need three email addresses you can read: sender, courier and receiver. The server only lets the sender add people
+who already have an account, so the courier and the receiver sign up first. Claude has not been able to run this on a
+device, so if a screen differs from these steps, note what you saw and carry on.
+
+1. Install the debug app on each device: with one attached, `./gradlew installDebug` (or
+   `adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk` for each, serials from `adb devices`).
+2. **Device A, courier:** open the app, enter the courier's email, Send Code, type the code from the email, Verify.
+   Enter a name, choose Courier, Continue.
+3. **Device B, receiver:** the same with the receiver's email, choosing Receiver.
+4. **Sender:** on a third device, or on device B after Settings, Apps, Cold Chain Handshake, Storage, Clear storage.
+   Sign in with the sender's email and choose Sender. On Dispatch, fill in Origin, Destination and Logger ID, then
+   Create Shipment. Enter the Courier's Email and Receiver's Email, then Add People. Then Dispatch Shipment (Seal
+   Cargo). Leave the shipment's QR code on screen.
+   - If you used device B: once dispatched, clear its storage again and sign in as the receiver again.
+5. **Device A, courier:** Transit, Scan Consignment QR, and scan the sender's QR code. On an emulator without a camera,
+   type the shipment ID into the scanner's text box. Then Take Custody. Readings start; leave it running at least
+   5 minutes, with the app open.
+6. **Device B, receiver:** Transit, Scan Consignment QR, the same shipment. Open Handover and wait for the readings to
+   arrive.
+7. **Device A, courier:** Handover, Confirm Handover, naming the receiver.
+8. **Device B, receiver:** choose the verdict the screen offers (PASS if nothing went wrong), then Confirm Handover.
+9. **Check:** the receiver's screen shows the shipment as accepted. Tell Claude the shipment ID. Claude then checks the
+   server's custody and handover records through the MCP server before tagging `gate-3`: two confirmations from two
+   different devices, custody moved to the receiver, status ACCEPTED.
 
 ### 6. Back up the branch off this PC
 

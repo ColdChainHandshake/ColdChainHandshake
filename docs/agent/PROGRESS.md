@@ -1,7 +1,8 @@
 # Progress
 
-**Next action:** fresh Gate 2 review, then the test-key guard, then the live server test on the local Docker stack.
-Phase 4 app work and Phase 5 wait until `gate-2` and `gate-3` are tagged (resume prompt of 6 Nov).
+**Next action:** blocked on the owner. `gate-2` is tagged. Gate 3 needs the dev project writable (`HANDOFF.md` Q1,
+item 3) and two or three devices (item 5); then Claude applies the migrations, runs the advisors and the device test,
+and waits for the owner's two-device run. Phase 4 app work and Phase 5 wait until `gate-3` is tagged.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
@@ -136,14 +137,24 @@ re-checked in this session. Full review: `docs/agent/gate2_review.md`.
 - 25 mutants run in all; the 6 survivors are explained in the review: 2 are equivalent, 4 are test gaps with no route
   to PASS (accepted in `DECISIONS.md`).
 
-Proof at `189799e`, 7 Nov:
+Before tagging, every `saveShipment` caller was checked against the new lock. One could hold the server's copy rather
+than the stored one; fixed in `f8507ce` with a test, plus a test that a breach after the journey starts still
+quarantines.
+
+Proof at `f8507ce`, 7 Nov, tagged `gate-2`:
 
 ```text
 ./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --rerun-tasks --continue
-BUILD SUCCESSFUL in 5m 10s
-core-domain 75 failed 0 | debug 421 failed 0 | release 364 failed 0 | skipped 0
-npx supabase test db        Files=4, Tests=233 ... Result: PASS
+BUILD SUCCESSFUL in 2m 27s
+core-domain 75 failed 0 | debug 423 failed 0 | release 366 failed 0 | skipped 0
+npx supabase test db        Files=4, Tests=233 ... Result: PASS    (at 189799e; no SQL changed after it)
+live run on the local Docker stack: 3 of 3
 ```
+
+**What Gate 2 means, in plain words:** the rules that decide PASS, FAIL and UNKNOWN are tested for heat, freezing,
+gaps, alerts and every status change, and three fresh reviews tried to break them. The last one found one way to get
+a false PASS, by moving a shipment's recorded start later, and that is now refused. All of this is tested on the PC,
+not yet on a phone.
 
 **Gate 2, earlier reviews:** first review not met, at `8b7c865`. It found four ways to reach an unsafe PASS, a lost second handover, no way to record a verdict when the cloud failed, and 32 surviving mutations. All were fixed test-first in the commits below, except what `DECISIONS.md` lists as accepted. A second fresh review is next. `gate-2` will then include the Phase 3 commits made in the meantime.
 

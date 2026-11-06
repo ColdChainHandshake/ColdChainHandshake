@@ -1,53 +1,69 @@
 # Status: what is proven, and on what
 
-Updated 6 Nov 2026, at commit `cfb2e85`. This is a prototype. Nothing here makes it fit for real vaccine or medicine
-stock.
+Updated 7 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock.
 
 "Real system" means a hosted Supabase project, an emulator or phone, or a real database running in Docker.
 "Fakes" means tests, fake servers and test vectors that Claude wrote. A fake can agree with the code and still be
-wrong about the world.
+wrong about the world: the first real run found a server rule the fake server didn't copy.
 
 ## Proven on real systems
 
-- **Database rules, on a real Postgres in local Docker** (Supabase's own Postgres 17 image, not a hosted project).
-  `npx supabase db reset` then `npx supabase test db`: 233 of 233 checks pass, 6 Nov. `db advisors --local`: no
-  issues. These checks cover: strangers locked out, readings can't be edited or deleted, a dropped, edited,
-  re-ordered or back-dated reading is refused, only the custodian can upload, one phone can't confirm for both people.
+All of these ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
+hosted project.
+
+- **Database rules:** `npx supabase test db`, 233 of 233 checks pass. `db advisors --local`: no issues. They cover:
+  - strangers are locked out;
+  - readings can't be edited or deleted;
+  - a dropped, edited, re-ordered or back-dated reading is refused;
+  - only the custodian can upload;
+  - one phone can't confirm for both people.
+- **The app's own server client, uploader and checks, for one whole handover:** `LiveSupabaseIntegrationTest`, 3 of 3.
+  - It signs up three accounts. The sender creates and dispatches a shipment, the courier takes custody and uploads
+    signed readings, and the receiver downloads and verifies them. Custody moves only after both confirm.
+  - Each shortcut is refused: a stale chain head, an edited reading, an upload by someone without custody, one phone
+    confirming for someone else, the sender confirming, and the old custodian uploading afterwards.
+  - Someone not signed in, and a stranger, see nothing.
+  - It signs up with passwords, so email-code sign-in itself is still untested.
 
 ## Proven only against our own fakes and vectors
 
-- **Full unit and screen test run:** see the counts in `PROGRESS.md` under "Status at session start".
-- **The app talking to the server:** checked against a fake server that copies the real one's refusal rules, and a
-  contract test that matches every call against the SQL.
-- **Sign-in by email code:** tested against a fake sign-in server only.
-- **Safety rules:** heat, freeze, gaps, one alert per excursion, escalation timing. These are pure logic tests, and
-  the timers ran in WorkManager's test harness, not in real time.
+- **Full unit and screen tests:** counts in `PROGRESS.md`.
+- **Offline behaviour, retries and timing:** against a fake server that copies the real one's refusal rules.
+- **Email-code sign-in:** against a fake sign-in server only.
+- **Safety rules:** heat, freeze, gaps, one alert per excursion, escalation timing. These are pure logic tests; the
+  timers ran in WorkManager's test harness, not in real time.
 - **Screens:** driven by Robolectric, which runs Android on the PC's JVM. No screen has been seen on a phone.
 - **Hash chain:** Python, Postgres and Kotlin agree on 18 shared test cases.
-- **Logger protocol:** Kotlin agrees with a separate Python version on the test vectors. Both were written by Claude.
-  Only one signature is checked against an outside source (RFC 6979).
+- **Logger protocol:** Kotlin agrees with a separate Python version on the vectors. Both were written by Claude; one
+  signature is checked against an outside source (RFC 6979).
+- **Logger test key refused:** in unit tests for both builds, and neither built APK contains its private key.
+- **Firmware:** interfaces and 38 tests build with g++; the code is the owner's to write, so 37 fail by design.
 
 ## Not proven
 
 - Anything on a hosted Supabase project. No migration has reached one.
 - Anything on an emulator or phone: sign-in, the phone's signing key, notifications, real timers, and the handover
-  with each person on their own phone.
+  with each person on their own phone (Gate 3).
 - Recording and sync with the screen off, after the app is killed, or after a long time offline.
-- A real logger. The virtual logger exists in code but the app doesn't use it yet; the app still uses the simulator.
+- A real logger. The virtual logger exists in code, but the app doesn't use it yet.
 - The GitHub Actions workflow has never run on GitHub.
-- Gate 2 is waiting for a fresh review. Gate 3 needs the dev project and two devices.
 
-## The 16 findings at `cfb2e85`
+## Gates
 
-"Unit" means fixed and tested against fakes or in pure logic tests. "Docker" means proven on the local Docker
-database. "Open" means not fixed yet.
+`gate-0` and `gate-2` are tagged. `gate-1` waits for the owner's answer (`HANDOFF.md` Q2). `gate-3` needs the dev
+project and devices.
+
+## The 16 findings
+
+"Unit" means fixed and tested against fakes or in pure logic tests. "Docker" means proven on the local Docker stack.
+"Open" means not fixed yet.
 
 | # | Finding, in short | State | Test that shows it |
 |---|---|---|---|
-| 1 | Anyone with the APK could read and write the cloud data | Docker (new schema). **The old demo project is still open** until the owner locks it | `0001_lockdown`, `0002_deny_by_default` pgTAP files |
-| 2 | Deleting or rewriting the hash chain went unnoticed | Docker and unit | `0003_trust_core` (CC001 stale head, CC003 gap or re-order, CC004 edit); `RegressionTest.finding2_*` |
+| 1 | Anyone with the APK could read and write the cloud data | Docker. **The old demo project is still open** until the owner locks it | `0001_lockdown`, `0002_deny_by_default`; `LiveSupabaseIntegrationTest.someoneNotSignedInSeesNothing`, `aStrangerSeesNoneOfAnotherShipment` |
+| 2 | Deleting or rewriting the hash chain went unnoticed | Docker and unit | `0003_trust_core` (stale head CC001, gap or re-order CC003, edit CC004); the live test's stale-head and edit checks; `RegressionTest.finding2_*` |
 | 3 | Freezing was never a breach | Unit | `RegressionTest.finding3_freezingFailsAFreezeSensitiveProduct` |
-| 4 | Two checkboxes on one phone stood in for two signatures | Server half Docker, app half unit. No run on two phones yet | `0003_trust_core` "one device cannot confirm for both people"; `ServerHandoverTest.custodyMovesOnlyOnceBothPeopleHaveConfirmed` |
+| 4 | Two checkboxes on one phone stood in for two signatures | Server half Docker, including through the app's client; app screens unit. No run on two phones yet | `0003_trust_core` "one device cannot confirm for both people"; the live test's borrowed-phone check; `ServerHandoverTest.custodyMovesOnlyOnceBothPeopleHaveConfirmed` |
 | 5 | No sensor, simulated readings | Open. Virtual logger written, not in the app (`HARDWARE = none`) | `LoggerVectorsTest` covers the protocol only |
 | 6 | Data gaps counted as safe | Unit | `RegressionTest.finding6_dataGapsAreUnknownNotSafe` |
 | 7 | A new alert every tick, no escalation | Unit | `RegressionTest.finding7_oneExcursionCreatesOneAlert`; `AlertNotificationsTest.theWorkerEscalatesWhatIsDueNotifiesAndBooksTheNextCheck` |
