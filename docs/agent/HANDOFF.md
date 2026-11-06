@@ -91,7 +91,14 @@ Desktop. This stops the local database, which is fine; Claude restarts it.
      npx supabase db push
      ```
 3. Turn on email sign-in: Authentication, Sign In / Providers, Email, enabled.
-4. **Check:** in a new Claude session, ask Claude to list the dev project's migrations. It should list `0000` to `0002`
+4. Make the emails carry a code, not just a link. A hosted project sends a sign-in link by default, and the app asks
+   for the 6-digit code. In Authentication, Emails (Templates), edit **Magic link** and **Confirm signup** and add
+   `<p>Your code: {{ .Token }}</p>`, then Save. (Source: Supabase's "Passwordless email logins" guide, read on 7 Nov.)
+5. Know the email limit. Supabase's built-in email service sends only a few emails an hour per project, and the
+   Gate 3 run needs 4 to 6. If the app shows "email rate limit exceeded", wait an hour, or set up your own SMTP
+   (Authentication, Emails, SMTP Settings) and then raise the limit under Authentication, Rate Limits. The exact
+   number is shown on that page.
+6. **Check:** in a new Claude session, ask Claude to list the dev project's migrations. It should list `0000` to `0002`
    (after `db push`), or no timeout error (before).
 
 ### 4. Point the app at the dev project (answers Q3)
