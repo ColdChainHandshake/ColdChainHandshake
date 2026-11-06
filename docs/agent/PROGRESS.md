@@ -135,6 +135,21 @@ Superseded by the numbers in the Gate 2 proof above.
 
 The app now syncs only through the server's functions. None of this has run against a hosted project yet.
 
+Proof at `d1698b9`:
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease
+BUILD SUCCESSFUL      (run at 3f53519; d1698b9 added tests, rerun below)
+debug tests 397 failed 0 | release tests 342 failed 0 | core tests 60 failed 0
+./gradlew :core-domain:test testDebugUnitTest      at d1698b9
+debug tests 402 failed 0 | core tests 60 failed 0, plus the pinning tests run on their own afterwards
+npx supabase test db        Files=4, Tests=233 ... Result: PASS   (no SQL has changed since)
+Mutating the worker's rebooking to KEEP, or removing the launch-time check, now fails a test.
+```
+
+Not run: `LiveSupabaseIntegrationTest`, the whole handover through real PostgREST and GoTrue. Docker's engine
+wouldn't start (see `HANDOFF.md` item 0b).
+
 **Gate 3:** not started. A real two-account run needs the dev project (`HANDOFF.md` Q1) and an emulator or phones.
 
 ## Phase 4: Logger as witness

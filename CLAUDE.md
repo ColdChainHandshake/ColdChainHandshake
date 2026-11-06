@@ -36,8 +36,11 @@ PowerShell: set `$env:JAVA_HOME` the same way, then `.\gradlew.bat testDebugUnit
 
 Default unit tests can't reach a real server by accident. `app/build.gradle` excludes `LiveSupabaseIntegrationTest`
 and points the test JVM at a dead proxy, with Maven Central as the one exception for Robolectric. With
-`CCH_LIVE_SUPABASE_URL` and `CCH_LIVE_SUPABASE_KEY` set to a project you own, only the live test runs. The build
-refuses the demo project.
+`CCH_LIVE_SUPABASE_URL` and `CCH_LIVE_SUPABASE_KEY` set to a project you own, only the live test runs: one whole
+handover with three new accounts, so the local stack is the right target. The build refuses the demo project.
+
+The app reaches the server only through `ColdChainRemote`. `ColdChainRemoteContractTest` checks every call against
+the SQL signatures, so add a function to the migration before calling it.
 
 Tests that use debug-only code live in `src/testDebug`. After changing a Room entity, add a version, a migration and
 a recorded hash in `ColdChainDatabaseMigrationTest`.

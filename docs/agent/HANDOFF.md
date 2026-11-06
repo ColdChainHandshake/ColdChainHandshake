@@ -47,6 +47,21 @@ then take custody as the courier and confirm the handover as the courier and the
 
 `KeystoreDeviceSignerTest` runs only on a device: `./gradlew connectedDebugAndroidTest` with one attached.
 
+### 0b. Optional: run the full handover against a local stack
+
+`LiveSupabaseIntegrationTest` runs one shipment from sender to receiver through real PostgREST and GoTrue,
+with three accounts, and checks that each shortcut is refused. It's written but hasn't run yet: on
+6 November Docker Desktop started, but its engine answered every request with an error for over 17 minutes.
+Its window may have been waiting for a prompt. Once `docker ps` works:
+
+```bash
+npx supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+npx supabase status -o env      # gives API_URL and ANON_KEY for the next line; keep the key off screen
+CCH_LIVE_SUPABASE_URL=http://127.0.0.1:54321 CCH_LIVE_SUPABASE_KEY=<ANON_KEY> ./gradlew testDebugUnitTest
+```
+
+It signs up three new accounts each run, so only point it at a project you own.
+
 ### 1. Lock down the demo project (urgent, 2 minutes)
 
 The demo project is still open: anyone who has the APK can read and rewrite its shipments, readings, alerts and
