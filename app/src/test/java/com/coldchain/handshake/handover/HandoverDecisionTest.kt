@@ -136,6 +136,24 @@ class HandoverDecisionTest {
     }
 
     @Test
+    fun aJourneyStartAfterTheHandoverCannotPass() = runBlocking {
+        prepare(steadyReadings(t0, 10 * minute, 5.0), journeyStartedAt = t0 + 12 * minute)
+
+        assertEquals(HandoverVerdict.UNKNOWN, handOver(at = t0 + 11 * minute).getOrThrow().handover.verdict)
+    }
+
+    @Test
+    fun movingTheJourneyStartLaterCannotTurnAnUnknownIntoAPass() = runBlocking {
+        // The third Gate 2 review's probe d12: the readings begin an hour after the journey started.
+        prepare(steadyReadings(t0, 10 * minute, 5.0), journeyStartedAt = t0 - hour)
+        val moving = shipments.getShipment("SHIP-1").first()!!
+
+        assertTrue(shipments.saveShipment(moving.copy(journeyStartedAt = t0)).isFailure)
+        assertEquals(HandoverVerdict.UNKNOWN, handOver().getOrThrow().handover.verdict)
+        assertEquals(ShipmentStatus.QUARANTINED, storedStatus())
+    }
+
+    @Test
     fun aFirstReadingLongAfterTheJourneyStartedIsUnknown() = runBlocking {
         prepare(steadyReadings(t0, 10 * minute, 5.0), journeyStartedAt = t0 - 2 * hour)
 

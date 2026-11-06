@@ -201,6 +201,61 @@ class ShipmentLifecycleTest {
         assertTrue(repository.saveShipment(shipment(IN_TRANSIT).copy(loggerId = "LOG-2")).isFailure)
     }
 
+    // The journey start opens the window the handover checks, so moving it later could hide the front of a journey
+    // (the third Gate 2 review's probe d12). The genesis anchors the chain (probe d13).
+
+    @Test
+    fun aJourneyStartCannotMoveOrBeDroppedOnceSet() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.saveShipment(shipment(CREATED)).getOrThrow()
+        repository.saveShipment(shipment(DISPATCHED)).getOrThrow()
+        repository.saveShipment(shipment(IN_TRANSIT).copy(journeyStartedAt = 1_000L)).getOrThrow()
+
+        assertTrue(repository.saveShipment(shipment(IN_TRANSIT).copy(journeyStartedAt = 1_000L + 3_600_000L)).isFailure)
+        assertTrue(repository.saveShipment(shipment(ARRIVED).copy(journeyStartedAt = 500L)).isFailure)
+        assertTrue(repository.saveShipment(shipment(ARRIVED)).isFailure)
+        assertEquals(1_000L, repository.getShipment("SHIP-1").first()?.journeyStartedAt)
+        assertTrue(repository.saveShipment(shipment(ARRIVED).copy(journeyStartedAt = 1_000L)).isSuccess)
+    }
+
+    @Test
+    fun aGenesisCannotChangeOrBeDroppedOnceSet() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.saveShipment(shipment(CREATED).copy(genesisHash = "a".repeat(64))).getOrThrow()
+
+        assertTrue(repository.saveShipment(shipment(CREATED).copy(genesisHash = "b".repeat(64))).isFailure)
+        assertTrue(repository.saveShipment(shipment(CREATED)).isFailure)
+        assertEquals("a".repeat(64), repository.getShipment("SHIP-1").first()?.genesisHash)
+    }
+
+    @Test
+    fun savingCannotGiveAShipmentAGenesisLater() = runBlocking {
+        // Only the server supplies a genesis, through adoption. Probe d13 attached one mid-journey.
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.adoptRemoteShipment(shipment(IN_TRANSIT)).getOrThrow()
+
+        assertTrue(repository.saveShipment(shipment(IN_TRANSIT).copy(genesisHash = "a".repeat(64))).isFailure)
+        assertEquals(null, repository.getShipment("SHIP-1").first()?.genesisHash)
+        assertTrue(repository.adoptRemoteShipment(shipment(IN_TRANSIT).copy(genesisHash = "a".repeat(64))).isSuccess)
+    }
+
+    @Test
+    fun adoptingKeepsTheEarlierJourneyStartAndRefusesAnotherGenesis() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        val genesis = "a".repeat(64)
+        repository.adoptRemoteShipment(shipment(IN_TRANSIT).copy(journeyStartedAt = 1_000L, genesisHash = genesis)).getOrThrow()
+
+        repository.adoptRemoteShipment(
+            shipment(ARRIVED).copy(journeyStartedAt = 1_000L + 3_600_000L, genesisHash = genesis)
+        ).getOrThrow()
+
+        val stored = repository.getShipment("SHIP-1").first()
+        assertEquals(1_000L, stored?.journeyStartedAt)
+        assertEquals(ARRIVED, stored?.status)
+        assertTrue(repository.adoptRemoteShipment(shipment(ARRIVED).copy(genesisHash = "b".repeat(64))).isFailure)
+        assertEquals(genesis, repository.getShipment("SHIP-1").first()?.genesisHash)
+    }
+
     @Test
     fun aDeviceCanCatchUpWithAStatusRecordedElsewhere() = runBlocking {
         val repository = ShipmentRepositoryImpl(FakeShipmentDao())

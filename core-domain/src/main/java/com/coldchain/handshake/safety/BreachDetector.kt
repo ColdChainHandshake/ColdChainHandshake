@@ -97,7 +97,9 @@ object BreachDetector {
             windowStart = shipment.journeyStartedAt,
             windowEnd = handoverAt
         )
-        return if (shipment.journeyStartedAt == null && evaluation.verdict == TemperatureVerdict.PASS) {
+        // A start after the handover leaves no window to check, so it can't prove anything either.
+        val windowUnknown = shipment.journeyStartedAt.let { it == null || it > handoverAt }
+        return if (windowUnknown && evaluation.verdict == TemperatureVerdict.PASS) {
             evaluation.copy(verdict = TemperatureVerdict.UNKNOWN)
         } else {
             evaluation

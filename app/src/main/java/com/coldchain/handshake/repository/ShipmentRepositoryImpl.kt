@@ -33,6 +33,9 @@ class ShipmentRepositoryImpl(
             }
         } else {
             requireSameManifest(current, shipment)
+            check(current.journeyStartedAt == null || current.journeyStartedAt == shipment.journeyStartedAt) {
+                "A shipment's journey start cannot change once set."
+            }
             if (current.status != shipment.status &&
                 !ShipmentLifecycle.canTransition(current.status, shipment.status)
             ) {
@@ -45,14 +48,17 @@ class ShipmentRepositoryImpl(
     override suspend fun adoptRemoteShipment(shipment: Shipment): Result<Unit> = runCatching {
         val current = shipmentDao.getShipmentDirect(shipment.id)
         if (current != null) {
-            requireSameManifest(current, shipment)
+            requireSameManifest(current, shipment, adopting = true)
             if (!ShipmentLifecycle.canReach(current.status, shipment.status)) {
                 throw IllegalTransitionException(current.status, shipment.status)
             }
         }
+        // Of two journey starts the earlier stands: a later one would shrink the window the handover checks, and an
+        // earlier one can only make the verdict stricter.
+        val journeyStartedAt = listOfNotNull(shipment.journeyStartedAt, current?.journeyStartedAt).minOrNull()
         shipmentDao.upsertShipment(
             shipment.copy(
-                journeyStartedAt = shipment.journeyStartedAt ?: current?.journeyStartedAt,
+                journeyStartedAt = journeyStartedAt,
                 genesisHash = shipment.genesisHash ?: current?.genesisHash
             ).toEntity(SyncStatus.SYNCED)
         )
@@ -60,12 +66,17 @@ class ShipmentRepositoryImpl(
 
     /**
      * These decide which rules apply and which readings belong, so changing one would change the
-     * outcome of a shipment already under way. The logger can still be chosen until dispatch.
+     * outcome of a shipment already under way. The logger can still be chosen until dispatch. The
+     * genesis anchors the chain and only the server supplies it, through adoption: saving can't add,
+     * replace or drop one, and adopting can add one but never replace it.
      */
-    private fun requireSameManifest(current: ShipmentEntity, shipment: Shipment) {
+    private fun requireSameManifest(current: ShipmentEntity, shipment: Shipment, adopting: Boolean = false) {
         val loggerLocked = current.status != ShipmentStatus.CREATED
         check(current.productProfileId == shipment.productProfileId) { "A shipment's product cannot change." }
         check(!loggerLocked || current.loggerId == shipment.loggerId) { "A shipment's logger cannot change." }
+        val genesisKept = current.genesisHash == shipment.genesisHash ||
+            (adopting && (current.genesisHash == null || shipment.genesisHash == null))
+        check(genesisKept) { "A shipment's genesis cannot change once set." }
     }
 
     override fun getShipment(id: String): Flow<Shipment?> {

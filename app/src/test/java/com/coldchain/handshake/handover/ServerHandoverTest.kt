@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -199,6 +200,21 @@ class ServerHandoverTest {
 
         assertTrue(receive(HandoverVerdict.PASS).isFailure)
         assertNull(handovers.getHandover("SHIP-1").first())
+    }
+
+    @Test
+    fun withNoSignalAndNoDeclaredVerdictNothingIsStoredAsAPass() = runBlocking {
+        // The third Gate 2 review's mutant X3: only the offline queue's unsynced history keeps this from being a PASS.
+        val readings = chain(10)
+        courierUploaded(readings)
+        openAsReceiver()
+        telemetry.saveTemperatures(readings.map { it.copy(syncStatus = SyncStatus.SYNCED) }).getOrThrow()
+        server.offlineError = IOException("No connection")
+
+        receive(verdict = null)
+
+        assertNotEquals(HandoverVerdict.PASS, handovers.getHandover("SHIP-1").first()?.verdict)
+        assertNotEquals(ShipmentStatus.ACCEPTED, localStatus())
     }
 
     @Test
