@@ -122,7 +122,30 @@ Review mutations replayed in rolled-back transactions: 13 of 13 caught
 
 Not proven yet: nothing has run on a phone or emulator. The handover and dispatch screens are driven by Robolectric, the others only open in the smoke test. WorkManager delays are read from its test harness, and no real delay has elapsed. The CI workflow has never run on GitHub.
 
-**Gate 2:** first review not met, at `8b7c865`. It found four ways to reach an unsafe PASS, a lost second handover, no way to record a verdict when the cloud failed, and 32 surviving mutations. All were fixed test-first in the commits below, except what `DECISIONS.md` lists as accepted. A second fresh review is next. `gate-2` will then include the Phase 3 commits made in the meantime.
+**Gate 2, third review (6 Nov, fresh reviewer on a clean clone at `cfb2e85`):** UNMET on two items, both fixed and
+re-checked in this session. Full review: `docs/agent/gate2_review.md`.
+
+- **Probe d12** (one of the previous reviewer's probe tests): re-saving a moving shipment with a later journey start
+  turned an UNKNOWN handover into PASS and ACCEPTED, and a start after the handover gave PASS (probe d3). Fixed in
+  `4214448`: the start and the genesis are locked, adoption keeps the earlier start, and a start after the handover is
+  UNKNOWN. Re-running the original probe now prints `saveShipment(later start) success=false ... verdict=UNKNOWN`,
+  `start after handover=UNKNOWN` and, for the genesis (probe d13), `success=false`.
+- **Mutant X3** (one of the reviewer's code changes): the offline queue could claim its history was synced and no test
+  failed. `ServerHandoverTest.withNoSignalAndNoDeclaredVerdictNothingIsStoredAsAPass` now fails on that mutant
+  (applied by hand, 1 of 11 failed, then reverted).
+- 25 mutants run in all; the 6 survivors are explained in the review: 2 are equivalent, 4 are test gaps with no route
+  to PASS (accepted in `DECISIONS.md`).
+
+Proof at `189799e`, 7 Nov:
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --rerun-tasks --continue
+BUILD SUCCESSFUL in 5m 10s
+core-domain 75 failed 0 | debug 421 failed 0 | release 364 failed 0 | skipped 0
+npx supabase test db        Files=4, Tests=233 ... Result: PASS
+```
+
+**Gate 2, earlier reviews:** first review not met, at `8b7c865`. It found four ways to reach an unsafe PASS, a lost second handover, no way to record a verdict when the cloud failed, and 32 surviving mutations. All were fixed test-first in the commits below, except what `DECISIONS.md` lists as accepted. A second fresh review is next. `gate-2` will then include the Phase 3 commits made in the meantime.
 
 Proof after the fixes:
 
@@ -183,18 +206,44 @@ npx supabase test db        Files=4, Tests=233 ... Result: PASS   (no SQL has ch
 Mutating the worker's rebooking to KEEP, or removing the launch-time check, now fails a test.
 ```
 
-Not run: `LiveSupabaseIntegrationTest`, the whole handover through real PostgREST and GoTrue. Docker's engine
-wouldn't start (see `HANDOFF.md` item 0b).
+**First real run, 6 Nov, on the local Docker stack** (Postgres, GoTrue, PostgREST and Kong; not a hosted project):
+`LiveSupabaseIntegrationTest` signs up three accounts and runs one shipment from sender to receiver through the
+app's own client, uploader and checks, and checks each shortcut is refused. It failed first: the server refused its
+first reading as back-dated, because the test's readings were spaced a minute apart. Fixed in `75ac588`. The run also
+showed the fake server had no clock rule; fixed in `189799e`.
+
+```text
+CCH_LIVE_SUPABASE_URL=http://127.0.0.1:54321 CCH_LIVE_SUPABASE_KEY=<local anon key> ./gradlew :app:testDebugUnitTest
+BUILD SUCCESSFUL | live tests 3 failures 0 errors 0
+local database afterwards: 1 shipment ACCEPTED, 8 readings, 2 handover confirmations
+```
+
+Test-key guard (resume prompt rule 7), app side, in `fed4912`: `LoggerHistoryVerifier.verify` refuses the published
+test key and its mirror in any encoding. `TestLoggerKeyRefusedTest` runs in debug and release. Neither built APK
+contains the private key (searched as hex and Base64 after unzipping, 6 Nov 23:16).
 
 **Gate 3:** not started. A real two-account run needs the dev project (`HANDOFF.md` Q1) and an emulator or phones.
 
 ## Phase 4: Logger as witness
 
-- [ ] 4.1 `docs/protocol/LOGGER_PROTOCOL.md`
-- [ ] 4.2 Virtual logger
-- [ ] 4.3 BLE ingestion behind `TelemetryRepository`
-- [ ] 4.4 Receiver reads and verifies the logger at handover
-- [ ] 4.5 Firmware interfaces, failing tests, skeleton, `WALKTHROUGH.md` (`FIRMWARE_OWNER = me`)
+- [ ] 4.1 `docs/protocol/LOGGER_PROTOCOL.md`. Written in `863ccd5`, a draft until the owner signs it off (`HANDOFF.md` Q4)
+- [ ] 4.2 Virtual logger. Kotlin protocol, virtual logger, verifier and ingestor in `cfb2e85`, checked against the
+  Python vectors. Not connected to the app: that waits for `gate-2` and `gate-3`
+- [ ] 4.3 BLE ingestion behind `TelemetryRepository`. Waits for the owner's go-ahead
+- [ ] 4.4 Receiver reads and verifies the logger at handover. Waits for `gate-3`
+- [ ] 4.5 Firmware interfaces, failing tests, `WALKTHROUGH.md` (`FIRMWARE_OWNER = me`). Claude's part done in
+  `487db13`; the function bodies are the owner's. PlatformIO skeleton skipped while `HARDWARE = none`
+
+Proof for 4.5, 6 Nov:
+
+```text
+cd firmware && cmake --preset host-tests -DCMAKE_CXX_COMPILER=g++ && cmake --build --preset host-tests
+[16/16] Linking CXX executable cch_logger_tests.exe        (no warnings, MSYS2 g++ 13.2)
+ctest --preset host-tests
+3% tests passed, 37 tests failed out of 38    (by design: each fails with "TODO(owner): <function>, step N")
+```
+
+The sanitizer and fuzz presets were not built: MinGW has no ASan and libFuzzer needs clang.
 
 **Gate 4:** not started.
 
