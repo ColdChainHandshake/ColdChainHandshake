@@ -1,136 +1,154 @@
 # Handoff: what the owner needs to do
 
-Newest and most urgent first. Questions come first; work continues on everything they don't block.
+Rewritten on 6 Nov 2026 at the start of a new session. Questions first, then your list, most urgent first. Claude
+carries on with everything these don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
 ## Questions for you
 
-### Q1. Can Claude write to the dev Supabase project? (blocks Gate 1 and Gate 3 sign-off)
+### Q1. Can Claude write to the dev Supabase project? (blocks Gate 1 and Gate 3)
 
-`.mcp.json` points at project `yjvoxozaoiarwbusyqke` with `read_only=true`, so the `apply_migration` tool is not
-available and the prompt's "apply to the dev project through MCP" step can't happen. Claude did not remove the
-flag, because that is your access decision.
+`.mcp.json` points at dev project `yjvoxozaoiarwbusyqke` with `read_only=true`. On 6 Nov at 22:00 the project
+answered `get_project_url` but timed out on `list_migrations`, so it is probably paused. No migration has reached any
+hosted project. Claude won't remove the flag, because that is your access decision. Answer by doing item 3 below.
 
-The database also timed out on `list_tables` and `list_migrations`, so the project may be paused.
+### Q2. Should Claude tag `gate-1` on local evidence?
 
-Nothing has been applied to this project. The migrations are tested on a local database only.
+`gate-0` is tagged. `gate-1` is not, by design: Gate 1 asks for the dev project's advisors to be clean, and that waits
+on Q1. Everything else Gate 1 asks for is proven locally (`PROGRESS.md`, Phase 1), and on 6 Nov the local Docker
+database passed all 233 checks with no advisor issues. Reply "tag gate-1 now" or "wait for the dev project".
 
-1. Open https://supabase.com/dashboard/project/yjvoxozaoiarwbusyqke and restore the project if it is paused.
-2. Confirm this is the intended dev project. It is not the demo project (`ljqwaqesiszczixbclwg`).
-3. Choose one:
-   - **Let Claude apply migrations:** delete `&read_only=true` from the URL in `.mcp.json`, then start a new
-     Claude Code session. Gate 1 and Gate 3 can then finish without you.
-   - **Keep it read-only:** run these yourself after each phase, and Claude checks the result with `get_advisors`:
+### Q3. Does `local.properties` still point at the old demo project?
+
+Claude may not read that file. If it does, any phone build would sign in against the demo project, which has none of
+the new server functions. See item 4.
+
+### Q4. Review the logger protocol's open design decisions
+
+`docs/protocol/LOGGER_PROTOCOL.md` is a draft until you sign it off here. The C++ tests Claude writes for you follow
+it, so a change later means changing those tests too. Each line is a choice Claude made that you may want to change:
+
+1. **Signature:** ECDSA P-256 with SHA-256, signatures as raw 64-byte `r || s`. Ed25519 is the alternative; Android
+   only verifies it from API 33.
+2. **High and low `s`:** verifiers accept both. Requiring low `s` would stop one signature having two valid forms.
+3. **Record:** 22 bytes: sequence number, millisecond timestamp, temperature in hundredths of a degree, 16 flag bits.
+   A set unknown flag bit counts as a sensor fault.
+4. **History hash:** one running SHA-256 hash over the logger's whole life, starting from its ID, so the logger
+   only has to store the latest hash.
+5. **Batches:** the logger signs the first and last sequence number with the hashes before and after; batches must
+   join end to end.
+6. **Freshness:** the phone sends a 16-byte random challenge and the logger signs its newest hash with it.
+7. **Bluetooth layout:** one service, seven characteristics under the base UUID `6f1c0000-8e4a-4c43-9b3a-2d7c5e1f0a00`,
+   history sent in pages sized to the connection's MTU.
+8. **Memory:** a ring buffer of 8,192 records, 5.7 days at one reading a minute.
+9. **Shipment link:** when custody starts, the server records the logger's newest sequence number, so shipment
+   reading `n` is logger record `start + n`.
+10. **Key enrolment:** the sender records the logger's public key when creating the shipment, so the courier never
+    supplies it.
+
+Reply with "signed off" or with the numbers you want changed.
+
+## Your list
+
+### 1. Lock down the old demo project (urgent, 2 minutes)
+
+Anyone who has the old APK can still read and rewrite the demo project's shipments, readings, alerts and handovers.
+Claude is not allowed to touch that project.
+
+1. Open the demo project (`ljqwaqesiszczixbclwg`) in the Supabase dashboard, then SQL Editor, then New query.
+2. Paste all of `docs/agent/lockdown_demo_project.sql` and click Run.
+3. **Check:** the final result table shows `rls_enabled = true` and `policies = 0` on every row.
+4. Tell Claude it's done, so this item can come off the list.
+
+The old APK stops syncing, which is intended. No data is deleted.
+
+### 2. Docker: working now, but move its disk off C:
+
+On 6 Nov at 22:00 `docker ps` answered and the local database ran all its tests, so nothing needs fixing today.
+C: has only 11 GB free (97% full), which is what can make Docker hang again.
+
+1. Docker Desktop, Settings, Resources, Advanced, Disk image location. Choose a folder on D: and click Apply & Restart.
+2. **Check:** `docker ps` in a new terminal returns a table without an error.
+
+Only if Docker hangs on "starting" again: quit Docker Desktop, run `wsl --shutdown` in PowerShell, then start Docker
+Desktop. This stops the local database, which is fine; Claude restarts it.
+
+### 3. Make the dev project reachable and decide on write access (answers Q1)
+
+1. Open https://supabase.com/dashboard/project/yjvoxozaoiarwbusyqke and click Restore if the project is paused.
+2. Choose one:
+   - **Let Claude apply migrations:** delete `&read_only=true` from the URL in `.mcp.json`, then start a new Claude
+     Code session.
+   - **Keep it read-only:** after each phase, run these yourself. `link` asks for the database password, which you
+     can reset in the project's database settings.
 
      ```powershell
      npx supabase login
      npx supabase link --project-ref yjvoxozaoiarwbusyqke
      npx supabase db push
      ```
+3. Turn on email sign-in: Authentication, Sign In / Providers, Email, enabled.
+4. **Check:** in a new Claude session, ask Claude to list the dev project's migrations. It should list `0000` to `0002`
+   (after `db push`), or no timeout error (before).
 
-     `link` asks for the database password, which you can reset in the project's database settings.
+### 4. Point the app at the dev project (answers Q3)
 
-## Do these first
+Once item 3 is done, set `supabase.url` and `supabase.anon.key` in `local.properties` to the dev project's URL and
+publishable key (Project Settings, API). Claude doesn't read or change that file.
 
-### 0. Point the app at the dev project before running it on a phone
+**Check:** a debug build on a phone shows the sign-in screen, and a code arrives by email when you ask for one.
 
-The app now signs people in and syncs only through the functions in `supabase/migrations`. Your
-`local.properties` points at the demo project, which has none of them, so a phone build would show sign-in and
-then fail. Once Q1 is settled and the migrations are applied to the dev project, set `supabase.url` and
-`supabase.anon.key` in `local.properties` to the dev project's values. Claude doesn't read or change that file.
+### 5. An emulator or a phone (needed for Gate 3 and Gate 5)
 
-Email sign-in also needs the project's email settings on: Authentication, then Providers, then Email, with
-"Confirm email" allowing one-time codes.
+Today this PC has no emulator, no system image, no Android Studio, and `adb devices` lists nothing.
 
-After that, a two-account check needs two phones or emulators, because a phone stays with the first account
-that registers it. Sign in as a sender on one, create and dispatch a shipment naming the other accounts' emails,
-then take custody as the courier and confirm the handover as the courier and the receiver.
+**Quickest: your own phone.** Settings, About phone, tap Build number seven times. Then Developer options, USB
+debugging on. Plug it in and accept the prompt. **Check:** `& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices`
+lists it as `device`.
 
-`KeystoreDeviceSignerTest` runs only on a device: `./gradlew connectedDebugAndroidTest` with one attached.
+**Emulator:** keep its files on D:, because C: is nearly full.
 
-### 0b. Optional: run the full handover against a local stack
+1. Install Android Studio with the SDK on D: (for example `D:\Android\Sdk`; choose the path in the setup wizard).
+2. Set the emulator's folder to D: once, then open a new terminal:
 
-`LiveSupabaseIntegrationTest` runs one shipment from sender to receiver through real PostgREST and GoTrue,
-with three accounts, and checks that each shortcut is refused. It's written but hasn't run yet: on
-6 November Docker Desktop started, but its engine answered every request with an error for over 17 minutes.
-Its window may have been waiting for a prompt. Once `docker ps` works:
+   ```powershell
+   [Environment]::SetEnvironmentVariable('ANDROID_AVD_HOME', 'D:\Android\avd', 'User')
+   ```
+3. In Android Studio, Device Manager, create a Pixel device with a recent Google APIs image, and start it.
+4. **Check:** `adb devices` lists `emulator-5554  device`.
 
-```bash
-npx supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
-npx supabase status -o env      # gives API_URL and ANON_KEY for the next line; keep the key off screen
-CCH_LIVE_SUPABASE_URL=http://127.0.0.1:54321 CCH_LIVE_SUPABASE_KEY=<ANON_KEY> ./gradlew testDebugUnitTest
-```
+**How many devices Gate 3 needs.** The run uses three accounts: sender, courier and receiver. A phone stays with the
+first account that signs in on it, and the courier and receiver must be on different phones. So it needs three
+devices, or two with one extra step: after the sender has dispatched, clear the app's storage on that phone
+(Settings, Apps, Cold Chain Handshake, Storage, Clear storage), then sign in there as the courier. Two emulators side
+by side need about 16 GB of RAM, so one emulator plus your phone is the easier pair.
 
-It signs up three new accounts each run, so only point it at a project you own.
+### 6. Back up the branch off this PC
 
-### 1. Lock down the demo project (urgent, 2 minutes)
+`PUSH_POLICY = local-only`, so this work exists only on this PC. Claude made a bundle on 6 Nov:
+`D:\cch-backup-20261106-2158.bundle` (1.9 MB, every branch and tag).
 
-The demo project is still open: anyone who has the APK can read and rewrite its shipments, readings, alerts and
-handovers. Claude is not allowed to touch that project.
+1. Copy it to cloud storage or a USB drive.
+2. **Check:** on the copy, `git bundle verify <path to the copy>` ends with "is okay".
 
-1. Open the demo project in the Supabase dashboard, then SQL Editor, then New query.
-2. Paste all of `docs/agent/lockdown_demo_project.sql` and click Run.
-3. Check the final result table: every row should show `rls_enabled = true` and `policies = 0`.
+### 7. Claude's safety settings: done
 
-The old APK will stop syncing, which is intended. No data is deleted.
+`.claude/settings.json` is in place and holds the deny rules (no reading `local.properties`, keystores or `.env`; no
+force-push, hard reset, `git clean`, branch deletion or stash drop). Nothing to do.
 
-### 2. Set `JAVA_HOME` and `ANDROID_HOME`
+### 8. Set `JAVA_HOME` and `ANDROID_HOME` for your own builds
 
-Nothing on this PC could build the app. `JAVA_HOME` was unset, and `gradle.properties` pointed at a Java folder that
-went away when the Red Hat Java extension updated itself; Claude has removed that line. The JDKs that are installed
-don't fit: Oracle 25 is too new, and Oracle XE's bundled Java 8 is too old. The build needs JDK 17.
-
-Claude put a portable Temurin 17 at `D:\cch-tools\jdk-17.0.20.1+1`. It changed nothing on PATH or in the registry.
-Set both variables once, then open a new terminal:
+Both are still unset on this PC. Claude sets them per command. To build yourself, run this once, then open a new
+terminal:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('JAVA_HOME', 'D:\cch-tools\jdk-17.0.20.1+1', 'User')
 [Environment]::SetEnvironmentVariable('ANDROID_HOME', "$env:LOCALAPPDATA\Android\Sdk", 'User')
 ```
 
-If you install Android Studio instead, point `JAVA_HOME` at its `jbr` folder and delete `D:\cch-tools`.
+If you install Android Studio, point `JAVA_HOME` at its `jbr` folder instead. **Check:** `.\gradlew.bat --version`
+shows JVM 17.
 
-### 3. Free space on C:
+### 9. Optional: `actionlint`
 
-C: is 98% full (under 9 GB free), and the local database images used 3 GB of it. If it fills up, builds and the
-local database will start failing. Do this before item 4. In order of effect:
-
-1. **Move Docker's data to D:.** Docker Desktop, Settings, Resources, Advanced, Disk image location. Choose a
-   folder on D: and click Apply.
-2. **Move the Gradle cache to D:.** Run this, then open a new terminal. The cache rebuilds itself.
-
-   ```powershell
-   [Environment]::SetEnvironmentVariable('GRADLE_USER_HOME', 'D:\gradle-home', 'User')
-   ```
-
-3. **See what else is there.** `docker system df` shows image space. Several images belong to your other projects,
-   so remove only what you recognise with `docker image rm <name>`.
-
-### 4. Install an emulator (needed for Gate 3 and Gate 5)
-
-The SDK has no emulator or system images, and Claude does not install tools beyond project dependencies. The
-two-account flow and the rotation, background and process-death checks can't be run without one.
-
-The Android SDK's own `sdkmanager` isn't installed here, so use the `android` CLI, which is:
-
-```powershell
-android sdk install emulator
-android emulator create
-android emulator list
-android emulator start <name from the list>
-```
-
-`android emulator create` is taken from the CLI's help and has not been run on this PC. It downloads a system
-image of several GB onto C:, which is why item 3 comes first.
-
-A phone is a simpler alternative: enable USB debugging, plug it in, and accept the prompt. That covers most of
-these checks, and `adb devices` will list it. `adb` is not on PATH; it is at
-`%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`.
-
-### 5. Optional: install `actionlint`
-
-Claude can only check the GitHub Actions workflow as valid YAML. `actionlint` checks it properly, and Claude will
-use it if it is on PATH.
-
-```powershell
-scoop install actionlint
-```
+Claude can only check the GitHub Actions workflow as YAML. `scoop install actionlint` lets it check the workflow
+properly. **Check:** `actionlint --version` prints a version.

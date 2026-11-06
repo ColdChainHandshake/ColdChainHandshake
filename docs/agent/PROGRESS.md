@@ -1,8 +1,44 @@
 # Progress
 
-**Next action:** task 3.5 (clock checks and interim signing), then connect the app to the server: 3.2, 3.3 and 3.4 are done on the server side only. Act on the Gate 2 review when it reports.
+**Next action:** fresh Gate 2 review, then the test-key guard, then the live server test on the local Docker stack.
+Phase 4 app work and Phase 5 wait until `gate-2` and `gate-3` are tagged (resume prompt of 6 Nov).
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
+
+## Status at session start (6 Nov 2026, 22:00, new session after a usage limit)
+
+Checked by commands run in this session. `docs/agent/STATUS.md` says what is proven and on what.
+
+- **Git:** branch `rebuild/trust-core`, clean, HEAD `cfb2e85`. All 11 commits the last session named exist.
+  `d1698b9` adds `LiveSupabaseIntegrationTest`; `2045c09` only changes docs. Tags: `gate-0` only. `gate-1` was held
+  back on purpose until the dev project is reachable; the owner is asked in `HANDOFF.md` Q2. No stashes. No remote
+  holds this branch, so a bundle was made: `D:\cch-backup-20261106-2158.bundle`, `git bundle verify` says "is okay".
+- **Deny rules:** `.claude/settings.json` is in place with them.
+- **Docker:** works again. `docker version` answers (Docker Desktop 4.45.0, engine 28.3.3); the local Postgres
+  container is healthy. GoTrue and pg_prove images are present; PostgREST and Kong are not yet.
+- **Supabase MCP:** connected to dev project `yjvoxozaoiarwbusyqke`, `read_only=true`, no `apply_migration` tool.
+  `get_project_url` answers; `list_migrations` times out, so the project is probably paused.
+- **Devices:** `adb devices` lists none. No emulator, no system image, no AVD, no Android Studio. C: 11 GB free
+  (97% used), D: 359 GB free. `JAVA_HOME` and `ANDROID_HOME` are still unset for the owner's shell.
+- **Demo project:** HANDOFF still lists the lockdown as not done. Claude can't check it; the owner is asked.
+- **Old Gate 2 reviewer:** its clone is `D:\cch-tools\clone-check` at `e4fc659`. Its mutation run had finished; it
+  stopped before classifying its probe results and before a verdict. Its notes are copied to
+  `D:\cch-tools\gate2-rev2-notes\`, off the C: Temp folder.
+
+Clean run at `cfb2e85` (6 Nov, 22:06 to 22:14):
+
+```text
+npx supabase db reset && npx supabase test db
+Files=4, Tests=233 ... Result: PASS
+npx supabase db advisors --local --fail-on info          No issues found
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --continue
+BUILD SUCCESSFUL in 5m 21s
+./gradlew :core-domain:test --rerun                      (it had been skipped as up to date)
+core-domain 66 failed 0 | debug 412 failed 0 | release 355 failed 0 | skipped 0 | live test classes run: 0
+```
+
+The debug and release counts differ as expected: 352 tests are shared, 60 are debug-only (`src/testDebug`) and 3 are
+release-only (`ReleaseHasNoDebugToolsTest`).
 
 ## Phase 0: Recon and safety net
 
