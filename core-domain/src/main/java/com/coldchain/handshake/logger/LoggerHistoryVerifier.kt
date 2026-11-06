@@ -16,7 +16,10 @@ enum class LoggerIssueType {
     STALE_HEAD,
 
     /** The head doesn't match the newest record handed over, so the history stops short. */
-    HEAD_MISMATCH
+    HEAD_MISMATCH,
+
+    /** The key is the published test key, so anyone could have signed this. Nothing else is checked. */
+    TEST_KEY
 }
 
 data class LoggerIssue(val seq: Long?, val type: LoggerIssueType)
@@ -59,6 +62,24 @@ object LoggerHistoryVerifier {
      * @param nonce The nonce this reader sent, which [head] must be signed over.
      */
     fun verify(
+        loggerId: String,
+        publicKey: ByteArray,
+        batches: List<LoggerBatch>,
+        fromSeq: Long = 1,
+        head: LoggerHead? = null,
+        nonce: ByteArray? = null
+    ): LoggerVerification =
+        if (TestLoggerKey.matches(publicKey)) {
+            LoggerVerification(emptyList(), listOf(LoggerIssue(null, LoggerIssueType.TEST_KEY)), emptyList())
+        } else {
+            verifyAnyKey(loggerId, publicKey, batches, fromSeq, head, nonce)
+        }
+
+    /**
+     * [verify] without refusing the published test key. `internal`, so the app can't reach it: it exists for this
+     * module's own tests against the vectors, which are signed with that key.
+     */
+    internal fun verifyAnyKey(
         loggerId: String,
         publicKey: ByteArray,
         batches: List<LoggerBatch>,

@@ -71,10 +71,13 @@ class LoggerVectorsTest {
         }
     }
 
+    // The vectors' key is the published test key, which the public check refuses (TestLoggerKeyTest), so these
+    // tests use the check without that refusal.
+
     @Test
     fun theVectorHistoryVerifiesWithItsHead() {
         val head = vectors.getValue("head").jsonObject
-        val verification = LoggerHistoryVerifier.verify(
+        val verification = LoggerHistoryVerifier.verifyAnyKey(
             loggerId, publicKey, batches.map { it.first },
             head = LoggerHead(
                 head.getValue("head_seq").jsonPrimitive.long,
@@ -95,9 +98,9 @@ class LoggerVectorsTest {
         val edited = first.copy(records = first.records.mapIndexed { i, r -> if (i == 1) r.copy(tempCentiC = 300) else r })
         val dropped = first.copy(records = first.records.drop(1))
 
-        assertTrue(LoggerHistoryVerifier.verify(loggerId, publicKey, listOf(edited, second)).issues.any { it.type == LoggerIssueType.BROKEN_CHAIN })
-        assertTrue(LoggerHistoryVerifier.verify(loggerId, publicKey, listOf(dropped, second)).issues.any { it.type == LoggerIssueType.BROKEN_CHAIN })
-        assertTrue(LoggerHistoryVerifier.verify(loggerId, publicKey, listOf(second)).issues.any { it.type == LoggerIssueType.GAP })
+        assertTrue(LoggerHistoryVerifier.verifyAnyKey(loggerId, publicKey, listOf(edited, second)).issues.any { it.type == LoggerIssueType.BROKEN_CHAIN })
+        assertTrue(LoggerHistoryVerifier.verifyAnyKey(loggerId, publicKey, listOf(dropped, second)).issues.any { it.type == LoggerIssueType.BROKEN_CHAIN })
+        assertTrue(LoggerHistoryVerifier.verifyAnyKey(loggerId, publicKey, listOf(second)).issues.any { it.type == LoggerIssueType.GAP })
     }
 
     @Test
