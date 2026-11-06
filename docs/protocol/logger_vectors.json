@@ -1,0 +1,94 @@
+{
+  "description": "Logger protocol test vectors. See docs/protocol/LOGGER_PROTOCOL.md. The private key is for tests only.",
+  "logger_id": "LOG-VEC-1",
+  "private_key": "604219bc9c9b2ae45ffe2a4495bae7612a2c49e29a98bb64ee2b060e5e724bf1",
+  "public_key_uncompressed": "046f56e353e87d63e976bf24b09e68063378c5d5611385f9069700c438834d6ef7ed15fd6fc81393ebdaa001840f2b7cd640fbd417cb169b50edc20376b509df62",
+  "public_key_spki_base64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb1bjU+h9Y+l2vySwnmgGM3jF1WEThfkGlwDEOINNbvftFf1vyBOT69qgAYQPK3zWQPvUF8sWm1DtwgN2tQnfYg==",
+  "genesis_hash": "e67ce95e33d5680a0259c900b78aa3a1f496a0d7ca69c022d5111b96a9eb9f98",
+  "records": [
+    {
+      "seq": 1,
+      "logger_ts": 1700000000000,
+      "temp_centi_c": 512,
+      "flags": 0,
+      "bytes": "00000000000000010000018bcfe56800000002000000",
+      "running_hash": "c9d2526441eac464191ab89239583693ee5e24a0b577b385404cf3f4406d4ae6"
+    },
+    {
+      "seq": 2,
+      "logger_ts": 1700000060000,
+      "temp_centi_c": 498,
+      "flags": 0,
+      "bytes": "00000000000000020000018bcfe65260000001f20000",
+      "running_hash": "b148f975287645fd50061b75e228f64407dca76568f25e0d002dda3eb56aba5f"
+    },
+    {
+      "seq": 3,
+      "logger_ts": 1700000120000,
+      "temp_centi_c": 845,
+      "flags": 4,
+      "bytes": "00000000000000030000018bcfe73cc00000034d0004",
+      "running_hash": "c51f8570b51eede414dae8c215f05186970da607cc14a184a2ff3113b3a830eb"
+    },
+    {
+      "seq": 4,
+      "logger_ts": 1700000180000,
+      "temp_centi_c": -150,
+      "flags": 2,
+      "bytes": "00000000000000040000018bcfe82720ffffff6a0002",
+      "running_hash": "b420525ef0a1985b4031784ecc3ef4480728639a2521403be8844a35a20fb4f6"
+    },
+    {
+      "seq": 5,
+      "logger_ts": 1700000240000,
+      "temp_centi_c": 0,
+      "flags": 1,
+      "bytes": "00000000000000050000018bcfe91180000000000001",
+      "running_hash": "17ed7c0ea8409bbfb72c6627e6b0f856e18bef8843cc0de7af7a3c3f561e7fe7"
+    },
+    {
+      "seq": 6,
+      "logger_ts": 1700000300000,
+      "temp_centi_c": 2147483647,
+      "flags": 8,
+      "bytes": "00000000000000060000018bcfe9fbe07fffffff0008",
+      "running_hash": "691e9a61453d0826febef865d31cc49b776639f9b57e6179491774a1ca7c3e24"
+    },
+    {
+      "seq": 7,
+      "logger_ts": 1700000360000,
+      "temp_centi_c": -2147483648,
+      "flags": 0,
+      "bytes": "00000000000000070000018bcfeae640800000000000",
+      "running_hash": "a30f3a17f10a4edf04243dd3da5813fb0df35f89b4b49a17cb187cb5a2b13a3a"
+    }
+  ],
+  "batches": [
+    {
+      "first_seq": 1,
+      "last_seq": 4,
+      "start_hash": "e67ce95e33d5680a0259c900b78aa3a1f496a0d7ca69c022d5111b96a9eb9f98",
+      "end_hash": "b420525ef0a1985b4031784ecc3ef4480728639a2521403be8844a35a20fb4f6",
+      "payload": "01000000106363682d6c6f676765722d6261746368000000094c4f472d5645432d3100000000000000010000000000000004e67ce95e33d5680a0259c900b78aa3a1f496a0d7ca69c022d5111b96a9eb9f98b420525ef0a1985b4031784ecc3ef4480728639a2521403be8844a35a20fb4f6",
+      "signature_raw": "5f7c1d2b98e48c10d9fee6609ba475316f90a65e513f4aa58fe358fdbf067bd2642ae4b823cd779686fd0b3a62ff470e250683e9eb9a86c6763aa53ba3c24c7b",
+      "signature_der": "304402205f7c1d2b98e48c10d9fee6609ba475316f90a65e513f4aa58fe358fdbf067bd20220642ae4b823cd779686fd0b3a62ff470e250683e9eb9a86c6763aa53ba3c24c7b"
+    },
+    {
+      "first_seq": 5,
+      "last_seq": 7,
+      "start_hash": "b420525ef0a1985b4031784ecc3ef4480728639a2521403be8844a35a20fb4f6",
+      "end_hash": "a30f3a17f10a4edf04243dd3da5813fb0df35f89b4b49a17cb187cb5a2b13a3a",
+      "payload": "01000000106363682d6c6f676765722d6261746368000000094c4f472d5645432d3100000000000000050000000000000007b420525ef0a1985b4031784ecc3ef4480728639a2521403be8844a35a20fb4f6a30f3a17f10a4edf04243dd3da5813fb0df35f89b4b49a17cb187cb5a2b13a3a",
+      "signature_raw": "a648da0ba2cbd28b28cadab51c83381b0b17eb874715fec0e302345adcafa154cbead667442b03c00fadf9c67e1b0ebe94371b24972cca370c6adf64f1e6f32b",
+      "signature_der": "3046022100a648da0ba2cbd28b28cadab51c83381b0b17eb874715fec0e302345adcafa154022100cbead667442b03c00fadf9c67e1b0ebe94371b24972cca370c6adf64f1e6f32b"
+    }
+  ],
+  "head": {
+    "nonce": "101112131415161718191a1b1c1d1e1f",
+    "head_seq": 7,
+    "head_hash": "a30f3a17f10a4edf04243dd3da5813fb0df35f89b4b49a17cb187cb5a2b13a3a",
+    "payload": "010000000f6363682d6c6f676765722d68656164000000094c4f472d5645432d310000000000000007a30f3a17f10a4edf04243dd3da5813fb0df35f89b4b49a17cb187cb5a2b13a3a101112131415161718191a1b1c1d1e1f",
+    "signature_raw": "3e93ce324fe8b9e5e45773f827ee1ab93f4c6f74db5a99122ca85c6f00694d8b0a8e05852800739bbfcca886e6df24fcfa5f6018630266b6939c0fb2d30d5343",
+    "signature_der": "304402203e93ce324fe8b9e5e45773f827ee1ab93f4c6f74db5a99122ca85c6f00694d8b02200a8e05852800739bbfcca886e6df24fcfa5f6018630266b6939c0fb2d30d5343"
+  }
+}
