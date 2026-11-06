@@ -28,7 +28,8 @@ data class TemperatureEventEntity(
     val currentHash: String,
     val syncStatus: SyncStatus,
     @ColumnInfo(defaultValue = "0")
-    val seq: Long = 0L
+    val seq: Long = 0L,
+    val receivedAt: Long? = null
 )
 
 fun TemperatureEventEntity.toDomain(): TemperatureEvent = TemperatureEvent(
@@ -40,7 +41,8 @@ fun TemperatureEventEntity.toDomain(): TemperatureEvent = TemperatureEvent(
     previousHash = previousHash,
     currentHash = currentHash,
     syncStatus = syncStatus,
-    seq = seq
+    seq = seq,
+    receivedAt = receivedAt
 )
 
 fun TemperatureEvent.toEntity(): TemperatureEventEntity = TemperatureEventEntity(
@@ -52,5 +54,6 @@ fun TemperatureEvent.toEntity(): TemperatureEventEntity = TemperatureEventEntity
     previousHash = previousHash,
     currentHash = currentHash,
     syncStatus = syncStatus,
-    seq = seq
+    seq = seq,
+    receivedAt = receivedAt
 )

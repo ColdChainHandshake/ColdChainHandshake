@@ -40,7 +40,7 @@ interface TemperatureEventDao {
     /**
      * Retrieve all pending or failed events that need cloud synchronization.
      */
-    @Query("SELECT * FROM temperature_events WHERE syncStatus != 'SYNCED' ORDER BY timestamp ASC")
+    @Query("SELECT * FROM temperature_events WHERE syncStatus IN ('PENDING', 'FAILED') ORDER BY timestamp ASC")
     suspend fun getPendingEvents(): List<TemperatureEventEntity>
 
     /**

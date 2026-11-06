@@ -19,10 +19,13 @@ interface ShipmentDao {
     @Query("SELECT * FROM shipments ORDER BY lastModifiedTimestamp DESC")
     fun getAllShipments(): Flow<List<ShipmentEntity>>
 
+    @Query("SELECT * FROM shipments")
+    suspend fun getAllShipmentsDirect(): List<ShipmentEntity>
+
     @Upsert
     suspend fun upsertShipment(shipment: ShipmentEntity)
 
-    @Query("SELECT * FROM shipments WHERE syncStatus != 'SYNCED'")
+    @Query("SELECT * FROM shipments WHERE syncStatus IN ('PENDING', 'FAILED')")
     suspend fun getPendingShipments(): List<ShipmentEntity>
 
     @Query("UPDATE shipments SET syncStatus = :syncStatus, lastModifiedTimestamp = :timestamp WHERE id = :id")

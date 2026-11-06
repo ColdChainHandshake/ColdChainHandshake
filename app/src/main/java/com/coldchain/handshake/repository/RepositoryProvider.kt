@@ -10,11 +10,11 @@ import com.coldchain.handshake.data.local.SharedPreferencesProfileCache
 import com.coldchain.handshake.data.remote.SupabaseAccountRepository
 import com.coldchain.handshake.data.remote.SupabaseClientProvider
 import com.coldchain.handshake.data.remote.SupabaseColdChainRemote
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
 import com.coldchain.handshake.data.security.KeystoreDeviceSigner
 import com.coldchain.handshake.util.DeviceIdProvider
 import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.handover.HandoverOrchestrator
+import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.models.ChaosScenarioType
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.simulator.TemperatureSimulator
@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Unified Single Source of Truth Provider for ColdChainHandshake.
@@ -68,13 +69,36 @@ object RepositoryProvider {
     private var simulator: TemperatureSimulator? = null
     internal var syncCoordinator: ShipmentHistorySyncCoordinator? = null
 
+    /** This install's name to the server. Tests set it; [initialize] reads it from the phone. */
+    @Volatile
+    internal var deviceIdValue: String? = null
+
+    val deviceId: String
+        get() = deviceIdValue ?: throw IllegalStateException("RepositoryProvider not initialized. Call initialize(context) first.")
+
+    val remote: ColdChainRemote
+        get() = remoteService ?: synchronized(this) {
+            remoteService ?: SupabaseColdChainRemote(SupabaseClientProvider.getClient()).also { remoteService = it }
+        }
+
     val shipmentHistorySyncCoordinator: ShipmentHistorySyncCoordinator
         get() = syncCoordinator ?: synchronized(this) {
-            syncCoordinator ?: ShipmentHistorySyncCoordinator(
-                telemetryRepository = telemetryRepository,
-                remoteDataSource = SupabaseRemoteDataSource()
-            ).also { syncCoordinator = it }
+            syncCoordinator ?: ShipmentHistorySyncCoordinator(telemetryRepository, remote).also { syncCoordinator = it }
         }
+
+    val shipmentWorkflow: ShipmentWorkflow
+        get() = ShipmentWorkflow(remote, shipmentRepository) { deviceId }
+
+    val serverHandover: ServerHandover
+        get() = ServerHandover(
+            remote = remote,
+            orchestrator = handoverOrchestrator,
+            shipments = shipmentRepository,
+            handovers = handoverRepository,
+            history = shipmentHistorySyncCoordinator,
+            uploadPending = { shipmentId -> syncService.uploadReadings(shipmentId) },
+            deviceId = { deviceId }
+        )
 
     @Volatile
     internal var syncScope: CoroutineScope? = null
@@ -151,40 +175,54 @@ object RepositoryProvider {
 
             val baseNetworkMonitor = AndroidNetworkMonitor(appContext)
             val networkMonitor = DebugTools.wrapNetworkMonitor(baseNetworkMonitor, chaosService)
-            val remoteDataSource = SupabaseRemoteDataSource()
 
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             syncScope = scope
 
             val deviceId = DeviceIdProvider.getDeviceId(appContext)
+            deviceIdValue = deviceId
             val remote = remoteService ?: SupabaseColdChainRemote(SupabaseClientProvider.getClient())
             remoteService = remote
+            val signer = KeystoreDeviceSigner("cch-device-$deviceId")
             if (accountRepo == null) {
                 accountRepo = SupabaseAccountRepository(
                     client = SupabaseClientProvider.getClient(),
                     remote = remote,
-                    signer = KeystoreDeviceSigner("cch-device-$deviceId"),
+                    signer = signer,
                     deviceId = { deviceId },
                     profileCache = SharedPreferencesProfileCache(appContext),
                     scope = scope
                 )
             }
+            val account = accountRepository
 
-            val coordinator = ShipmentHistorySyncCoordinator(
-                telemetryRepository = tRepo,
-                remoteDataSource = remoteDataSource
-            )
-            syncCoordinator = coordinator
+            syncCoordinator = ShipmentHistorySyncCoordinator(tRepo, remote)
 
             syncServiceInstance = SyncServiceImpl(
                 shipmentDao = db.shipmentDao(),
                 temperatureEventDao = db.temperatureEventDao(),
                 alertDao = db.alertDao(),
                 handoverDao = db.handoverDao(),
-                remoteDataSource = remoteDataSource,
+                remote = remote,
+                uploader = ReadingUploader(remote, signer, { deviceId }),
+                account = account,
                 networkMonitor = networkMonitor,
+                deviceId = { deviceId },
                 coroutineScope = scope
             )
+
+            // Someone signing in after another person's session ended without a sign-out, for example
+            // when it expired, mustn't see that person's records.
+            scope.launch {
+                val owner = appContext.getSharedPreferences(OWNER_PREFS, Context.MODE_PRIVATE)
+                account.state.collect { state ->
+                    if (state is AccountState.Ready) {
+                        val previous = owner.getString(KEY_OWNER, null)
+                        if (previous != null && previous != state.userId) forgetLocalData()
+                        owner.edit().putString(KEY_OWNER, state.userId).apply()
+                    }
+                }
+            }
 
             if (simulator == null) {
                 simulator = TemperatureSimulator(
@@ -216,6 +254,36 @@ object RepositoryProvider {
                 }
             }
         }
+    }
+
+    /**
+     * Ends the session and clears what this phone holds, so the next person to sign in can't see it.
+     * Refused while anything recorded here still has to reach the server, because clearing it would
+     * lose evidence.
+     */
+    suspend fun signOut(): Result<Unit> {
+        val unsent = database?.let { db -> withContext(Dispatchers.IO) { countUnsent(db) } } ?: 0
+        if (unsent > 0) {
+            return Result.failure(
+                IllegalStateException("$unsent records haven't reached the server yet. Connect, let them send, then sign out.")
+            )
+        }
+
+        simulator?.reset()
+        return accountRepository.signOut().onSuccess { forgetLocalData() }
+    }
+
+    private suspend fun countUnsent(db: ColdChainDatabase): Int {
+        val onServer = db.shipmentDao().getAllShipmentsDirect().filter { it.genesisHash != null }.map { it.id }.toSet()
+        return db.temperatureEventDao().getPendingEvents().count { it.shipmentId in onServer } +
+            db.alertDao().getPendingAlerts().count { it.shipmentId in onServer } +
+            db.handoverDao().getPendingHandovers().count { it.shipmentId in onServer }
+    }
+
+    private suspend fun forgetLocalData() {
+        simulator?.reset()
+        syncCoordinator = null
+        database?.let { db -> withContext(Dispatchers.IO) { db.clearAllTables() } }
     }
 
     fun getShipmentRepository(context: Context): ShipmentRepository {
@@ -302,6 +370,7 @@ object RepositoryProvider {
             database = null
             accountRepo = null
             remoteService = null
+            deviceIdValue = null
             shipmentRepo = null
             telemetryRepo = null
             alertRepo = null
@@ -318,4 +387,7 @@ object RepositoryProvider {
     fun resetForTesting() {
         reset()
     }
+
+    private const val OWNER_PREFS = "coldchain_local_owner"
+    private const val KEY_OWNER = "user_id"
 }

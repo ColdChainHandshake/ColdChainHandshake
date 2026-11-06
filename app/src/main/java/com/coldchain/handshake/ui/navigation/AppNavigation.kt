@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -50,6 +51,7 @@ fun AppRoot() {
     val state by account.state.collectAsState()
     val scope = rememberCoroutineScope()
     var localOnly by rememberSaveable { mutableStateOf(false) }
+    var signOutProblem by remember { mutableStateOf<String?>(null) }
 
     val current = state
     when {
@@ -59,10 +61,15 @@ fun AppRoot() {
             onAction = { localOnly = false }
         )
         current is AccountState.Ready -> AppNavigation(
-            statusLine = current.deviceProblem
+            statusLine = signOutProblem
+                ?: current.deviceProblem
                 ?: "${current.profile.displayName}, ${roleLabel(current.profile.role)}",
             actionLabel = "Sign Out",
-            onAction = { scope.launch { account.signOut() } }
+            onAction = {
+                scope.launch {
+                    signOutProblem = RepositoryProvider.signOut().exceptionOrNull()?.message
+                }
+            }
         )
         current is AccountState.NeedsProfile -> ProfileSetupScreen(account)
         current is AccountState.Unreachable -> AccountUnreachableScreen(account)

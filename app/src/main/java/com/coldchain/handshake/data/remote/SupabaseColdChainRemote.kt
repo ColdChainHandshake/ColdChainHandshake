@@ -16,6 +16,7 @@ import com.coldchain.handshake.repository.HandoverState
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.RemoteRejection
 import com.coldchain.handshake.repository.RemoteShipment
+import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.repository.UploadedBatch
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.exception.PostgrestRestException
@@ -127,6 +128,20 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
             createdAtMs = row.createdAt.toEpochMillis(),
             journeyStartedAt = started?.serverTime?.toEpochMillis()
         )
+    }
+
+    override suspend fun getMembers(shipmentId: String) = call {
+        val members = client.postgrest.from("shipment_members")
+            .select(Columns.raw("user_id,role")) { filter { eq("shipment_id", shipmentId) } }
+            .decodeList<MemberRow>()
+
+        // Profiles hang off the accounts table, so PostgREST can't embed them here.
+        val names = client.postgrest.from("profiles")
+            .select(Columns.raw("user_id,display_name")) { filter { isIn("user_id", members.map { it.userId }) } }
+            .decodeList<MemberNameRow>()
+            .associate { it.userId to it.displayName }
+
+        members.map { ShipmentMember(it.userId, MemberRole.valueOf(it.role.uppercase()), names[it.userId]) }
     }
 
     override suspend fun getCustody(shipmentId: String) = call {
@@ -334,6 +349,15 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
         val destination: String,
         val status: String,
         @SerialName("created_at") val createdAt: String
+    )
+
+    @Serializable
+    private data class MemberRow(@SerialName("user_id") val userId: String, val role: String)
+
+    @Serializable
+    private data class MemberNameRow(
+        @SerialName("user_id") val userId: String,
+        @SerialName("display_name") val displayName: String
     )
 
     @Serializable

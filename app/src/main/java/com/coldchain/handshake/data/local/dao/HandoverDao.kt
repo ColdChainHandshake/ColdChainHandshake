@@ -23,7 +23,13 @@ interface HandoverDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertHandover(handover: HandoverEntity)
 
-    @Query("SELECT * FROM handovers WHERE syncStatus != 'SYNCED' ORDER BY timestamp ASC")
+    /**
+     * The server keeps every confirmation, so this phone's copy follows the latest one for the shipment.
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun replaceHandover(handover: HandoverEntity)
+
+    @Query("SELECT * FROM handovers WHERE syncStatus IN ('PENDING', 'FAILED') ORDER BY timestamp ASC")
     suspend fun getPendingHandovers(): List<HandoverEntity>
 
     @Query("UPDATE handovers SET syncStatus = :syncStatus, lastModifiedTimestamp = :timestamp WHERE id = :id")

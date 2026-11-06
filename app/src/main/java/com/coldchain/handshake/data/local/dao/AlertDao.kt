@@ -56,7 +56,7 @@ interface AlertDao {
         timestamp: Long = System.currentTimeMillis()
     ): Int
 
-    @Query("SELECT * FROM alerts WHERE syncStatus != 'SYNCED' ORDER BY timestamp ASC")
+    @Query("SELECT * FROM alerts WHERE syncStatus IN ('PENDING', 'FAILED') ORDER BY timestamp ASC")
     suspend fun getPendingAlerts(): List<AlertEntity>
 
     @Query("UPDATE alerts SET syncStatus = :syncStatus, lastModifiedTimestamp = :timestamp WHERE id = :id")

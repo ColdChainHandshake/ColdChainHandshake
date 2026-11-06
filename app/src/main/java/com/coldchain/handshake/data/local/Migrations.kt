@@ -30,3 +30,12 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL("ALTER TABLE shipments ADD COLUMN genesisHash TEXT")
     }
 }
+
+/**
+ * Keeps when the server received each reading, which only readings downloaded from it have.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE temperature_events ADD COLUMN receivedAt INTEGER")
+    }
+}

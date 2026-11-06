@@ -8,9 +8,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
 import androidx.work.ListenableWorker
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.WorkerParameters
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
@@ -25,7 +29,9 @@ import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.AlertEscalationEngine
 import com.coldchain.handshake.safety.FakeAlertRepository
 import com.coldchain.handshake.safety.FakeShipmentRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -213,6 +219,46 @@ class AlertNotificationsTest {
         assertEquals(ListenableWorker.Result.success(), result)
         assertEquals(AlertType.DATA_GAP, alerts.savedAlerts.single().type)
         assertEquals(1, pendingChecks())
+    }
+
+    @Test
+    fun aCheckBookedWhileACheckIsRunningIsKept() = runBlocking {
+        HoldingWorker.reset()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            AlertEscalationScheduler.WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<HoldingWorker>().build()
+        )
+        withTimeout(5_000) { HoldingWorker.started.await() }
+        val running = WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWork(AlertEscalationScheduler.WORK_NAME).get().map { it.state }
+        assertEquals(listOf(WorkInfo.State.RUNNING), running)
+
+        // As the escalation worker does: book the next check before its own run has finished.
+        AlertEscalationScheduler.checkAt(context, System.currentTimeMillis() + 15 * 60_000L)
+        HoldingWorker.release.complete(Unit)
+
+        val delay = awaitBookedDelay { it > 0 }
+        assertTrue("booked $delay", delay in 14 * 60_000L..15 * 60_000L)
+    }
+
+    /** Stays running until released, standing in for a check that books the next one mid-run. */
+    class HoldingWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+        override suspend fun doWork(): Result {
+            started.complete(Unit)
+            release.await()
+            return Result.success()
+        }
+
+        companion object {
+            var started = CompletableDeferred<Unit>()
+            var release = CompletableDeferred<Unit>()
+
+            fun reset() {
+                started = CompletableDeferred()
+                release = CompletableDeferred()
+            }
+        }
     }
 
     /** The test executor runs undelayed work on another thread, so the booking arrives shortly after. */

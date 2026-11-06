@@ -17,6 +17,12 @@ enum class MemberRole {
     RECEIVER
 }
 
+data class ShipmentMember(
+    val userId: String,
+    val role: MemberRole,
+    val displayName: String?
+)
+
 data class CreatedShipment(
     val genesisHash: String,
     val createdAtMs: Long,
@@ -137,6 +143,7 @@ interface ColdChainRemote {
     suspend fun requestReplacement(shipmentId: String): Result<Unit>
 
     suspend fun getShipment(shipmentId: String): Result<RemoteShipment?>
+    suspend fun getMembers(shipmentId: String): Result<List<ShipmentMember>>
     suspend fun getCustody(shipmentId: String): Result<CustodyState?>
     suspend fun getChainHead(shipmentId: String): Result<ServerChainHead?>
 

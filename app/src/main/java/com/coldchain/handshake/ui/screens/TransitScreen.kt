@@ -36,11 +36,10 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -61,21 +60,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
+import androidx.core.content.ContextCompat
+import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.debugtools.DebugTools
-import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
-import com.coldchain.handshake.data.remote.dto.toDomain
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
+import com.coldchain.handshake.repository.AccountState
+import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.RepositoryProvider
-import com.coldchain.handshake.util.DeviceIdProvider
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.PrimaryCold
 import com.coldchain.handshake.ui.theme.StatusAmber
@@ -87,16 +85,16 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.UUID
 
 /**
  * Lightweight in-memory data holder for foreground GPS fix.
@@ -117,7 +115,9 @@ fun TransitScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val simulator = RepositoryProvider.temperatureSimulator
-    val remoteDataSource = remember { SupabaseRemoteDataSource() }
+    val accountState by RepositoryProvider.accountRepository.state.collectAsState()
+    val me = accountState as? AccountState.Ready
+    var custodyNotice by remember { mutableStateOf<String?>(null) }
 
     // Authoritative session shipment: only what was explicitly created or scanned
     val activeShipment by simulator.activeShipment.collectAsState()
@@ -130,7 +130,6 @@ fun TransitScreen(
     val lastPersistenceError by simulator.lastPersistenceError.collectAsState()
 
     // Mode: Transporter (Phone A) vs Shipment Monitor (Phone B)
-        val myDeviceId = remember { DeviceIdProvider.getDeviceId(context) }
     var isCurrentCustodyDevice by remember { mutableStateOf(false) }
     var showHandedOverDialog by remember { mutableStateOf(false) }
     var handedOverShipmentId by remember { mutableStateOf("") }
@@ -139,17 +138,13 @@ fun TransitScreen(
         mutableStateOf(currentShipment?.workerId == "W-MONITOR")
     }
 
-    LaunchedEffect(currentShipment?.id) {
+    // Only the server knows who has custody. A shipment kept on this phone alone has no custodian there.
+    LaunchedEffect(currentShipment?.id, me?.userId) {
         val ship = currentShipment
-        if (ship != null) {
-            runCatching {
-                val custody = remoteDataSource.getCustodyState(ship.id).getOrNull()
-                if (custody != null) {
-                    isCurrentCustodyDevice = (custody.activeDeviceId == myDeviceId)
-                    if (!isCurrentCustodyDevice && custody.custodyState != "TRANSFERRED") {
-                        isMonitorMode = true
-                    }
-                }
+        if (ship != null && me != null && ship.genesisHash != null) {
+            RepositoryProvider.remote.getCustody(ship.id).getOrNull()?.let { custody ->
+                isCurrentCustodyDevice = custody.custodianId == me.userId
+                if (!isCurrentCustodyDevice) isMonitorMode = true
             }
         }
     }
@@ -185,6 +180,17 @@ fun TransitScreen(
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
+    // Only for a shipment the server holds, which then decides whether this person may report it.
+    fun uploadLocation(ship: Shipment, latitude: Double, longitude: Double, accuracy: Float, timestamp: Long) {
+        if (RepositoryProvider.accountRepository.state.value !is AccountState.Ready || ship.genesisHash == null) return
+        scope.launch(Dispatchers.IO) {
+            val point = GpsPoint(UUID.randomUUID().toString(), ship.id, latitude, longitude, accuracy, timestamp)
+            RepositoryProvider.remote.appendGpsPoints(ship.id, RepositoryProvider.deviceId, listOf(point))
+                .onSuccess { lastGpsUploadStatus = "Synced ${timeFormatter.format(Date(timestamp))}" }
+                .onFailure { e -> lastGpsUploadStatus = "Not sent: ${e.message ?: "network issue"}" }
+        }
+    }
+
     // Callback invoked on Phone A when foreground GPS yields new coordinates
     val locationCallback = remember(currentShipment?.id) {
         object : LocationCallback() {
@@ -203,24 +209,7 @@ fun TransitScreen(
                     // Phone A: Upload latest location to Supabase 'shipment_locations' table
                     val ship = currentShipment
                     if (ship != null) {
-                        scope.launch(Dispatchers.IO) {
-                            runCatching {
-                                remoteDataSource.upsertShipmentLocation(
-                                    RemoteShipmentLocationDto(
-                                        id = UUID.randomUUID().toString(),
-                                        shipmentId = ship.id,
-                                        latitude = loc.latitude,
-                                        longitude = loc.longitude,
-                                        accuracy = loc.accuracy,
-                                        timestamp = locTimestamp
-                                    )
-                                )
-                            }.onSuccess {
-                                lastGpsUploadStatus = "Synced ${timeFormatter.format(Date(locTimestamp))}"
-                            }.onFailure { e ->
-                                lastGpsUploadStatus = "Upload deferred: ${e.localizedMessage ?: "network issue"}"
-                            }
-                        }
+                        uploadLocation(ship, loc.latitude, loc.longitude, loc.accuracy, locTimestamp)
                     }
                 }
             }
@@ -253,20 +242,7 @@ fun TransitScreen(
 
                     val ship = currentShipment
                     if (ship != null) {
-                        scope.launch(Dispatchers.IO) {
-                            runCatching {
-                                remoteDataSource.upsertShipmentLocation(
-                                    RemoteShipmentLocationDto(
-                                        id = UUID.randomUUID().toString(),
-                                        shipmentId = ship.id,
-                                        latitude = loc.latitude,
-                                        longitude = loc.longitude,
-                                        accuracy = loc.accuracy,
-                                        timestamp = locTimestamp
-                                    )
-                                )
-                            }
-                        }
+                        uploadLocation(ship, loc.latitude, loc.longitude, loc.accuracy, locTimestamp)
                     }
                 }
             }
@@ -346,13 +322,14 @@ fun TransitScreen(
     // ----------------------------------------------------
     LaunchedEffect(currentShipment?.id, isMonitorMode) {
         val ship = currentShipment
-        if (!isMonitorMode && ship != null) {
+        if (!isMonitorMode && ship != null && ship.genesisHash != null) {
             val activeShipId = ship.id
             while (isActive) {
                 delay(3500L)
                 runCatching {
-                    val custody = remoteDataSource.getCustodyState(activeShipId).getOrNull()
-                    if (custody != null && custody.activeDeviceId != myDeviceId && custody.custodyState == "TRANSFERRED") {
+                    val custody = RepositoryProvider.remote.getCustody(activeShipId).getOrNull()
+                    val holder = RepositoryProvider.accountRepository.state.value as? AccountState.Ready
+                    if (custody != null && holder != null && custody.custodianId != holder.userId) {
                         // Custody transferred to receiving device!
                         stopGpsTracking()
                         simulator.reset()
@@ -368,18 +345,18 @@ fun TransitScreen(
     // PHONE B: 3-SECOND POLLING LOOP FOR LIVE MONITORING
     // ----------------------------------------------------
     LaunchedEffect(isMonitorMode, currentShipment?.id) {
-        if (isMonitorMode && currentShipment != null) {
+        if (isMonitorMode && currentShipment != null && currentShipment.genesisHash != null) {
             val shipId = currentShipment.id
             while (isActive) {
                 // 1. Fetch latest shared GPS location from Supabase
                 runCatching {
-                    val locDto = remoteDataSource.getLatestShipmentLocation(shipId).getOrNull()
-                    if (locDto != null) {
+                    val point = RepositoryProvider.remote.getLatestGpsPoint(shipId).getOrNull()
+                    if (point != null) {
                         remoteGpsLocation = GpsLocationData(
-                            latitude = locDto.latitude,
-                            longitude = locDto.longitude,
-                            accuracy = locDto.accuracy,
-                            timestamp = locDto.timestamp
+                            latitude = point.latitude,
+                            longitude = point.longitude,
+                            accuracy = point.accuracyMeters,
+                            timestamp = point.deviceTimestamp
                         )
                     }
                 }
@@ -391,19 +368,14 @@ fun TransitScreen(
 
                 // 3. Fetch latest shipment status
                 runCatching {
-                    val remoteShip = remoteDataSource.getShipment(shipId).getOrNull()
-                    if (remoteShip != null && remoteShip.status != currentShipment.status.name) {
-                        val updated = currentShipment.copy(
-                            status = runCatching { ShipmentStatus.valueOf(remoteShip.status) }.getOrDefault(currentShipment.status)
-                        )
-                        RepositoryProvider.getShipmentRepository(context).adoptRemoteShipment(updated)
-                    }
+                    RepositoryProvider.shipmentWorkflow.open(shipId)
                 }
 
                 // 4. Poll custody state: if transferred to this device, become active holder
                 runCatching {
-                    val custody = remoteDataSource.getCustodyState(shipId).getOrNull()
-                    if (custody != null && custody.activeDeviceId == myDeviceId && custody.custodyState == "TRANSFERRED") {
+                    val custody = RepositoryProvider.remote.getCustody(shipId).getOrNull()
+                    val holder = RepositoryProvider.accountRepository.state.value as? AccountState.Ready
+                    if (custody != null && holder != null && custody.custodianId == holder.userId) {
                         isCurrentCustodyDevice = true
                         isMonitorMode = false
                     }
@@ -431,34 +403,20 @@ fun TransitScreen(
                     var resolvedShipment = RepositoryProvider.getShipmentRepository(context)
                         .getShipment(targetId).firstOrNull()
 
-                    if (resolvedShipment == null) {
-                        val remoteRes = remoteDataSource.getShipment(targetId)
-                        if (remoteRes.isSuccess && remoteRes.getOrNull() != null) {
-                            resolvedShipment = remoteRes.getOrNull()!!.toDomain()
-                        } else if (scannedCode.startsWith("CCH:SHIP:")) {
-                            val parts = scannedCode.split(":")
-                            if (parts.size >= 6) {
-                                resolvedShipment = Shipment(
-                                    id = parts[2],
-                                    qrCode = scannedCode,
-                                    origin = parts[3],
-                                    destination = parts[4],
-                                    loggerId = parts[5],
-                                    workerId = "W-MONITOR",
-                                    status = ShipmentStatus.IN_TRANSIT
-                                )
-                            }
-                        }
-                        if (resolvedShipment != null) {
-                            RepositoryProvider.getShipmentRepository(context).adoptRemoteShipment(resolvedShipment)
-                        }
+                    // A code only names a shipment. Nothing is ever built from its text.
+                    if (resolvedShipment == null && RepositoryProvider.accountRepository.state.value is AccountState.Ready) {
+                        resolvedShipment = RepositoryProvider.shipmentWorkflow.open(targetId)
+                            .onFailure { custodyNotice = it.message }
+                            .getOrNull()
                     }
 
                     if (resolvedShipment != null) {
                         simulator.attachShipmentForMonitoring(resolvedShipment)
                         isMonitorMode = true
                         runCatching {
-                            RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(resolvedShipment.id)
+                            if (resolvedShipment.genesisHash != null) {
+                                RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(resolvedShipment.id)
+                            }
                         }
                     }
                 }
@@ -492,6 +450,35 @@ fun TransitScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // A courier takes custody on their own phone, and the server records it.
+        val waiting = currentShipment
+        if (me != null && waiting != null && waiting.genesisHash != null && waiting.status == ShipmentStatus.DISPATCHED) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        RepositoryProvider.shipmentWorkflow.takeCustody(waiting.id)
+                            .onSuccess { taken ->
+                                custodyNotice = null
+                                isMonitorMode = false
+                                simulator.attachShipment(taken)
+                                RepositoryProvider.shipmentHistorySyncCoordinator.markReady(taken.id)
+                                simulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
+                                AlertEscalationScheduler.checkNow(context)
+                            }
+                            .onFailure { custodyNotice = it.message }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Take Custody")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        custodyNotice?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         // Mode Selector Bar (Transporter vs Monitor)
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1341,7 +1328,7 @@ private fun TelemetryEventRow(
     val (syncBg, syncTextColor) = when (event.syncStatus) {
         SyncStatus.SYNCED -> StatusGreen.copy(alpha = 0.2f) to StatusGreen
         SyncStatus.PENDING -> StatusAmber.copy(alpha = 0.2f) to StatusAmber
-        SyncStatus.FAILED -> StatusRed.copy(alpha = 0.2f) to StatusRed
+        SyncStatus.FAILED, SyncStatus.REJECTED -> StatusRed.copy(alpha = 0.2f) to StatusRed
     }
 
     Surface(

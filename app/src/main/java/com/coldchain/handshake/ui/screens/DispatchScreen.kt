@@ -41,37 +41,36 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
-import com.coldchain.handshake.alerts.AlertEscalationScheduler
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
-import com.coldchain.handshake.data.remote.dto.toDomain
-import com.coldchain.handshake.data.remote.dto.RemoteShipmentCustodyDto
+import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.RepositoryProvider
-import com.coldchain.handshake.util.DeviceIdProvider
-import androidx.compose.ui.platform.LocalContext
+import com.coldchain.handshake.repository.ShipmentDraft
 import com.coldchain.handshake.ui.components.OptionSelector
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.util.QRCodeGenerator
+import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 @Composable
 fun DispatchScreen(
@@ -92,6 +91,11 @@ fun DispatchScreen(
     var infoBannerMessage by remember { mutableStateOf<String?>(null) }
 
     var currentShipment by remember { mutableStateOf<Shipment?>(null) }
+
+    val accountState by RepositoryProvider.accountRepository.state.collectAsState()
+    val signedIn = accountState is AccountState.Ready
+    var courierEmail by rememberSaveable { mutableStateOf("") }
+    var receiverEmail by rememberSaveable { mutableStateOf("") }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showScannerDialog by remember { mutableStateOf(false) }
 
@@ -123,27 +127,11 @@ fun DispatchScreen(
                                 it.id == targetId
                     }
 
-                    // 2. If absent locally, fetch from Supabase (Phone B monitoring Phone A)
-                    if (matchedShipment == null) {
-                        val remoteRes = SupabaseRemoteDataSource().getShipment(targetId)
-                        if (remoteRes.isSuccess && remoteRes.getOrNull() != null) {
-                            matchedShipment = remoteRes.getOrNull()!!.toDomain()
-                            RepositoryProvider.shipmentRepository.adoptRemoteShipment(matchedShipment)
-                        } else if (scannedCode.startsWith("CCH:SHIP:")) {
-                            val parts = scannedCode.split(":")
-                            if (parts.size >= 6) {
-                                matchedShipment = Shipment(
-                                    id = parts[2],
-                                    qrCode = scannedCode,
-                                    origin = parts[3],
-                                    destination = parts[4],
-                                    loggerId = parts[5],
-                                    workerId = "W-MONITOR",
-                                    status = ShipmentStatus.IN_TRANSIT
-                                )
-                                RepositoryProvider.shipmentRepository.adoptRemoteShipment(matchedShipment)
-                            }
-                        }
+                    // 2. If absent here, ask the server. A code only names a shipment: nothing is built from it.
+                    if (matchedShipment == null && signedIn) {
+                        matchedShipment = RepositoryProvider.shipmentWorkflow.open(targetId)
+                            .onFailure { infoBannerMessage = it.message }
+                            .getOrNull()
                     }
 
                     if (matchedShipment != null) {
@@ -153,11 +141,17 @@ fun DispatchScreen(
                         qrBitmap = QRCodeGenerator.generateQR(matchedShipment.qrCode, 400)
                         RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(matchedShipment)
                         scope.launch {
-                            RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(matchedShipment.id)
+                            if (matchedShipment.genesisHash != null) {
+                                RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(matchedShipment.id)
+                            } else {
+                                RepositoryProvider.shipmentHistorySyncCoordinator.markReady(matchedShipment.id)
+                            }
                         }
                         infoBannerMessage = "Identified consignment ${matchedShipment.id} via QR (Monitor Mode)"
                         onNavigateToTransit()
-                    } else if (currentShipment != null && currentShipment!!.status == ShipmentStatus.CREATED) {
+                    } else if (currentShipment != null && currentShipment!!.status == ShipmentStatus.CREATED &&
+                        currentShipment!!.genesisHash == null
+                    ) {
                         // Associate scanned QR code directly with existing active shipment
                         val updatedShipment = if (scannedCode.startsWith("LOG-")) {
                             currentShipment!!.copy(loggerId = scannedCode)
@@ -396,6 +390,11 @@ fun DispatchScreen(
                         )
                     }
 
+                    if (signedIn) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        PeopleFields(courierEmail, { courierEmail = it }, receiverEmail, { receiverEmail = it })
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Row(
@@ -417,6 +416,26 @@ fun DispatchScreen(
                         Button(
                             onClick = {
                                 val shipmentId = "SHIP-" + UUID.randomUUID().toString().take(6).uppercase()
+                                if (signedIn) {
+                                    scope.launch {
+                                        val draft = ShipmentDraft(
+                                            shipmentId, selectedProfileId, loggerId.trim(), origin.trim(), destination.trim()
+                                        )
+                                        RepositoryProvider.shipmentWorkflow.create(draft)
+                                            .onSuccess { created ->
+                                                currentShipment = created
+                                                qrBitmap = QRCodeGenerator.generateQR(created.qrCode, 400)
+                                                infoBannerMessage = RepositoryProvider.shipmentWorkflow
+                                                    .addPeople(created.id, courierEmail, receiverEmail)
+                                                    .fold(
+                                                        { "Created ${created.id}. The courier and receiver can open it now." },
+                                                        { "Created ${created.id}, but people weren't added: ${it.message}" }
+                                                    )
+                                            }
+                                            .onFailure { infoBannerMessage = "Couldn't create the shipment: ${it.message}" }
+                                    }
+                                    return@Button
+                                }
                                 // The authoritative qrCode is explicitly associated with the scanned code if present
                                 val authoritativeQr = boundQrCode ?: "CCH:SHIP:$shipmentId:$origin:$destination:$loggerId"
                                 val newShipment = Shipment(
@@ -440,19 +459,7 @@ fun DispatchScreen(
                                         return@launch
                                     }
                                     RepositoryProvider.temperatureSimulator.attachShipment(newShipment)
-                                    // Register initial custody with Supabase
-                                    val myDevId = DeviceIdProvider.getDeviceId(context)
-                                    runCatching {
-                                        SupabaseRemoteDataSource().upsertCustody(
-                                            RemoteShipmentCustodyDto(
-                                                shipmentId = shipmentId,
-                                                activeDeviceId = myDevId,
-                                                custodyState = "ACTIVE",
-                                                updatedAt = System.currentTimeMillis()
-                                            )
-                                        )
-                                    }
-                                    infoBannerMessage = "Created Consignment $shipmentId (Custody: $myDevId)"
+                                    infoBannerMessage = "Created $shipmentId on this phone only"
                                 }
                             },
                             enabled = origin.isNotBlank() && destination.isNotBlank() && loggerId.isNotBlank()
@@ -616,8 +623,36 @@ fun DispatchScreen(
                     // Status Actions
                     when (shipment.status) {
                         ShipmentStatus.CREATED -> {
+                            if (shipment.genesisHash != null) {
+                                PeopleFields(courierEmail, { courierEmail = it }, receiverEmail, { receiverEmail = it })
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            infoBannerMessage = RepositoryProvider.shipmentWorkflow
+                                                .addPeople(shipment.id, courierEmail, receiverEmail)
+                                                .fold({ "People added to ${shipment.id}" }, { "Couldn't add people: ${it.message}" })
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Add People")
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
                             Button(
                                 onClick = {
+                                    if (shipment.genesisHash != null) {
+                                        scope.launch {
+                                            RepositoryProvider.shipmentWorkflow.dispatch(shipment.id)
+                                                .onSuccess {
+                                                    currentShipment = it
+                                                    infoBannerMessage =
+                                                        "${it.id} dispatched. The courier takes custody on their own phone."
+                                                }
+                                                .onFailure { infoBannerMessage = "Couldn't dispatch: ${it.message}" }
+                                        }
+                                        return@Button
+                                    }
                                     val dispatched = shipment.copy(status = ShipmentStatus.DISPATCHED)
                                     currentShipment = dispatched
                                     scope.launch {
@@ -642,7 +677,12 @@ fun DispatchScreen(
                                 Text("Dispatch Shipment (Seal Cargo)")
                             }
                         }
-                        ShipmentStatus.DISPATCHED -> {
+                        ShipmentStatus.DISPATCHED -> if (shipment.genesisHash != null) {
+                            Text(
+                                text = "Waiting for the courier to take custody on their own phone.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        } else {
                             Button(
                                 onClick = {
                                     val inTransit = shipment.copy(
@@ -728,4 +768,29 @@ fun DispatchScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PeopleFields(
+    courierEmail: String,
+    onCourierEmail: (String) -> Unit,
+    receiverEmail: String,
+    onReceiverEmail: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = courierEmail,
+        onValueChange = onCourierEmail,
+        label = { Text("Courier's Email") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedTextField(
+        value = receiverEmail,
+        onValueChange = onReceiverEmail,
+        label = { Text("Receiver's Email") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(modifier = Modifier.height(8.dp))
 }

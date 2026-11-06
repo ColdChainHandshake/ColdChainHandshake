@@ -112,7 +112,8 @@ class ColdChainDatabaseMigrationTest {
         val recorded = mapOf(
             1 to "f740cf5168238cf469e45dbf7d9daf80",
             2 to "16336bc1a46df29247067f953840fde0",
-            3 to "dfd95156f9fdb479ca1bc5104da47f9b"
+            3 to "dfd95156f9fdb479ca1bc5104da47f9b",
+            4 to "a81aef6e8a9a8062b5e88e319e183e0a"
         )
         recorded.forEach { (version, hash) ->
             assertTrue("Schema $version has changed", schemaFile(version).contains("\"identityHash\": \"$hash\""))

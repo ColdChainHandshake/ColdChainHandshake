@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -11,14 +12,15 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.testing.WorkManagerTestInitHelper
+import com.coldchain.handshake.crypto.DeviceSigner
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.local.DatabaseProvider
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
-import com.coldchain.handshake.data.remote.dto.RemoteTemperatureEventDto
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShakeTestResult
@@ -27,14 +29,22 @@ import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.models.VvmStage
+import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.AlertRepositoryImpl
+import com.coldchain.handshake.repository.FakeAccountRepository
+import com.coldchain.handshake.repository.FakeColdChainServer
+import com.coldchain.handshake.repository.HandoverConfirmation
 import com.coldchain.handshake.repository.HandoverRepositoryImpl
+import com.coldchain.handshake.repository.MemberRole
+import com.coldchain.handshake.repository.FakeNetworkMonitor
+import com.coldchain.handshake.repository.ReadingUploader
 import com.coldchain.handshake.repository.RepositoryProvider
-import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.repository.SyncServiceImpl
 import com.coldchain.handshake.repository.ShipmentRepositoryImpl
+import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
+import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.ui.screens.HandoverScreen
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -49,8 +59,8 @@ import org.robolectric.annotation.Config
 import java.io.IOException
 
 /**
- * Runs the real screen on a real database, with only the server replaced. The tall screen fits all of
- * it, which scrolls in the app.
+ * Runs the real screen on a real database. Local mode is a shipment kept on this phone alone. Server
+ * mode replaces only the server, with a fake that applies the same handover rules.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w400dp-h6000dp")
@@ -69,35 +79,39 @@ class HandoverScreenTest {
     private val handovers = HandoverRepositoryImpl(db.handoverDao())
     private val alerts = AlertRepositoryImpl(db.alertDao())
 
+    private val server = FakeColdChainServer(currentUser = "courier")
+    private val genesis = server.seedShipment("SHIP-1", createdAt = now - 11 * minute)
+
     private var showing by mutableStateOf(true)
+    private val account = FakeAccountRepository()
 
-    private enum class Server { HAS_NOTHING_MORE, UNREACHABLE, STILL_SENDING }
+    private val sync = SyncServiceImpl(
+        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), server,
+        ReadingUploader(server, object : DeviceSigner {
+            override val publicKey = "public-key"
+            override fun sign(payload: ByteArray) = "signature"
+        }, { "this-phone" }),
+        account, FakeNetworkMonitor(), { "this-phone" }
+    )
 
-    private class FakeServer(private val behaviour: Server) : SupabaseRemoteDataSource() {
-        override suspend fun getTemperatureEvents(shipmentId: String): Result<List<RemoteTemperatureEventDto>> =
-            when (behaviour) {
-                Server.HAS_NOTHING_MORE -> Result.success(emptyList())
-                Server.UNREACHABLE -> Result.failure(IOException("No connection"))
-                Server.STILL_SENDING -> awaitCancellation()
-            }
-    }
-
-    private val shipment = Shipment(
+    private val localShipment = Shipment(
         "SHIP-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.ARRIVED, ProductProfiles.DEFAULT.id, now - 11 * minute
     )
 
-    private fun readings(lastAt: Long = now - minute, count: Int = 10) = HashChainService.buildChain(
-        (count - 1 downTo 0).map { back ->
-            TemperatureEvent(
-                "TE-$back", "SHIP-1", "LOG-1", lastAt - back * minute, 5.0, "", "", SyncStatus.PENDING
-            )
-        }
-    )
+    private fun readings(lastAt: Long = now - minute, count: Int = 10, genesisHash: String = HashChainService.UNBOUND_GENESIS) =
+        HashChainService.buildChain(
+            (count - 1 downTo 0).map { back ->
+                TemperatureEvent("TE-$back", "SHIP-1", "LOG-1", lastAt - back * minute, 5.0, "", "", SyncStatus.PENDING)
+            },
+            genesisHash
+        )
 
     @Before
     fun setUp() {
         WorkManagerTestInitHelper.initializeTestWorkManager(context)
-        RepositoryProvider.initialize(shipments, telemetry, alerts, handovers)
+        RepositoryProvider.initialize(shipments, telemetry, alerts, handovers, sync)
+        RepositoryProvider.remoteService = server
+        RepositoryProvider.deviceIdValue = "this-phone"
     }
 
     @After
@@ -109,18 +123,62 @@ class HandoverScreenTest {
         db.close()
     }
 
-    private fun show(server: Server = Server.HAS_NOTHING_MORE, events: List<TemperatureEvent> = readings()) {
+    private fun showLocal(events: List<TemperatureEvent> = readings(), monitorOnly: Boolean = true) {
         runBlocking {
-            shipments.adoptRemoteShipment(shipment).getOrThrow()
+            shipments.adoptRemoteShipment(localShipment).getOrThrow()
             telemetry.saveTemperatures(events).getOrThrow()
         }
-        RepositoryProvider.syncCoordinator = ShipmentHistorySyncCoordinator(telemetry, FakeServer(server))
-        RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(shipment)
+        if (monitorOnly) {
+            RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(localShipment)
+        } else {
+            RepositoryProvider.temperatureSimulator.attachShipment(localShipment)
+        }
         compose.setContent { if (showing) HandoverScreen() }
     }
 
+    /**
+     * The courier's phone uploaded these, and this person opened the shipment on their own phone. A
+     * courier releasing is held against the readings at that moment, so it happens after the upload.
+     */
+    private fun showOnServer(
+        user: String,
+        role: MemberRole,
+        uploaded: List<TemperatureEvent> = readings(genesisHash = genesis),
+        courierReleased: Boolean = false,
+        offlineOnArrival: Boolean = false
+    ) {
+        runBlocking {
+            if (uploaded.isNotEmpty()) server.appendReadings("SHIP-1", uploaded, genesis, "courier-phone", "s").getOrThrow()
+            if (courierReleased) courierReleases()
+            server.currentUser = user
+            val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
+            account.setState(AccountState.Ready(user, null, UserProfile(user, role)))
+            RepositoryProvider.accountRepo = account
+            RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(opened)
+        }
+        if (offlineOnArrival) server.offlineError = IOException("No connection")
+        compose.setContent { if (showing) HandoverScreen() }
+    }
+
+    private fun courierReleases() {
+        val user = server.currentUser
+        server.currentUser = "courier"
+        runBlocking {
+            server.confirmHandover(
+                HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = "receiver")
+            ).getOrThrow()
+        }
+        server.currentUser = user
+    }
+
     private fun await(text: String): SemanticsNodeInteraction {
-        compose.waitUntil(10_000) { compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+        try {
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+        } catch (e: ComposeTimeoutException) {
+            val shown = compose.onRoot(useUnmergedTree = true).printToString()
+                .lines().filter { "Text = " in it }.joinToString(" | ") { it.trim() }
+            throw AssertionError("\"$text\" never appeared. The screen shows: $shown", e)
+        }
         return compose.onNodeWithText(text)
     }
 
@@ -130,15 +188,17 @@ class HandoverScreenTest {
 
     private fun storedHandover() = runBlocking { handovers.getHandover("SHIP-1").first() }
 
+    private fun storedStatus() = runBlocking { shipments.getShipment("SHIP-1").first()?.status }
+
     private fun awaitStored() {
         compose.waitUntil(10_000) { storedHandover() != null }
     }
 
-    private fun storedStatus() = runBlocking { shipments.getShipment("SHIP-1").first()?.status }
+    // Local mode
 
     @Test
     fun aCleanJourneyRecordsTheReceiversInspection() {
-        show()
+        showLocal()
 
         choose("Stage 2 (usable)")
         choose("Passed")
@@ -154,7 +214,7 @@ class HandoverScreenTest {
 
     @Test
     fun theReceiversOwnVerdictAndReasonAreRecorded() {
-        show()
+        showLocal()
 
         await("Record PASS handover")
         choose("Fail: quarantine the shipment")
@@ -168,34 +228,22 @@ class HandoverScreenTest {
     }
 
     @Test
-    fun whenTheHistoryCannotBeFetchedTheReceiverCanStillRecordWhatTheyFound() {
-        show(Server.UNREACHABLE)
+    fun aLocalHandoverSaysNobodyElseConfirms() {
+        showLocal()
 
-        await("Try Again")
-        await("Record UNKNOWN handover").assertIsEnabled().performClick()
-
-        awaitStored()
-        assertEquals(HandoverVerdict.UNKNOWN, storedHandover()?.verdict)
-        assertEquals(ShipmentStatus.QUARANTINED, storedStatus())
+        await("Local only. On a real handover the courier and the receiver each confirm on their own phone, and the server moves custody.")
     }
 
     @Test
     fun whenThereAreNoReadingsTheReceiverCanStillRecordWhatTheyFound() {
-        show(events = emptyList())
+        showLocal(events = emptyList())
 
         await("Record UNKNOWN handover").assertIsEnabled()
     }
 
     @Test
-    fun recordingWaitsWhileTheHistoryIsStillDownloading() {
-        show(Server.STILL_SENDING)
-
-        await("Waiting for Complete History...").assertIsNotEnabled()
-    }
-
-    @Test
     fun aLoggerThatStoppedLongBeforeHandoverIsNotOfferedAsAPass() {
-        show(events = readings(lastAt = now - 30 * minute))
+        showLocal(events = readings(lastAt = now - 30 * minute))
 
         await("Record UNKNOWN handover")
 
@@ -204,7 +252,7 @@ class HandoverScreenTest {
 
     @Test
     fun aRecordedHandoverIsShownAndCannotBeRecordedAgain() {
-        show()
+        showLocal()
         await("Record PASS handover")
         runBlocking {
             RepositoryProvider.handoverOrchestrator.processHandover(
@@ -222,12 +270,82 @@ class HandoverScreenTest {
 
     @Test
     fun recordingAHandoverStopsTheShipmentsLogger() {
-        show()
+        showLocal(monitorOnly = false)
 
         await("Record PASS handover").performClick()
 
-        awaitStored()
-        compose.waitUntil(10_000) { RepositoryProvider.temperatureSimulator.isMonitorOnly.value }
-        assertEquals(ShipmentStatus.ACCEPTED, RepositoryProvider.temperatureSimulator.activeShipment.value?.status)
+        // Waiting on the status itself: the logger was already running before, so nothing else proves it stopped.
+        compose.waitUntil(10_000) {
+            RepositoryProvider.temperatureSimulator.activeShipment.value?.status == ShipmentStatus.ACCEPTED
+        }
+        assertTrue(RepositoryProvider.temperatureSimulator.isMonitorOnly.value)
+    }
+
+    // On the server
+
+    @Test
+    fun theReceiverConfirmsOnTheServerAndCustodyMoves() {
+        showOnServer("receiver", MemberRole.RECEIVER, courierReleased = true)
+
+        await("Record PASS handover").performClick()
+
+        await("Custody has moved. The shipment is now ACCEPTED.")
+        assertEquals("receiver", server.confirmations.last().userId)
+        assertEquals(ShipmentStatus.ACCEPTED, storedStatus())
+    }
+
+    @Test
+    fun theReceiverConfirmingFirstWaitsForTheCourier() {
+        showOnServer("receiver", MemberRole.RECEIVER)
+
+        await("Record PASS handover").performClick()
+
+        await("Confirmed. Waiting for the other person to confirm on their own phone.")
+        assertEquals(ShipmentStatus.IN_TRANSIT, storedStatus())
+    }
+
+    @Test
+    fun withNoSignalTheReceiverCanStillRecordAFail() {
+        showOnServer("receiver", MemberRole.RECEIVER, offlineOnArrival = true)
+
+        await("Try Again")
+        choose("Fail: quarantine the shipment")
+        compose.onNodeWithText("Reason").performTextInput("Seal broken")
+        compose.onNodeWithText("Record FAIL handover").performClick()
+
+        await("No connection. Your FAIL is saved on this phone and will be sent. Custody hasn't moved.")
+        assertEquals(ShipmentStatus.QUARANTINED, storedStatus())
+        assertTrue(server.confirmations.isEmpty())
+    }
+
+    @Test
+    fun recordingWaitsWhileTheHistoryIsStillDownloading() {
+        server.neverFinishes = true
+        showOnServer("receiver", MemberRole.RECEIVER, uploaded = emptyList())
+
+        await("Waiting for Complete History...").assertIsNotEnabled()
+    }
+
+    @Test
+    fun theCustodianNamesWhoTakesOverAndConfirms() {
+        showOnServer("courier", MemberRole.COURIER)
+
+        await("Confirm Handover").performClick()
+
+        await("Confirmed. Waiting for the other person to confirm on their own phone.")
+        val confirmation = server.confirmations.single()
+        assertEquals("courier", confirmation.userId)
+        assertEquals("receiver", confirmation.details.toUserId)
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun theSenderCanOnlyWatch() {
+        showOnServer("sender", MemberRole.SENDER)
+
+        await("Only the people handing over can confirm.")
+
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodes(hasText("Confirm Handover")).fetchSemanticsNodes().isEmpty())
     }
 }

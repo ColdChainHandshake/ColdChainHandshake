@@ -4,9 +4,9 @@ import com.coldchain.handshake.data.local.dao.AlertDao
 import com.coldchain.handshake.data.local.dao.HandoverDao
 import com.coldchain.handshake.data.local.dao.ShipmentDao
 import com.coldchain.handshake.data.local.dao.TemperatureEventDao
+import com.coldchain.handshake.data.local.entities.toDomain
 import com.coldchain.handshake.data.network.NetworkMonitor
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
-import com.coldchain.handshake.data.remote.dto.toRemoteDto
+import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.SyncStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -14,24 +14,35 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
- * Concrete implementation of the shared SyncService contract.
- * Orchestrates store-and-forward replication of local Room records to Supabase.
- * Enforces mutex concurrency guards, idempotent retry handling, and append-only telemetry invariants.
+ * Sends what this phone recorded to the server's functions: readings through [ReadingUploader], then
+ * alerts and any handover confirmation that couldn't be sent at the time.
+ *
+ * Only a shipment the server created is ever sent. One made in the debug build's local mode has no
+ * server genesis and stays on the phone. A refusal from the server is final for that record: it's
+ * marked [SyncStatus.REJECTED] and reported, never retried in a loop.
  */
 class SyncServiceImpl(
     private val shipmentDao: ShipmentDao,
     private val temperatureEventDao: TemperatureEventDao,
     private val alertDao: AlertDao,
     private val handoverDao: HandoverDao,
-    private val remoteDataSource: SupabaseRemoteDataSource,
+    private val remote: ColdChainRemote,
+    private val uploader: ReadingUploader,
+    private val account: AccountRepository,
     private val networkMonitor: NetworkMonitor,
+    private val deviceId: () -> String,
     coroutineScope: CoroutineScope? = null
 ) : SyncService {
 
     private val _syncStatus = MutableStateFlow(SyncStatus.SYNCED)
+    private val _lastRejection = MutableStateFlow<String?>(null)
     private val syncMutex = Mutex()
+
+    @Volatile
+    private var deviceRegistered = false
 
     init {
         // Automatically attempt synchronization when network connectivity is restored
@@ -48,6 +59,8 @@ class SyncServiceImpl(
 
     override fun getSyncStatus(): Flow<SyncStatus> = _syncStatus.asStateFlow()
 
+    override fun getLastRejection(): Flow<String?> = _lastRejection.asStateFlow()
+
     override suspend fun syncPendingData(): Result<Unit> {
         // Prevent concurrent sync routines from processing overlapping batches
         if (!syncMutex.tryLock()) {
@@ -60,102 +73,135 @@ class SyncServiceImpl(
         }
     }
 
+    /**
+     * Unlike [syncPendingData], this waits for a sync already running, because a handover needs these
+     * readings on the server before anyone confirms.
+     */
+    override suspend fun uploadReadings(shipmentId: String): Result<Unit> = syncMutex.withLock {
+        if (!isSignedIn()) return@withLock Result.failure(IllegalStateException("Sign in to send readings."))
+        registerDeviceOnce().getOrElse { return@withLock Result.failure(it) }
+        uploadShipment(shipmentId)
+    }
+
+    private fun isSignedIn() = account.state.value is AccountState.Ready
+
+    private suspend fun registerDeviceOnce(): Result<Unit> {
+        if (deviceRegistered) return Result.success(Unit)
+        return account.registerDevice().onSuccess { deviceRegistered = true }
+    }
+
     private suspend fun executeSync(): Result<Unit> {
-        val hasPending = hasPendingData()
-
-        if (!isOnline()) {
-            if (hasPending) {
-                _syncStatus.value = SyncStatus.PENDING
-            }
-            return Result.failure(IllegalStateException("Device is offline. Local changes remain queued."))
-        }
-
-        if (!hasPending) {
+        // Nothing on this phone belongs to the server until someone signs in.
+        if (!isSignedIn() || !hasPendingData()) {
             _syncStatus.value = SyncStatus.SYNCED
             return Result.success(Unit)
         }
 
         _syncStatus.value = SyncStatus.PENDING
-
-        return try {
-            // 1. Sync pending shipments
-            val pendingShipments = shipmentDao.getPendingShipments()
-            if (pendingShipments.isNotEmpty()) {
-                val dtos = pendingShipments.map { it.toRemoteDto() }
-                val result = remoteDataSource.upsertShipments(dtos)
-                if (result.isSuccess) {
-                    pendingShipments.forEach {
-                        shipmentDao.updateSyncStatus(it.id, SyncStatus.SYNCED)
-                    }
-
-                } else {
-                    pendingShipments.forEach {
-                        shipmentDao.updateSyncStatus(it.id, SyncStatus.FAILED)
-                    }
-                    throw result.exceptionOrNull() ?: Exception("Shipments sync failed")
-                }
-            }
-
-
-            // 2. Sync pending temperature events (APPEND-ONLY: telemetry fields are untouched)
-            val pendingEvents = temperatureEventDao.getPendingEvents()
-            if (pendingEvents.isNotEmpty()) {
-                val dtos = pendingEvents.map { it.toRemoteDto() }
-                val result = remoteDataSource.upsertTemperatureEvents(dtos)
-                if (result.isSuccess) {
-                    val ids = pendingEvents.map { it.id }
-                    temperatureEventDao.updateSyncStatuses(ids, SyncStatus.SYNCED)
-                } else {
-                    val ids = pendingEvents.map { it.id }
-                    temperatureEventDao.updateSyncStatuses(ids, SyncStatus.FAILED)
-                    throw result.exceptionOrNull() ?: Exception("Temperature events sync failed")
-                }
-            }
-
-            // 3. Sync pending alerts
-            val pendingAlerts = alertDao.getPendingAlerts()
-            if (pendingAlerts.isNotEmpty()) {
-                val dtos = pendingAlerts.map { it.toRemoteDto() }
-                val result = remoteDataSource.upsertAlerts(dtos)
-                if (result.isSuccess) {
-                    pendingAlerts.forEach {
-                        alertDao.updateSyncStatus(it.id, SyncStatus.SYNCED)
-                    }
-                } else {
-                    pendingAlerts.forEach {
-                        alertDao.updateSyncStatus(it.id, SyncStatus.FAILED)
-                    }
-                    throw result.exceptionOrNull() ?: Exception("Alerts sync failed")
-                }
-            }
-
-            // 4. Sync pending handovers
-            val pendingHandovers = handoverDao.getPendingHandovers()
-            if (pendingHandovers.isNotEmpty()) {
-                for (handover in pendingHandovers) {
-                    val result = remoteDataSource.upsertHandover(handover.toRemoteDto())
-                    if (result.isSuccess) {
-                        handoverDao.updateSyncStatus(handover.id, SyncStatus.SYNCED)
-                    } else {
-                        handoverDao.updateSyncStatus(handover.id, SyncStatus.FAILED)
-                        throw result.exceptionOrNull() ?: Exception("Handover sync failed")
-                    }
-                }
-            }
-
-            _syncStatus.value = SyncStatus.SYNCED
-            Result.success(Unit)
-        } catch (e: Exception) {
+        registerDeviceOnce().getOrElse {
             _syncStatus.value = SyncStatus.FAILED
-            Result.failure(e)
+            return Result.failure(it)
+        }
+
+        val failures = mutableListOf<Throwable>()
+        temperatureEventDao.getPendingEvents().map { it.shipmentId }.distinct().forEach { shipmentId ->
+            uploadShipment(shipmentId).onFailure { failures += it }
+        }
+        syncAlerts(failures)
+        syncHandovers(failures)
+
+        _syncStatus.value = if (failures.isEmpty()) SyncStatus.SYNCED else SyncStatus.FAILED
+        return failures.firstOrNull()?.let { Result.failure(it) } ?: Result.success(Unit)
+    }
+
+    private suspend fun isOnServer(shipmentId: String): Boolean =
+        shipmentDao.getShipmentDirect(shipmentId)?.genesisHash != null
+
+    private suspend fun uploadShipment(shipmentId: String): Result<Unit> {
+        if (!isOnServer(shipmentId)) return Result.success(Unit)
+
+        val pending = temperatureEventDao.getPendingEvents()
+            .filter { it.shipmentId == shipmentId }
+            .map { it.toDomain() }
+        if (pending.isEmpty()) return Result.success(Unit)
+
+        return uploader.upload(shipmentId, pending).fold(
+            onSuccess = { result ->
+                temperatureEventDao.updateSyncStatuses(result.uploadedIds, SyncStatus.SYNCED)
+                Result.success(Unit)
+            },
+            onFailure = { failure ->
+                // A conflict or a refusal applies to everything after it too, because each reading
+                // depends on the one before.
+                temperatureEventDao.updateSyncStatuses(pending.map { it.id }, statusAfter(failure))
+                Result.failure(failure)
+            }
+        )
+    }
+
+    private suspend fun syncAlerts(failures: MutableList<Throwable>) {
+        for (entity in alertDao.getPendingAlerts()) {
+            val alert = entity.toDomain()
+            if (!isOnServer(alert.shipmentId)) continue
+
+            val result = remote.recordAlert(alert)
+                .mapCatching {
+                    if (alert.escalationLevel != EscalationLevel.WORKER) {
+                        remote.escalateAlert(alert.id, alert.escalationLevel).getOrThrow()
+                    }
+                }
+                .mapCatching { if (alert.acknowledged) remote.acknowledgeAlert(alert.id).getOrThrow() }
+
+            val status = result.fold({ SyncStatus.SYNCED }, { statusAfter(it) })
+            alertDao.updateSyncStatus(alert.id, status, System.currentTimeMillis())
+            result.exceptionOrNull()?.let { failures += it }
         }
     }
 
+    /**
+     * Only a confirmation recorded without a connection is here, and that's never a PASS.
+     */
+    private suspend fun syncHandovers(failures: MutableList<Throwable>) {
+        for (entity in handoverDao.getPendingHandovers()) {
+            val handover = entity.toDomain()
+            if (!isOnServer(handover.shipmentId)) continue
+
+            val result = runCatching {
+                val head = remote.getChainHead(handover.shipmentId).getOrThrow()
+                    ?: throw IllegalStateException("The server has no record of ${handover.shipmentId}.")
+                val custody = remote.getCustody(handover.shipmentId).getOrThrow()
+                    ?: throw IllegalStateException("Nobody has custody of ${handover.shipmentId}.")
+                remote.confirmHandover(
+                    HandoverConfirmation(
+                        shipmentId = handover.shipmentId,
+                        leg = custody.leg,
+                        deviceId = deviceId(),
+                        headHash = head.headHash,
+                        verdict = handover.verdict,
+                        reason = handover.reason,
+                        vvmStage = handover.vvmStage,
+                        shakeTest = handover.shakeTest
+                    )
+                ).getOrThrow()
+            }
+
+            val alreadyThere = (result.exceptionOrNull() as? RemoteRejection)?.code == RemoteRejection.ALREADY_CONFIRMED
+            val status = if (result.isSuccess || alreadyThere) SyncStatus.SYNCED else statusAfter(result.exceptionOrNull()!!)
+            handoverDao.updateSyncStatus(handover.id, status, System.currentTimeMillis())
+            if (!alreadyThere) result.exceptionOrNull()?.let { failures += it }
+        }
+    }
+
+    private fun statusAfter(failure: Throwable): SyncStatus {
+        val permanent = failure is HistoryConflict ||
+            (failure is RemoteRejection && failure.code != RemoteRejection.STALE_HEAD)
+        if (permanent) _lastRejection.value = failure.message
+        return if (permanent) SyncStatus.REJECTED else SyncStatus.FAILED
+    }
 
     private suspend fun hasPendingData(): Boolean {
-        return shipmentDao.getPendingShipments().isNotEmpty() ||
-                temperatureEventDao.getPendingEvents().isNotEmpty() ||
-                alertDao.getPendingAlerts().isNotEmpty() ||
-                handoverDao.getPendingHandovers().isNotEmpty()
+        return temperatureEventDao.getPendingEvents().isNotEmpty() ||
+            alertDao.getPendingAlerts().isNotEmpty() ||
+            handoverDao.getPendingHandovers().isNotEmpty()
     }
 }

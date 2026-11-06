@@ -42,7 +42,7 @@ The application combines:
 ✅ Phone-to-phone shipment monitoring  
 ✅ GPS location snapshots  
 ✅ Historical destination inspection  
-✅ Worker + pharmacist signatures  
+✅ Each person confirms on their own phone, under their own sign-in  
 ✅ PASS / UNKNOWN / FAIL handover verdicts  
 ✅ Persistent shipment-scoped event logs  
 
@@ -112,8 +112,9 @@ From PowerShell, use `.\gradlew.bat` in place of `./gradlew`.
 Default unit tests make no calls to real servers. The one exception is Robolectric, which downloads its Android
 jars from Maven Central on first use.
 
-Cloud sync doesn't work at the moment. The database now denies anonymous access, and sign-in arrives in Phase 3 of
-the rebuild, so the app works on one device until then.
+The app needs a Supabase project with the migrations in `supabase/migrations` and email sign-in. It has been tested
+against a local database and against a fake server in the unit tests, not yet against a hosted project. Debug builds
+can also run without an account, on one phone only, and say so on screen.
 
 Database tests run against a local Postgres container:
 

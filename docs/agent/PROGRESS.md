@@ -113,11 +113,11 @@ Debug tests 271 failures 0 errors 0 | Release tests 243 failures 0 errors 0
 ```
 
 - [x] 3.0b Extract `:core-domain`. Done in `7f89d30`, moved here from Phase 2
-- [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out. Client libraries are in; the `profiles` table and `complete_profile` exist; no screens yet
-- [ ] 3.2 Data-model migrations, RLS, RPCs. Server done in `adf006d`, `33aeb1c` and `60ed408`. Status: `doing`, the app still calls the legacy tables, so sync fails until it moves over
-- [ ] 3.3 `confirm_handover`. Server done in the same commits. The checkboxes are still in the app, so finding 4 stays open
-- [ ] 3.4 Chain v2 with shared vectors and SQL. Domain, Room and SQL done in `91fbf99`. `ReadingUploader` is written and tested against a fake server (`0917dc1`, `aa9da30`), but the app doesn't call it yet
-- [ ] 3.5 Clock-skew detection and Keystore interim signing. Server side done (`clock_ahead`, signature required). Domain done in `c2f9899`: the signature format and `ClockSkewDetector`. The Keystore signer isn't written
+- [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out. Done in `01c8e38` and tested against a fake auth server. Not run against a real one yet, and the Keystore signer's instrumented test needs a device
+- [ ] 3.2 Data-model migrations, RLS, RPCs. Server done in `adf006d`, `33aeb1c` and `60ed408`, and the app now uses them. Waiting only on the dev project (`HANDOFF.md` Q1)
+- [ ] 3.3 `confirm_handover`. Server and app done. The checkboxes are gone and each person confirms on their own phone, so finding 4 is closed in code. A real two-account run is still to do
+- [x] 3.4 Chain v2 with shared vectors and SQL. Domain, Room and SQL done in `91fbf99`; the app uploads only through `append_readings` and compares its history with the server's head
+- [ ] 3.5 Clock-skew detection and Keystore interim signing. Server, domain and app done: uploads are signed with the Keystore key and the handover screen shows clock and signature checks. The signer itself has only an instrumented test, not yet run
 - [ ] 3.6 pgTAP attack tests and client-side JVM tests. Attack tests done; client tests done for the chain
 
 Proof so far:
@@ -133,7 +133,7 @@ Debug tests 272 failures 0 errors 0 | Release tests 243 failures 0 errors 0 | co
 Superseded by the numbers in the Gate 2 proof above.
 ```
 
-Known gap: the app can't sync at the moment. The legacy tables are locked and renamed, and the app has not moved to the new functions yet. It still works on one device. The last commit's automated security review did not finish (HTTP 429).
+The app now syncs only through the server's functions. None of this has run against a hosted project yet.
 
 **Gate 3:** not started. A real two-account run needs the dev project (`HANDOFF.md` Q1) and an emulator or phones.
 

@@ -22,21 +22,19 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Refresh
-import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
-import com.coldchain.handshake.crypto.IntegrityVerificationState
-import com.coldchain.handshake.repository.HistorySyncState
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,10 +42,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,29 +57,43 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.coldchain.handshake.crypto.ClockIssue
+import com.coldchain.handshake.crypto.ClockIssueType
+import com.coldchain.handshake.crypto.ClockSkewDetector
 import com.coldchain.handshake.crypto.HashChainService
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
-import com.coldchain.handshake.data.remote.dto.RemoteShipmentLocationDto
+import com.coldchain.handshake.crypto.IntegrityVerificationState
+import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
+import com.coldchain.handshake.crypto.UploadAudit
+import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
+import com.coldchain.handshake.handover.HandoverResult
 import com.coldchain.handshake.handover.HandoverVerdictEngine
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShakeTestResult
-import com.coldchain.handshake.models.VvmStage
-import com.coldchain.handshake.safety.TemperatureVerdict
-import com.coldchain.handshake.ui.components.HandoverDecisionForm
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
+import com.coldchain.handshake.models.VvmStage
+import com.coldchain.handshake.repository.AccountState
+import com.coldchain.handshake.repository.CustodyState
+import com.coldchain.handshake.repository.GpsPoint
+import com.coldchain.handshake.repository.HandoverOutcome
+import com.coldchain.handshake.repository.HandoverState
+import com.coldchain.handshake.repository.HistorySyncState
+import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.safety.BreachDetector
+import com.coldchain.handshake.safety.TemperatureVerdict
+import com.coldchain.handshake.ui.components.HandoverDecisionForm
+import com.coldchain.handshake.ui.components.OptionSelector
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.ui.theme.StatusRed
-import com.coldchain.handshake.util.DeviceIdProvider
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 
 /**
  * Destination Custody Handover Screen.
@@ -88,45 +101,13 @@ import java.util.Locale
  * Read-only audit snapshot; contains NO live telemetry or continuous GPS controls.
  */
 
-/**
- * Maps custody transfer exceptions to user-friendly, truthful diagnostic messages.
- * Avoids misrepresenting server/database errors as generic "network issues".
- */
-fun formatCustodyErrorMessage(throwable: Throwable?): String {
-    if (throwable == null) return "Waiting for network to confirm custody transfer"
-    val msg = throwable.message ?: ""
-    val className = throwable.javaClass.simpleName
-
-    return when {
-        throwable is java.net.UnknownHostException ||
-        throwable is java.io.IOException ||
-        msg.contains("Unable to resolve host", ignoreCase = true) ||
-        msg.contains("Failed to connect", ignoreCase = true) ||
-        msg.contains("ConnectException", ignoreCase = true) ||
-        msg.contains("SocketTimeoutException", ignoreCase = true) -> {
-            "Waiting for network to confirm custody transfer"
-        }
-        msg.contains("permission denied", ignoreCase = true) || msg.contains("42501") -> {
-            "Custody transfer failed: Permission denied (table 'shipment_custody' requires GRANT/RLS policy in Supabase)"
-        }
-        msg.contains("Could not find the table", ignoreCase = true) || msg.contains("PGRST205") -> {
-            "Custody transfer failed: Table 'shipment_custody' not found in Supabase database"
-        }
-        msg.isNotBlank() -> {
-            "Custody transfer failed: $msg"
-        }
-        else -> {
-            "Custody transfer failed: $className"
-        }
-    }
-}
-
 @Composable
 fun HandoverScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
-    val remoteDataSource = remember { SupabaseRemoteDataSource() }
+    val accountState by RepositoryProvider.accountRepository.state.collectAsState()
+    val me = accountState as? AccountState.Ready
 
     val activeShipment by RepositoryProvider.temperatureSimulator.activeShipment.collectAsState()
     val shipment = activeShipment
@@ -140,11 +121,19 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
     }).collectAsState(initial = HistorySyncState.IDLE)
 
     // Trigger history hydration if not ready
+    // A shipment kept on this phone alone has nothing on the server to fetch.
     LaunchedEffect(shipmentId) {
         if (shipmentId.isNotBlank()) {
-            RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipmentId)
+            if (shipment?.genesisHash != null) {
+                RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipmentId)
+            } else {
+                RepositoryProvider.shipmentHistorySyncCoordinator.markReady(shipmentId)
+            }
         }
     }
+
+    // What the server holds, which is what catches a removed tail or a rewritten history
+    val serverHead by RepositoryProvider.shipmentHistorySyncCoordinator.getServerHead(shipmentId).collectAsState()
 
     // Chronological telemetry events strictly for this shipment
     val telemetryEvents by (if (shipmentId.isNotBlank()) {
@@ -188,11 +177,12 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
     // Cryptographic Hash Chain Integrity Check (State-Aware)
     val isSyncComplete = syncState == HistorySyncState.HISTORY_READY
-    val integrityEvaluation = remember(telemetryEvents, isSyncComplete, shipment) {
+    val integrityEvaluation = remember(telemetryEvents, isSyncComplete, shipment, serverHead) {
         ShipmentIntegrityEvaluator.evaluate(
             telemetryEvents,
             isSyncComplete,
-            shipment?.genesisHash ?: HashChainService.UNBOUND_GENESIS
+            shipment?.genesisHash ?: HashChainService.UNBOUND_GENESIS,
+            serverHead
         )
     }
 
@@ -205,22 +195,45 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         kotlinx.coroutines.flow.flowOf(null)
     }).collectAsState(initial = null)
 
+    // Who confirms is decided on the server: each person on their own phone, and custody only moves
+    // when both have. A shipment kept on this phone alone has nobody else to confirm.
+    val onServer = me != null && shipment?.genesisHash != null
+    var custody by remember(shipmentId) { mutableStateOf<CustodyState?>(null) }
+    var members by remember(shipmentId) { mutableStateOf<List<ShipmentMember>>(emptyList()) }
+    var uploadIssues by remember(shipmentId) { mutableStateOf<List<UploadIssue>?>(null) }
+    var serverRefresh by remember { mutableIntStateOf(0) }
+    var serverNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(shipmentId, onServer, serverRefresh, telemetryEvents.size) {
+        if (onServer) {
+            val remote = RepositoryProvider.remote
+            custody = remote.getCustody(shipmentId).getOrNull()
+            members = remote.getMembers(shipmentId).getOrDefault(emptyList())
+            uploadIssues = remote.getBatches(shipmentId).getOrNull()
+                ?.let { UploadAudit.check(shipmentId, it, telemetryEvents) }
+        }
+    }
+    val clockIssues = remember(telemetryEvents) { ClockSkewDetector.detect(telemetryEvents) }
+    // With no signal the server can't say, so this phone answers: the one running the logger has custody,
+    // and the person's own role stands in for their role on the shipment.
+    val monitorOnly by RepositoryProvider.temperatureSimulator.isMonitorOnly.collectAsState()
+    val isCustodian = onServer && (custody?.let { it.custodianId == me?.userId } ?: !monitorOnly)
+    val myRole = if (members.isEmpty()) me?.profile?.role else members.firstOrNull { it.userId == me?.userId }?.role
+    val canRecord = !onServer || (!isCustodian && (myRole == MemberRole.COURIER || myRole == MemberRole.RECEIVER))
+
     // Historical Last Recorded Location
-    var lastRecordedLocation by remember { mutableStateOf<RemoteShipmentLocationDto?>(null) }
-    LaunchedEffect(shipmentId) {
-        if (shipmentId.isNotBlank()) {
-            runCatching {
-                lastRecordedLocation = remoteDataSource.getLatestShipmentLocation(shipmentId).getOrNull()
-            }
+    var lastRecordedLocation by remember { mutableStateOf<GpsPoint?>(null) }
+    LaunchedEffect(shipmentId, onServer) {
+        if (onServer) {
+            lastRecordedLocation = RepositoryProvider.remote.getLatestGpsPoint(shipmentId).getOrNull()
         }
     }
 
-    var workerSigned by remember { mutableStateOf(true) }
-    var pharmacistSigned by remember { mutableStateOf(true) }
+    // A second person confirms on their own phone, so nothing here stands in for them.
+    val workerSigned = true
+    val pharmacistSigned = true
 
     var handoverResult by remember { mutableStateOf<HandoverOrchestratorResult?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var custodyTransferNotice by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     var vvmStage by rememberSaveable { mutableStateOf(VvmStage.NOT_RECORDED) }
     var shakeTest by rememberSaveable { mutableStateOf(ShakeTestResult.NOT_DONE) }
@@ -720,13 +733,13 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = String.format(Locale.US, "Lat: %.5f, Lon: %.5f (±%.1fm)", loc.latitude, loc.longitude, loc.accuracy),
+                                text = String.format(Locale.US, "Lat: %.5f, Lon: %.5f (±%.1fm)", loc.latitude, loc.longitude, loc.accuracyMeters),
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = "Recorded at: ${timeFormatter.format(Date(loc.timestamp))}",
+                                text = "Recorded at: ${timeFormatter.format(Date(loc.deviceTimestamp))}",
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -744,52 +757,36 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // 8. CUSTODY SIGN-OFF
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "CUSTODY SIGN-OFF",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = workerSigned,
-                        onCheckedChange = { workerSigned = it }
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Column {
-                        Text("Logistics Courier / Worker Sign-off", fontWeight = FontWeight.Medium, fontSize = 12.sp)
-                        Text("Confirms physical delivery of intact thermal package", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+        // 8. WHO CONFIRMS
+        HandoverParties(
+            onServer = onServer,
+            isCustodian = isCustodian,
+            myUserId = me?.userId,
+            myRole = myRole,
+            members = members,
+            clockIssues = clockIssues,
+            uploadIssues = uploadIssues,
+            busy = isProcessing,
+            onRelease = { member ->
+                isProcessing = true
+                errorMessage = null
+                coroutineScope.launch {
+                    // The handover is held against the readings so far, so the logger stops first.
+                    RepositoryProvider.temperatureSimulator.stopContinuousSimulation()
+                    RepositoryProvider.serverHandover.release(shipment.id, member.userId)
+                        .onSuccess { serverNotice = describeOutcome(it) }
+                        .onFailure { errorMessage = it.message }
+                    serverRefresh++
+                    isProcessing = false
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = pharmacistSigned,
-                        onCheckedChange = { pharmacistSigned = it }
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Column {
-                        Text("Receiving Pharmacist Sign-off", fontWeight = FontWeight.Medium, fontSize = 12.sp)
-                        Text("Confirms receipt, inspection, and formal custody acceptance", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+            },
+            onRefresh = {
+                coroutineScope.launch {
+                    RepositoryProvider.serverHandover.refresh(shipment.id).onFailure { errorMessage = it.message }
+                    serverRefresh++
                 }
             }
-        }
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -874,7 +871,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        HandoverDecisionForm(
+        if (canRecord) HandoverDecisionForm(
             evaluation = computedEvaluation,
             vvmStage = vvmStage,
             onVvmStageChange = { vvmStage = it },
@@ -890,40 +887,38 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             onRecord = { verdict, reason ->
                 isProcessing = true
                 errorMessage = null
-                custodyTransferNotice = null
+                serverNotice = null
                 coroutineScope.launch {
                     try {
-                        val result = RepositoryProvider.handoverOrchestrator.processHandover(
-                            shipmentId = shipment.id,
-                            workerSigned = workerSigned,
-                            pharmacistSigned = pharmacistSigned,
-                            declaredVerdict = verdict,
-                            reason = reason,
-                            vvmStage = vvmStage,
-                            shakeTest = shakeTest,
-                            historySynced = isSyncComplete
-                        )
-                        if (result.isSuccess) {
-                            val res = result.getOrNull()
-                            handoverResult = res
-                            res?.let { RepositoryProvider.temperatureSimulator.onHandedOver(it.updatedShipment) }
-                            // If verdict is PASS, transfer custody to this receiving device
-                            if (res?.handover?.verdict == HandoverVerdict.PASS) {
-                                val myDeviceId = DeviceIdProvider.getDeviceId(context)
-                                val custodyResult = remoteDataSource.transferCustodyWithConfirmation(
-                                    shipmentId = shipment.id,
-                                    newDeviceId = myDeviceId,
-                                    custodyState = "TRANSFERRED"
-                                )
-                                if (custodyResult.isSuccess) {
-                                    custodyTransferNotice = "CUSTODY TRANSFERRED to this device ($myDeviceId)"
-                                } else {
-                                    val err = custodyResult.exceptionOrNull()
-                                    custodyTransferNotice = formatCustodyErrorMessage(err)
+                        if (onServer) {
+                            RepositoryProvider.serverHandover.receive(shipment.id, verdict, reason, vvmStage, shakeTest)
+                                .onSuccess { result ->
+                                    serverNotice = when (result) {
+                                        is HandoverResult.Confirmed -> describeOutcome(result.outcome)
+                                        is HandoverResult.QueuedOffline ->
+                                            "No connection. Your ${result.handover.verdict.name} is saved on this " +
+                                                "phone and will be sent. Custody hasn't moved."
+                                    }
+                                    serverRefresh++
                                 }
-                            }
+                                .onFailure { errorMessage = it.message }
                         } else {
-                            errorMessage = result.exceptionOrNull()?.message ?: "Handover processing failed"
+                            val result = RepositoryProvider.handoverOrchestrator.processHandover(
+                                shipmentId = shipment.id,
+                                workerSigned = workerSigned,
+                                pharmacistSigned = pharmacistSigned,
+                                declaredVerdict = verdict,
+                                reason = reason,
+                                vvmStage = vvmStage,
+                                shakeTest = shakeTest,
+                                historySynced = isSyncComplete
+                            )
+                            result
+                                .onSuccess { res ->
+                                    handoverResult = res
+                                    RepositoryProvider.temperatureSimulator.onHandedOver(res.updatedShipment)
+                                }
+                                .onFailure { errorMessage = it.message ?: "Handover processing failed" }
                         }
                     } catch (e: Exception) {
                         errorMessage = e.message ?: "Unknown error"
@@ -971,56 +966,9 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        if (custodyTransferNotice != null) {
+        serverNotice?.let {
             Spacer(modifier = Modifier.height(10.dp))
-            val isSuccess = custodyTransferNotice!!.startsWith("CUSTODY TRANSFERRED")
-            val isWaitingNetwork = custodyTransferNotice!!.startsWith("Waiting for network")
-            val noticeColor = when {
-                isSuccess -> StatusGreen
-                isWaitingNetwork -> StatusAmber
-                else -> StatusRed
-            }
-            Text(
-                text = custodyTransferNotice!!,
-                color = noticeColor,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodySmall
-            )
-
-            if (!isSuccess && handoverResult?.handover?.verdict == HandoverVerdict.PASS) {
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        isProcessing = true
-                        coroutineScope.launch {
-                            try {
-                                val myDeviceId = DeviceIdProvider.getDeviceId(context)
-                                val custodyResult = remoteDataSource.transferCustodyWithConfirmation(
-                                    shipmentId = shipment.id,
-                                    newDeviceId = myDeviceId,
-                                    custodyState = "TRANSFERRED"
-                                )
-                                if (custodyResult.isSuccess) {
-                                    custodyTransferNotice = "CUSTODY TRANSFERRED to this device ($myDeviceId)"
-                                } else {
-                                    val err = custodyResult.exceptionOrNull()
-                                    custodyTransferNotice = formatCustodyErrorMessage(err)
-                                }
-                            } catch (e: Exception) {
-                                custodyTransferNotice = formatCustodyErrorMessage(e)
-                            } finally {
-                                isProcessing = false
-                            }
-                        }
-                    },
-                    enabled = !isProcessing,
-                    modifier = Modifier.fillMaxWidth().height(40.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Retry Custody Transfer to Network", fontSize = 12.sp)
-                }
-            }
+            Text(text = it, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
         }
 
         // Post-execution Summary Card
@@ -1119,6 +1067,108 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private fun describeOutcome(outcome: HandoverOutcome): String = when (outcome.state) {
+    HandoverState.TRANSFERRED -> "Custody has moved. The shipment is now ${outcome.status.name}."
+    HandoverState.WAITING -> "Confirmed. Waiting for the other person to confirm on their own phone."
+}
+
+/**
+ * Who has to confirm, and what the uploads and clocks show. These checks say which phone uploaded and
+ * whether times add up, not that the readings are true.
+ */
+@Composable
+private fun HandoverParties(
+    onServer: Boolean,
+    isCustodian: Boolean,
+    myUserId: String?,
+    myRole: MemberRole?,
+    members: List<ShipmentMember>,
+    clockIssues: List<ClockIssue>,
+    uploadIssues: List<UploadIssue>?,
+    busy: Boolean,
+    onRelease: (ShipmentMember) -> Unit,
+    onRefresh: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(text = "WHO CONFIRMS", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (!onServer) {
+                Text(
+                    "Local only. On a real handover the courier and the receiver each confirm on their own " +
+                        "phone, and the server moves custody.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else if (isCustodian) {
+                val candidates = members.filter { it.userId != myUserId && it.role != MemberRole.SENDER }
+                var chosen by remember(candidates) { mutableStateOf(candidates.firstOrNull()) }
+                Text(
+                    "You have custody. Choose who takes over, then confirm. Your readings are sent first.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                chosen?.let { selected ->
+                    OptionSelector(
+                        title = "Taking Over",
+                        options = candidates,
+                        selected = selected,
+                        label = { it.displayName ?: roleLabel(it.role) },
+                        onSelect = { chosen = it }
+                    )
+                }
+                Button(
+                    onClick = { chosen?.let(onRelease) },
+                    enabled = !busy && chosen != null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Confirm Handover")
+                }
+            } else if (myRole == MemberRole.COURIER || myRole == MemberRole.RECEIVER) {
+                Text(
+                    "Record what you found below. Custody moves once the person handing over confirms too.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                Text("Only the people handing over can confirm.", style = MaterialTheme.typography.bodySmall)
+            }
+
+            if (onServer) {
+                TextButton(onClick = onRefresh) { Text("Check Again") }
+            }
+
+            val ahead = clockIssues.count { it.type == ClockIssueType.AHEAD_OF_SERVER }
+            val backwards = clockIssues.count { it.type == ClockIssueType.BACKWARDS }
+            if (ahead > 0 || backwards > 0) {
+                Text(
+                    "Clock: $ahead readings are dated after they reached the server, and $backwards are " +
+                        "earlier than the reading before.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StatusAmber
+                )
+            }
+
+            uploadIssues?.let { issues ->
+                Text(
+                    text = if (issues.isEmpty()) {
+                        "Every upload is signed by the phone that sent it. This shows which phone uploaded, " +
+                            "not that the readings are true."
+                    } else {
+                        "${issues.size} upload checks failed: " +
+                            issues.joinToString { "${it.type.name} at ${it.firstSeq}-${it.lastSeq}" }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (issues.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else StatusRed
+                )
             }
         }
     }

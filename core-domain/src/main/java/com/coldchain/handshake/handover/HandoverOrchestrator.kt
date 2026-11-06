@@ -2,10 +2,12 @@ package com.coldchain.handshake.handover
 
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.crypto.IntegrityVerificationState
+import com.coldchain.handshake.crypto.ServerChainHead
 import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.models.Handover
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShakeTestResult
+import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.VvmStage
@@ -31,6 +33,34 @@ data class HandoverOrchestratorResult(
     val evaluation: HandoverEvaluation,
     val updatedShipment: Shipment
 )
+
+/**
+ * What a handover would record. Nothing has been stored.
+ */
+data class HandoverAssessment(
+    val integrityPassed: Boolean,
+    val temperaturePassed: Boolean,
+    val workerSigned: Boolean,
+    val pharmacistSigned: Boolean,
+    val evaluation: HandoverEvaluation,
+    val decision: HandoverDecision,
+    val vvmStage: VvmStage,
+    val shakeTest: ShakeTestResult
+) {
+    fun toHandover(shipmentId: String, timestamp: Long, id: String = shipmentId) = Handover(
+        id = id,
+        shipmentId = shipmentId,
+        workerSigned = workerSigned,
+        pharmacistSigned = pharmacistSigned,
+        integrityVerified = integrityPassed,
+        temperaturePassed = temperaturePassed,
+        verdict = decision.verdict,
+        timestamp = timestamp,
+        reason = decision.reason,
+        vvmStage = vvmStage,
+        shakeTest = shakeTest
+    )
+}
 
 /**
  * Handover Orchestration Service.
@@ -100,6 +130,86 @@ class HandoverOrchestrator(
         Result.failure(e)
     }
 
+    /**
+     * Works out what a handover would record, changing nothing. A confirmation to the server needs this
+     * first, because nothing may be stored as accepted until the server agrees.
+     *
+     * @param serverHead What the server holds, which is what catches a removed tail.
+     */
+    suspend fun assess(
+        shipmentId: String,
+        workerSigned: Boolean,
+        pharmacistSigned: Boolean,
+        declaredVerdict: HandoverVerdict?,
+        reason: String?,
+        vvmStage: VvmStage,
+        shakeTest: ShakeTestResult,
+        historySynced: Boolean,
+        serverHead: ServerChainHead?,
+        timestamp: Long
+    ): Result<HandoverAssessment> {
+        val shipment = shipmentRepository.getShipment(shipmentId).firstOrNull()
+            ?: return Result.failure(IllegalArgumentException("Shipment not found with id: $shipmentId"))
+        val events = telemetryRepository.getTemperatures(shipmentId).firstOrNull()
+            ?: return Result.failure(
+                IllegalStateException("Telemetry stream could not be obtained for shipment: $shipmentId")
+            )
+
+        return evaluate(
+            shipment, events, workerSigned, pharmacistSigned, declaredVerdict, reason,
+            vvmStage, shakeTest, historySynced, serverHead, timestamp
+        )
+    }
+
+    /**
+     * The application determines integrity and temperature itself, from the actual events.
+     */
+    private fun evaluate(
+        shipment: Shipment,
+        events: List<TemperatureEvent>,
+        workerSigned: Boolean,
+        pharmacistSigned: Boolean,
+        declaredVerdict: HandoverVerdict?,
+        reason: String?,
+        vvmStage: VvmStage,
+        shakeTest: ShakeTestResult,
+        historySynced: Boolean,
+        serverHead: ServerChainHead?,
+        timestamp: Long
+    ): Result<HandoverAssessment> {
+        val integrity = ShipmentIntegrityEvaluator.evaluate(
+            events,
+            isSyncComplete = historySynced,
+            genesisHash = shipment.genesisHash ?: HashChainService.UNBOUND_GENESIS,
+            serverHead = serverHead
+        )
+        val integrityPassed = integrity.state == IntegrityVerificationState.VERIFIED
+        val temperature = BreachDetector.evaluateForHandover(shipment, events, timestamp)
+
+        val evaluation = HandoverVerdictEngine.evaluate(
+            temperature = temperature.verdict,
+            integrityPassed = integrityPassed,
+            workerSigned = workerSigned,
+            pharmacistSigned = pharmacistSigned,
+            vvmStage = vvmStage,
+            shakeTest = shakeTest,
+            historyAvailable = integrity.state != IntegrityVerificationState.PENDING_SYNC
+        )
+
+        return HandoverVerdictEngine.decide(evaluation, declaredVerdict, reason).map { decision ->
+            HandoverAssessment(
+                integrityPassed = integrityPassed,
+                temperaturePassed = temperature.temperaturePassed,
+                workerSigned = workerSigned,
+                pharmacistSigned = pharmacistSigned,
+                evaluation = evaluation,
+                decision = decision,
+                vvmStage = vvmStage,
+                shakeTest = shakeTest
+            )
+        }
+    }
+
     private suspend fun record(
         shipmentId: String,
         workerSigned: Boolean,
@@ -138,29 +248,14 @@ class HandoverOrchestrator(
             IllegalStateException("Telemetry stream could not be obtained for shipment: $shipmentId")
         )
 
-        // 4. Application independently determines integrity and temperature from the actual events
-        val integrity = ShipmentIntegrityEvaluator.evaluate(
-            events,
-            isSyncComplete = historySynced,
-            genesisHash = shipment.genesisHash ?: HashChainService.UNBOUND_GENESIS
-        )
-        val integrityPassed = integrity.state == IntegrityVerificationState.VERIFIED
-        val temperature = BreachDetector.evaluateForHandover(shipment, events, timestamp)
+        // 4. Authoritative evaluation from the actual events, via HandoverVerdictEngine
+        val assessment = evaluate(
+            shipment, events, workerSigned, pharmacistSigned, declaredVerdict, reason,
+            vvmStage, shakeTest, historySynced, null, timestamp
+        ).getOrElse { return Result.failure(it) }
+        val decision = assessment.decision
 
-        // 5. Authoritative evaluation via HandoverVerdictEngine
-        val evaluation = HandoverVerdictEngine.evaluate(
-            temperature = temperature.verdict,
-            integrityPassed = integrityPassed,
-            workerSigned = workerSigned,
-            pharmacistSigned = pharmacistSigned,
-            vvmStage = vvmStage,
-            shakeTest = shakeTest,
-            historyAvailable = integrity.state != IntegrityVerificationState.PENDING_SYNC
-        )
-        val decision = HandoverVerdictEngine.decide(evaluation, declaredVerdict, reason)
-            .getOrElse { return Result.failure(it) }
-
-        // 6. Check the outcome is reachable before anything is written
+        // 5. Check the outcome is reachable before anything is written
         val inspectedStatus = pathToInspection.lastOrNull() ?: shipment.status
         if (inspectedStatus != decision.targetStatus &&
             !ShipmentLifecycle.canTransition(inspectedStatus, decision.targetStatus)
@@ -170,7 +265,7 @@ class HandoverOrchestrator(
             )
         }
 
-        // 7. Move through arrival and inspection
+        // 6. Move through arrival and inspection
         for (status in pathToInspection) {
             val saveResult = shipmentRepository.saveShipment(shipment.copy(status = status))
             if (saveResult.isFailure) {
@@ -180,22 +275,10 @@ class HandoverOrchestrator(
             }
         }
 
-        // 8. Construct official Handover model
-        val handover = Handover(
-            id = handoverId,
-            shipmentId = shipmentId,
-            workerSigned = workerSigned,
-            pharmacistSigned = pharmacistSigned,
-            integrityVerified = integrityPassed,
-            temperaturePassed = temperature.temperaturePassed,
-            verdict = decision.verdict,
-            timestamp = timestamp,
-            reason = decision.reason,
-            vvmStage = vvmStage,
-            shakeTest = shakeTest
-        )
+        // 7. Construct official Handover model
+        val handover = assessment.toHandover(shipmentId, timestamp, handoverId)
 
-        // 9. Persist Handover record
+        // 8. Persist Handover record
         val saveHandoverResult = handoverRepository.saveHandover(handover)
         if (saveHandoverResult.isFailure) {
             return Result.failure(
@@ -203,7 +286,7 @@ class HandoverOrchestrator(
             )
         }
 
-        // 10. Update Shipment lifecycle status (ACCEPTED or QUARANTINED)
+        // 9. Update Shipment lifecycle status (ACCEPTED or QUARANTINED)
         val updatedShipment = shipment.copy(status = decision.targetStatus)
         if (decision.targetStatus != inspectedStatus) {
             val saveShipmentResult = shipmentRepository.saveShipment(updatedShipment)
@@ -217,7 +300,7 @@ class HandoverOrchestrator(
         return Result.success(
             HandoverOrchestratorResult(
                 handover = handover,
-                evaluation = evaluation,
+                evaluation = assessment.evaluation,
                 updatedShipment = updatedShipment
             )
         )

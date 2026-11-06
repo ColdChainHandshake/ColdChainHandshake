@@ -31,6 +31,22 @@ Nothing has been applied to this project. The migrations are tested on a local d
 
 ## Do these first
 
+### 0. Point the app at the dev project before running it on a phone
+
+The app now signs people in and syncs only through the functions in `supabase/migrations`. Your
+`local.properties` points at the demo project, which has none of them, so a phone build would show sign-in and
+then fail. Once Q1 is settled and the migrations are applied to the dev project, set `supabase.url` and
+`supabase.anon.key` in `local.properties` to the dev project's values. Claude doesn't read or change that file.
+
+Email sign-in also needs the project's email settings on: Authentication, then Providers, then Email, with
+"Confirm email" allowing one-time codes.
+
+After that, a two-account check needs two phones or emulators, because a phone stays with the first account
+that registers it. Sign in as a sender on one, create and dispatch a shipment naming the other accounts' emails,
+then take custody as the courier and confirm the handover as the courier and the receiver.
+
+`KeystoreDeviceSignerTest` runs only on a device: `./gradlew connectedDebugAndroidTest` with one attached.
+
 ### 1. Lock down the demo project (urgent, 2 minutes)
 
 The demo project is still open: anyone who has the APK can read and rewrite its shipments, readings, alerts and

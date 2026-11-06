@@ -293,13 +293,15 @@ class FakeShipmentDao : ShipmentDao {
         return flow
     }
 
+    override suspend fun getAllShipmentsDirect(): List<ShipmentEntity> = shipments.values.toList()
+
     override suspend fun upsertShipment(shipment: ShipmentEntity) {
         shipments[shipment.id] = shipment
         flow.value = shipments.values.toList()
     }
 
     override suspend fun getPendingShipments(): List<ShipmentEntity> {
-        return shipments.values.filter { it.syncStatus != SyncStatus.SYNCED }
+        return shipments.values.filter { it.syncStatus == SyncStatus.PENDING || it.syncStatus == SyncStatus.FAILED }
     }
 
     override suspend fun updateSyncStatus(id: String, syncStatus: SyncStatus, timestamp: Long) {
@@ -341,7 +343,7 @@ class FakeTemperatureEventDao : TemperatureEventDao {
     }
 
     override suspend fun getPendingEvents(): List<TemperatureEventEntity> {
-        return events.filter { it.syncStatus != SyncStatus.SYNCED }.sortedBy { it.timestamp }
+        return events.filter { it.syncStatus == SyncStatus.PENDING || it.syncStatus == SyncStatus.FAILED }.sortedBy { it.timestamp }
     }
 
     override suspend fun updateSyncStatus(id: String, syncStatus: SyncStatus) {
@@ -410,7 +412,7 @@ class FakeAlertDao : AlertDao {
     }
 
     override suspend fun getPendingAlerts(): List<AlertEntity> {
-        return alerts.values.filter { it.syncStatus != SyncStatus.SYNCED }
+        return alerts.values.filter { it.syncStatus == SyncStatus.PENDING || it.syncStatus == SyncStatus.FAILED }
     }
 
     override suspend fun updateSyncStatus(id: String, syncStatus: SyncStatus, timestamp: Long) {
@@ -445,8 +447,10 @@ class FakeHandoverDao : HandoverDao {
         flow.value = handovers.values.toList()
     }
 
+    override suspend fun replaceHandover(handover: HandoverEntity) = insertHandover(handover)
+
     override suspend fun getPendingHandovers(): List<HandoverEntity> {
-        return handovers.values.filter { it.syncStatus != SyncStatus.SYNCED }
+        return handovers.values.filter { it.syncStatus == SyncStatus.PENDING || it.syncStatus == SyncStatus.FAILED }
     }
 
     override suspend fun updateSyncStatus(id: String, syncStatus: SyncStatus, timestamp: Long) {

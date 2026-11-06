@@ -1,11 +1,11 @@
 package com.coldchain.handshake.repository
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.coldchain.handshake.crypto.DeviceSigner
+import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.network.NetworkMonitor
-import com.coldchain.handshake.data.remote.SupabaseRemoteDataSource
-import com.coldchain.handshake.data.remote.dto.RemoteAlertDto
-import com.coldchain.handshake.data.remote.dto.RemoteHandoverDto
-import com.coldchain.handshake.data.remote.dto.RemoteShipmentDto
-import com.coldchain.handshake.data.remote.dto.RemoteTemperatureEventDto
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
@@ -15,440 +15,312 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.IOException
 
+/**
+ * Runs on a real Room database, so the queries that decide what's still to send are tested too. The
+ * server is a fake that refuses what the real one refuses.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class SyncServiceTest {
 
-    private lateinit var shipmentDao: FakeShipmentDao
-    private lateinit var temperatureEventDao: FakeTemperatureEventDao
-    private lateinit var alertDao: FakeAlertDao
-    private lateinit var handoverDao: FakeHandoverDao
+    private val context: Context = ApplicationProvider.getApplicationContext()
+    private val db = DatabaseProvider.createInMemoryDatabase(context)
+    private val shipments = ShipmentRepositoryImpl(db.shipmentDao())
+    private val telemetry = TelemetryRepositoryImpl(db.temperatureEventDao())
+    private val alerts = AlertRepositoryImpl(db.alertDao())
+    private val handovers = HandoverRepositoryImpl(db.handoverDao())
 
-    private lateinit var shipmentRepository: ShipmentRepository
-    private lateinit var telemetryRepository: TelemetryRepository
-    private lateinit var alertRepository: AlertRepository
-    private lateinit var handoverRepository: HandoverRepository
+    private val server = FakeColdChainServer(currentUser = "courier")
+    private val genesis = server.seedShipment("SHIP-1")
+    private val account = FakeAccountRepository(
+        AccountState.Ready("courier", null, UserProfile("Cory", MemberRole.COURIER))
+    )
+    private val network = FakeNetworkMonitor()
+    private val signer = object : DeviceSigner {
+        override val publicKey = "public-key"
+        override fun sign(payload: ByteArray) = "signature"
+    }
+    private val scopes = mutableListOf<CoroutineScope>()
 
-    private lateinit var fakeRemoteDataSource: FakeSupabaseRemoteDataSource
-    private lateinit var fakeNetworkMonitor: FakeNetworkMonitor
-    private lateinit var syncService: SyncServiceImpl
+    private fun service(watchNetwork: Boolean = false) = SyncServiceImpl(
+        shipmentDao = db.shipmentDao(),
+        temperatureEventDao = db.temperatureEventDao(),
+        alertDao = db.alertDao(),
+        handoverDao = db.handoverDao(),
+        remote = server,
+        uploader = ReadingUploader(server, signer, { "device-1" }),
+        account = account,
+        networkMonitor = network,
+        deviceId = { "device-1" },
+        coroutineScope = if (watchNetwork) CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes += it } else null
+    )
 
-    @Before
-    fun setup() {
-        shipmentDao = FakeShipmentDao()
-        temperatureEventDao = FakeTemperatureEventDao()
-        alertDao = FakeAlertDao()
-        handoverDao = FakeHandoverDao()
+    @After
+    fun tearDown() {
+        scopes.forEach { it.cancel() }
+        db.close()
+    }
 
-        shipmentRepository = ShipmentRepositoryImpl(shipmentDao)
-        telemetryRepository = TelemetryRepositoryImpl(temperatureEventDao)
-        alertRepository = AlertRepositoryImpl(alertDao)
-        handoverRepository = HandoverRepositoryImpl(handoverDao)
+    private suspend fun shipmentOnServer() {
+        ShipmentWorkflow(server, shipments) { "device-1" }.open("SHIP-1").getOrThrow()
+    }
 
-        fakeRemoteDataSource = FakeSupabaseRemoteDataSource()
-        fakeNetworkMonitor = FakeNetworkMonitor(isInitiallyOnline = true)
-
-        syncService = SyncServiceImpl(
-            shipmentDao = shipmentDao,
-            temperatureEventDao = temperatureEventDao,
-            alertDao = alertDao,
-            handoverDao = handoverDao,
-            remoteDataSource = fakeRemoteDataSource,
-            networkMonitor = fakeNetworkMonitor
+    private fun chain(count: Int, shipmentId: String = "SHIP-1", genesisHash: String = genesis): List<TemperatureEvent> =
+        HashChainService.buildChain(
+            (1..count).map {
+                TemperatureEvent(
+                    "$shipmentId-TE-$it", shipmentId, "LOG-1", 1_700_000_000_000L + it * 60_000L, 5.0, "", "",
+                    SyncStatus.PENDING
+                )
+            },
+            genesisHash
         )
+
+    private suspend fun recordReadings(count: Int = 3): List<TemperatureEvent> {
+        shipmentOnServer()
+        return chain(count).also { telemetry.saveTemperatures(it).getOrThrow() }
+    }
+
+    private suspend fun stored(shipmentId: String = "SHIP-1") = telemetry.getTemperatures(shipmentId).first()
+
+    @Test
+    fun readingsReachTheServerAndAreMarkedSynced() = runBlocking {
+        recordReadings()
+
+        service().syncPendingData().getOrThrow()
+
+        assertEquals(3, server.readings.getValue("SHIP-1").size)
+        assertTrue(stored().all { it.syncStatus == SyncStatus.SYNCED })
     }
 
     @Test
-    fun test1_offlineLocalSaveRemainsAvailable() = runTest {
-        // Device is offline
-        fakeNetworkMonitor.setOnline(false)
-        assertFalse(syncService.isOnline())
+    fun theServerHoldsExactlyWhatThisPhoneRecorded() = runBlocking {
+        val local = recordReadings()
 
-        val shipment = Shipment(
-            id = "ship-offline-1",
-            qrCode = "QR_OFFLINE_1",
-            loggerId = "LOG-OFFLINE-1",
-            origin = "Station Alpha",
-            destination = "Station Beta",
-            workerId = "WORKER-1",
-            status = ShipmentStatus.CREATED
-        )
+        service().syncPendingData().getOrThrow()
 
-        // Save locally
-        val saveRes = shipmentRepository.saveShipment(shipment)
-        assertTrue(saveRes.isSuccess)
-
-        // Read locally - data must be instantly available
-        val stored = shipmentRepository.getShipment("ship-offline-1").first()
-        assertNotNull(stored)
-        assertEquals("ship-offline-1", stored?.id)
-
-        // Local record is marked PENDING in Room
-        val pending = shipmentDao.getPendingShipments()
-        assertEquals(1, pending.size)
-        assertEquals(SyncStatus.PENDING, pending[0].syncStatus)
+        val remote = server.readings.getValue("SHIP-1")
+        assertEquals(local.map { it.currentHash }, remote.map { it.currentHash })
+        assertEquals(local.map { it.timestamp }, remote.map { it.timestamp })
     }
 
     @Test
-    fun test2_pendingRecordsAreDetected() = runTest {
-        fakeNetworkMonitor.setOnline(false)
+    fun aFailedUploadStaysQueuedAndGoesLater() = runBlocking {
+        recordReadings()
+        server.offlineError = IOException("No connection")
 
-        val event = TemperatureEvent(
-            id = "evt-detect-1",
-            shipmentId = "ship-1",
-            loggerId = "LOG-1",
-            timestamp = 1000L,
-            temperature = 4.5,
-            previousHash = "0000",
-            currentHash = "1111",
-            syncStatus = SyncStatus.PENDING
-        )
-        telemetryRepository.saveTemperature(event)
+        assertTrue(service().syncPendingData().isFailure)
+        assertTrue(stored().all { it.syncStatus == SyncStatus.FAILED })
 
-        val syncResult = syncService.syncPendingData()
-        assertTrue(syncResult.isFailure) // Offline failure
-        assertEquals(SyncStatus.PENDING, syncService.getSyncStatus().first())
+        server.offlineError = null
+        service().syncPendingData().getOrThrow()
 
-        val pendingEvents = temperatureEventDao.getPendingEvents()
-        assertEquals(1, pendingEvents.size)
-        assertEquals("evt-detect-1", pendingEvents[0].id)
+        assertEquals(3, server.readings.getValue("SHIP-1").size)
     }
 
     @Test
-    fun test3_successfulRemoteSyncChangesLocalStateToSynced() = runTest {
-        fakeNetworkMonitor.setOnline(true)
+    fun aLostReplyIsNotSentTwice() = runBlocking {
+        recordReadings()
+        server.loseNextAppendReply = true
+        val sync = service()
 
-        val shipment = Shipment(
-            id = "ship-sync-1",
-            qrCode = "QR_1",
-            loggerId = "LOG-1",
-            origin = "Origin",
-            destination = "Destination",
-            workerId = "W-1",
-            status = ShipmentStatus.CREATED
-        )
-        val event = TemperatureEvent(
-            id = "evt-sync-1",
-            shipmentId = "ship-sync-1",
-            loggerId = "LOG-1",
-            timestamp = 2000L,
-            temperature = 5.2,
-            previousHash = "HASH-PREV",
-            currentHash = "HASH-CURR",
-            syncStatus = SyncStatus.PENDING
-        )
+        assertTrue(sync.syncPendingData().isFailure)
+        sync.syncPendingData().getOrThrow()
 
-        shipmentRepository.saveShipment(shipment)
-        telemetryRepository.saveTemperature(event)
-
-        assertEquals(1, shipmentDao.getPendingShipments().size)
-        assertEquals(1, temperatureEventDao.getPendingEvents().size)
-
-        // Trigger sync
-        val syncResult = syncService.syncPendingData()
-        assertTrue(syncResult.isSuccess)
-
-        // Verify status moved to SYNCED
-        assertEquals(SyncStatus.SYNCED, syncService.getSyncStatus().first())
-        assertEquals(0, shipmentDao.getPendingShipments().size)
-        assertEquals(0, temperatureEventDao.getPendingEvents().size)
-
-        val localEvent = temperatureEventDao.getTemperatures("ship-sync-1").first().first()
-        assertEquals(SyncStatus.SYNCED, localEvent.syncStatus)
-
-        // Verify remote mock received the records
-        assertEquals(1, fakeRemoteDataSource.uploadedShipments.size)
-        assertEquals(1, fakeRemoteDataSource.uploadedEvents.size)
+        assertEquals(3, server.readings.getValue("SHIP-1").size)
+        assertEquals(1, server.appendCalls)
+        assertTrue(stored().all { it.syncStatus == SyncStatus.SYNCED })
     }
 
     @Test
-    fun test4_failedSyncRemainsRetryable() = runTest {
-        fakeNetworkMonitor.setOnline(true)
-        fakeRemoteDataSource.shouldFail = true // Simulate cloud endpoint error
+    fun aRefusalIsFinalAndSaysWhy() = runBlocking {
+        recordReadings()
+        server.custody["SHIP-1"] = CustodyState(2, "someone-else")
+        val sync = service()
 
-        val alert = Alert(
-            id = "alt-fail-1",
-            shipmentId = "ship-fail",
-            type = AlertType.TEMPERATURE_BREACH,
-            message = "Breach detected",
-            timestamp = 3000L,
-            escalationLevel = EscalationLevel.WORKER,
-            acknowledged = false
-        )
-        alertRepository.saveAlert(alert)
+        assertTrue(sync.syncPendingData().isFailure)
+        sync.syncPendingData()
 
-        // Attempt sync with failing remote
-        val result = syncService.syncPendingData()
-        assertTrue(result.isFailure)
-        assertEquals(SyncStatus.FAILED, syncService.getSyncStatus().first())
-
-        // Record must NOT be deleted, and must remain retryable
-        val pendingAlerts = alertDao.getPendingAlerts()
-        assertEquals(1, pendingAlerts.size)
-        assertEquals("alt-fail-1", pendingAlerts[0].id)
-        assertEquals(SyncStatus.FAILED, pendingAlerts[0].syncStatus)
-
-        // Now restore remote and retry
-        fakeRemoteDataSource.shouldFail = false
-        val retryResult = syncService.syncPendingData()
-        assertTrue(retryResult.isSuccess)
-        assertEquals(SyncStatus.SYNCED, syncService.getSyncStatus().first())
-        assertEquals(0, alertDao.getPendingAlerts().size)
+        assertTrue(stored().all { it.syncStatus == SyncStatus.REJECTED })
+        assertEquals(1, server.appendCalls)
+        assertNotNull(sync.getLastRejection().first())
     }
 
     @Test
-    fun test5_networkRestorationAllowsPendingDataToSync() = runTest {
-        // Start offline
-        fakeNetworkMonitor.setOnline(false)
+    fun aShipmentKeptOnThisPhoneIsNeverSent() = runBlocking {
+        shipments.saveShipment(Shipment("LOCAL-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.CREATED)).getOrThrow()
+        telemetry.saveTemperatures(chain(2, "LOCAL-1", HashChainService.UNBOUND_GENESIS)).getOrThrow()
 
-        val handover = Handover(
-            id = "hnd-reconnect-1",
-            shipmentId = "ship-reconnect",
-            workerSigned = true,
-            pharmacistSigned = true,
-            integrityVerified = true,
-            temperaturePassed = true,
-            verdict = HandoverVerdict.PASS,
-            timestamp = 4000L
-        )
-        handoverRepository.saveHandover(handover)
+        service().syncPendingData().getOrThrow()
 
-        // Attempt sync while offline -> fails
-        val offlineResult = syncService.syncPendingData()
-        assertTrue(offlineResult.isFailure)
-        assertEquals(1, handoverDao.getPendingHandovers().size)
-
-        // Network restored
-        fakeNetworkMonitor.setOnline(true)
-        assertTrue(syncService.isOnline())
-
-        // Reconnect sync
-        val onlineResult = syncService.syncPendingData()
-        assertTrue(onlineResult.isSuccess)
-        assertEquals(0, handoverDao.getPendingHandovers().size)
-        assertEquals(1, fakeRemoteDataSource.uploadedHandovers.size)
+        assertEquals(0, server.appendCalls)
+        assertTrue(stored("LOCAL-1").all { it.syncStatus == SyncStatus.PENDING })
     }
 
     @Test
-    fun test6_retryingSameLogicalEventDoesNotCreateDuplicateLogicalRecords() = runTest {
-        fakeNetworkMonitor.setOnline(true)
+    fun nothingIsSentWhileSignedOut() = runBlocking {
+        recordReadings()
+        account.setState(AccountState.SignedOut)
 
-        val event = TemperatureEvent(
-            id = "evt-idempotent-99",
-            shipmentId = "ship-idem",
-            loggerId = "LOG-IDEM",
-            timestamp = 5000L,
-            temperature = 4.0,
-            previousHash = "H0",
-            currentHash = "H1",
-            syncStatus = SyncStatus.PENDING
-        )
-        telemetryRepository.saveTemperature(event)
+        service().syncPendingData().getOrThrow()
 
-        // Sync 1
-        syncService.syncPendingData()
-        assertEquals(1, fakeRemoteDataSource.uploadedEvents.size)
-
-        // Force record back to PENDING to simulate a retry after network drop before ack
-        temperatureEventDao.updateSyncStatus("evt-idempotent-99", SyncStatus.PENDING)
-
-        // Sync 2 (Retry)
-        syncService.syncPendingData()
-
-        // Verify remote mock still only has 1 record for this ID (keyed by onConflict = "id")
-        assertEquals(1, fakeRemoteDataSource.uploadedEvents.size)
-        assertEquals("evt-idempotent-99", fakeRemoteDataSource.uploadedEvents.keys.first())
+        assertEquals(0, server.appendCalls)
     }
 
     @Test
-    fun test7_originalTemperatureTimestampAndHashesArePreserved() = runTest {
-        fakeNetworkMonitor.setOnline(true)
+    fun thePhoneIsRegisteredOnceBeforeItsFirstUpload() = runBlocking {
+        recordReadings()
+        val sync = service()
 
-        val exactTimestamp = 1719999999123L
-        val exactPreviousHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-        val exactCurrentHash = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+        sync.syncPendingData().getOrThrow()
+        telemetry.saveTemperatures(emptyList()).getOrThrow()
+        sync.syncPendingData().getOrThrow()
 
-        val event = TemperatureEvent(
-            id = "evt-hash-preserve",
-            shipmentId = "ship-hash",
-            loggerId = "LOG-H",
-            timestamp = exactTimestamp,
-            temperature = 3.85,
-            previousHash = exactPreviousHash,
-            currentHash = exactCurrentHash,
-            syncStatus = SyncStatus.PENDING
-        )
-        telemetryRepository.saveTemperature(event)
-
-        syncService.syncPendingData()
-
-        // Verify remote received exact byte-for-byte matching values
-        val remoteDto = fakeRemoteDataSource.uploadedEvents["evt-hash-preserve"]
-        assertNotNull(remoteDto)
-        assertEquals(exactTimestamp, remoteDto?.timestamp)
-        assertEquals(exactPreviousHash, remoteDto?.previousHash)
-        assertEquals(exactCurrentHash, remoteDto?.currentHash)
-        assertEquals(3.85, remoteDto?.temperature ?: 0.0, 0.0001)
-
-        // Verify local Room record retains exact values and only syncStatus changed
-        val localEvent = telemetryRepository.getTemperatures("ship-hash").first().first()
-        assertEquals(exactTimestamp, localEvent.timestamp)
-        assertEquals(exactPreviousHash, localEvent.previousHash)
-        assertEquals(exactCurrentHash, localEvent.currentHash)
-        assertEquals(3.85, localEvent.temperature, 0.0001)
-        assertEquals(SyncStatus.SYNCED, localEvent.syncStatus)
+        assertEquals(1, account.deviceRegistrations)
     }
 
     @Test
-    fun test8_concurrentSyncCallsDoNotDuplicateProcessing() = runTest {
-        fakeNetworkMonitor.setOnline(true)
+    fun aRestoredConnectionSendsWithoutBeingAsked() = runBlocking {
+        recordReadings()
+        network.setOnline(false)
+        service(watchNetwork = true)
 
-        val shipment = Shipment(
-            id = "ship-concurrent-1",
-            qrCode = "QR_C",
-            loggerId = "LOG_C",
-            origin = "Origin",
-            destination = "Dest",
-            workerId = "W",
-            status = ShipmentStatus.CREATED
-        )
-        shipmentRepository.saveShipment(shipment)
+        network.setOnline(true)
 
-        // Simulate artificial delay in remote upsert to create concurrency window
-        fakeRemoteDataSource.remoteDelayMs = 50L
-
-        // Trigger two concurrent syncs
-        val syncJob1 = async { syncService.syncPendingData() }
-        val syncJob2 = async { syncService.syncPendingData() }
-
-        val res1 = syncJob1.await()
-        val res2 = syncJob2.await()
-
-        assertTrue(res1.isSuccess)
-        assertTrue(res2.isSuccess)
-
-        // Verify remote was upserted without duplicate entries
-        assertEquals(1, fakeRemoteDataSource.uploadedShipments.size)
-        assertEquals(SyncStatus.SYNCED, syncService.getSyncStatus().first())
+        withTimeout(10_000) { while (server.readings.getValue("SHIP-1").size < 3) delay(20) }
     }
 
     @Test
-    fun test9_automaticSyncTriggeredOnNetworkRestoredWithoutManualCall() = runTest {
-        // Start completely offline
-        val offlineMonitor = FakeNetworkMonitor(isInitiallyOnline = false)
-        val testRemote = FakeSupabaseRemoteDataSource()
+    fun syncsRunningAtOnceSendEverythingOnce() = runBlocking {
+        recordReadings()
+        val sync = service()
 
-        // Create a real background scope matching production Dispatchers pattern
-        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        (1..4).map { async(Dispatchers.Default) { sync.syncPendingData() } }.awaitAll()
+        sync.syncPendingData().getOrThrow()
 
-        val autoSyncService = SyncServiceImpl(
-            shipmentDao = shipmentDao,
-            temperatureEventDao = temperatureEventDao,
-            alertDao = alertDao,
-            handoverDao = handoverDao,
-            remoteDataSource = testRemote,
-            networkMonitor = offlineMonitor,
-            coroutineScope = testScope
-        )
-
-        val shipment = Shipment(
-            id = "ship-auto-sync-1",
-            qrCode = "QR_AUTO",
-            loggerId = "LOG_AUTO",
-            origin = "Origin",
-            destination = "Dest",
-            workerId = "WORKER_AUTO",
-            status = ShipmentStatus.CREATED
-        )
-        val event = TemperatureEvent(
-            id = "evt-auto-sync-1",
-            shipmentId = "ship-auto-sync-1",
-            loggerId = "LOG_AUTO",
-            timestamp = 6000L,
-            temperature = 4.2,
-            previousHash = "PREV_H",
-            currentHash = "CURR_H",
-            syncStatus = SyncStatus.PENDING
-        )
-
-        // 1. Pending records exist while offline
-        shipmentRepository.saveShipment(shipment)
-        telemetryRepository.saveTemperature(event)
-
-        assertEquals(1, shipmentDao.getPendingShipments().size)
-        assertEquals(1, temperatureEventDao.getPendingEvents().size)
-        val storedEventBefore = telemetryRepository.getTemperatures("ship-auto-sync-1").first().first()
-        assertEquals(SyncStatus.PENDING, storedEventBefore.syncStatus)
-        assertTrue(testRemote.uploadedShipments.isEmpty())
-        assertTrue(testRemote.uploadedEvents.isEmpty())
-
-        // 2. Network changes from false -> true
-        offlineMonitor.setOnline(true)
-
-        // 3. Automatic sync happens WITHOUT calling syncPendingData() manually
-        var attempts = 0
-        // Wait for the rows to be marked synced, not just uploaded: cancelling between the two loses that write.
-        while (
-            (shipmentDao.getPendingShipments().isNotEmpty() || temperatureEventDao.getPendingEvents().isNotEmpty()) &&
-            attempts < 50
-        ) {
-            delay(50)
-            attempts++
-        }
-        testScope.cancel()
-
-        // 4. The record becomes SYNCED and the fake remote receives it
-        assertEquals(0, shipmentDao.getPendingShipments().size)
-        assertEquals(0, temperatureEventDao.getPendingEvents().size)
-        val storedEventAfter = telemetryRepository.getTemperatures("ship-auto-sync-1").first().first()
-        assertEquals(SyncStatus.SYNCED, storedEventAfter.syncStatus)
-        assertEquals(SyncStatus.SYNCED, autoSyncService.getSyncStatus().first())
-
-        assertEquals(1, testRemote.uploadedShipments.size)
-        assertEquals(1, testRemote.uploadedEvents.size)
-        val remoteShipment = testRemote.uploadedShipments["ship-auto-sync-1"]
-        val remoteEvent = testRemote.uploadedEvents["evt-auto-sync-1"]
-        assertNotNull(remoteShipment)
-        assertNotNull(remoteEvent)
-        assertEquals("ship-auto-sync-1", remoteShipment?.id)
-        assertEquals("evt-auto-sync-1", remoteEvent?.id)
+        assertEquals(3, server.readings.getValue("SHIP-1").size)
+        assertEquals(1, server.appendCalls)
     }
 
     @Test
-    fun test10_repositoryProviderResetCancelsSyncScope() {
-        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
-        RepositoryProvider.syncScope = testScope
-        assertTrue(testScope.isActive)
+    fun oneShipmentCanBeSentStraightAway() = runBlocking {
+        recordReadings()
+
+        service().uploadReadings("SHIP-1").getOrThrow()
+
+        assertEquals(3, server.readings.getValue("SHIP-1").size)
+    }
+
+    private fun alert(level: EscalationLevel = EscalationLevel.WORKER, acknowledged: Boolean = false) = Alert(
+        "SHIP-1:DATA_GAP:1000", "SHIP-1", AlertType.DATA_GAP, "Gap", 2_000L, level, acknowledged,
+        excursionStart = 1_000L
+    )
+
+    @Test
+    fun anAlertIsRecordedEscalatedAndAcknowledged() = runBlocking {
+        shipmentOnServer()
+        server.currentUser = "receiver"
+        account.setState(AccountState.Ready("receiver", null, UserProfile("Rae", MemberRole.RECEIVER)))
+        alerts.saveAlert(alert(EscalationLevel.SUPERVISOR, acknowledged = true)).getOrThrow()
+
+        service().syncPendingData().getOrThrow()
+
+        val onServer = server.alerts.getValue("SHIP-1:DATA_GAP:1000")
+        assertEquals(EscalationLevel.SUPERVISOR, onServer.escalationLevel)
+        assertTrue(onServer.acknowledged)
+        assertTrue(db.alertDao().getPendingAlerts().isEmpty())
+    }
+
+    @Test
+    fun aCourierAcknowledgingIsRefusedAndNotRetried() = runBlocking {
+        shipmentOnServer()
+        alerts.saveAlert(alert(acknowledged = true)).getOrThrow()
+        val sync = service()
+
+        assertTrue(sync.syncPendingData().isFailure)
+
+        assertEquals(SyncStatus.REJECTED, db.alertDao().getAlertDirect("SHIP-1:DATA_GAP:1000")?.syncStatus)
+        assertTrue(sync.syncPendingData().isSuccess)
+    }
+
+    private fun handover(verdict: HandoverVerdict = HandoverVerdict.FAIL) = Handover(
+        id = "H-1",
+        shipmentId = "SHIP-1",
+        workerSigned = true,
+        pharmacistSigned = true,
+        integrityVerified = false,
+        temperaturePassed = false,
+        verdict = verdict,
+        timestamp = 3_000L,
+        reason = "Seal broken"
+    )
+
+    @Test
+    fun aConfirmationRecordedWithNoSignalIsSentLater() = runBlocking {
+        shipmentOnServer()
+        server.currentUser = "receiver"
+        handovers.saveHandover(handover()).getOrThrow()
+
+        service().syncPendingData().getOrThrow()
+
+        val sent = server.confirmations.single()
+        assertEquals("receiver", sent.userId)
+        assertEquals(HandoverVerdict.FAIL, sent.details.verdict)
+        assertEquals("Seal broken", sent.details.reason)
+        assertTrue(db.handoverDao().getPendingHandovers().isEmpty())
+    }
+
+    @Test
+    fun aConfirmationTheServerAlreadyHasCountsAsSent() = runBlocking {
+        shipmentOnServer()
+        server.currentUser = "receiver"
+        handovers.saveHandover(handover()).getOrThrow()
+        val sync = service()
+        sync.syncPendingData().getOrThrow()
+        db.handoverDao().updateSyncStatus("H-1", SyncStatus.PENDING, 0L)
+
+        sync.syncPendingData().getOrThrow()
+
+        assertEquals(SyncStatus.SYNCED, db.handoverDao().getHandoverDirect("SHIP-1")?.syncStatus)
+        assertEquals(1, server.confirmations.size)
+    }
+
+    @Test
+    fun resettingTheProviderStopsItsSyncScope() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        RepositoryProvider.syncScope = scope
 
         RepositoryProvider.reset()
 
         assertNull(RepositoryProvider.syncScope)
-        assertFalse(testScope.isActive)
+        assertFalse(scope.isActive)
     }
 }
-
-
-// ---------------------------------------------------------------------------
-// Fake In-Memory Implementations for Testing
-// ---------------------------------------------------------------------------
 
 class FakeNetworkMonitor(isInitiallyOnline: Boolean = true) : NetworkMonitor {
     private var online: Boolean = isInitiallyOnline
@@ -466,44 +338,4 @@ class FakeNetworkMonitor(isInitiallyOnline: Boolean = true) : NetworkMonitor {
     override fun isOnline(): Boolean = online
 
     override fun observeNetworkState(): Flow<Boolean> = _flow
-}
-
-
-class FakeSupabaseRemoteDataSource : SupabaseRemoteDataSource() {
-    val uploadedShipments = LinkedHashMap<String, RemoteShipmentDto>()
-    val uploadedEvents = LinkedHashMap<String, RemoteTemperatureEventDto>()
-    val uploadedAlerts = LinkedHashMap<String, RemoteAlertDto>()
-    val uploadedHandovers = LinkedHashMap<String, RemoteHandoverDto>()
-
-    var shouldFail: Boolean = false
-    var remoteDelayMs: Long = 0L
-
-    override suspend fun upsertShipments(shipments: List<RemoteShipmentDto>): Result<Unit> {
-        if (remoteDelayMs > 0) delay(remoteDelayMs)
-        if (shouldFail) return Result.failure(Exception("Simulated 500 Server Error"))
-        shipments.forEach { uploadedShipments[it.id] = it }
-        return Result.success(Unit)
-    }
-
-    override suspend fun upsertTemperatureEvents(events: List<RemoteTemperatureEventDto>): Result<Unit> {
-        if (remoteDelayMs > 0) delay(remoteDelayMs)
-        if (shouldFail) return Result.failure(Exception("Simulated 500 Server Error"))
-        // Upsert by logical ID
-        events.forEach { uploadedEvents[it.id] = it }
-        return Result.success(Unit)
-    }
-
-    override suspend fun upsertAlerts(alerts: List<RemoteAlertDto>): Result<Unit> {
-        if (remoteDelayMs > 0) delay(remoteDelayMs)
-        if (shouldFail) return Result.failure(Exception("Simulated 500 Server Error"))
-        alerts.forEach { uploadedAlerts[it.id] = it }
-        return Result.success(Unit)
-    }
-
-    override suspend fun upsertHandover(handover: RemoteHandoverDto): Result<Unit> {
-        if (remoteDelayMs > 0) delay(remoteDelayMs)
-        if (shouldFail) return Result.failure(Exception("Simulated 500 Server Error"))
-        uploadedHandovers[handover.id] = handover
-        return Result.success(Unit)
-    }
 }

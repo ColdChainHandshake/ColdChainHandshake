@@ -20,6 +20,10 @@ class HandoverRepositoryImpl(
         handoverDao.insertHandover(handover.toEntity(SyncStatus.PENDING))
     }
 
+    override suspend fun saveConfirmedHandover(handover: Handover): Result<Unit> = runCatching {
+        handoverDao.replaceHandover(handover.toEntity(SyncStatus.SYNCED))
+    }
+
     override fun getHandover(shipmentId: String): Flow<Handover?> {
         return handoverDao.getHandover(shipmentId).map { it?.toDomain() }
     }
