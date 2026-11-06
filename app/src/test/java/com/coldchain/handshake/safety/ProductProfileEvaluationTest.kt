@@ -123,6 +123,13 @@ class ProductProfileEvaluationTest {
     }
 
     @Test
+    fun aFreezeEarlierInTheTripDoesNotUseUpTheHeatBudget() {
+        val readings = minutely(-3.0, -3.0, -3.0, -3.0, 5.0, 9.0, 9.0, 9.0, 9.0, 5.0)
+
+        assertEquals(TemperatureVerdict.PASS, BreachDetector.evaluateTelemetry(readings, tolerant).verdict)
+    }
+
+    @Test
     fun heatAndFreezeHaveSeparateBudgets() {
         val readings = minutely(9.0, 9.0, 9.0, 9.0, 5.0, -3.0, -3.0, -3.0, -3.0, 5.0)
 

@@ -96,6 +96,13 @@ class LoggerSilenceCheckTest {
     }
 
     @Test
+    fun aJourneyWithNoReadingsYetIsCheckedWhenItWouldGoQuiet() = runBlocking {
+        shipments.saveShipment(moving())
+
+        assertEquals(t0 + limit + 1, check(t0))
+    }
+
+    @Test
     fun aHotLoggerThatStopsIsCountedUpToNow() = runBlocking {
         shipments.saveShipment(moving())
         telemetry.saveTemperatures(ownReadings(3 * minute, 12.0)).getOrThrow()

@@ -24,6 +24,8 @@ import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.models.SyncStatus
+import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.AlertEscalationEngine
@@ -219,6 +221,24 @@ class AlertNotificationsTest {
         assertEquals(ListenableWorker.Result.success(), result)
         assertEquals(AlertType.DATA_GAP, alerts.savedAlerts.single().type)
         assertEquals(1, pendingChecks())
+    }
+
+    @Test
+    fun theNextCheckIsWhicheverComesFirst() = runBlocking {
+        val now = System.currentTimeMillis()
+        shipments.saveShipment(
+            Shipment("SHIP-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.IN_TRANSIT, ProductProfiles.DEFAULT.id, now)
+        )
+        telemetry.saveTemperatures(
+            listOf(TemperatureEvent("TE-1", "SHIP-1", "LOG-1", now, 5.0, "", "", SyncStatus.PENDING, 1L))
+        ).getOrThrow()
+        alerts.saveAlert(alert(createdAt = now))
+
+        TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+
+        // The logger would go quiet in about three minutes, long before the alert's escalation is due.
+        val delay = awaitBookedDelay { it > 0 }
+        assertTrue("booked $delay", delay in 1..ProductProfiles.DEFAULT.maxSilenceMs + 1_000L)
     }
 
     @Test

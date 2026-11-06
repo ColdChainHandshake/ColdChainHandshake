@@ -176,6 +176,24 @@ class ShipmentLifecycleTest {
     }
 
     @Test
+    fun aShipmentsLoggerCanStillChangeBeforeDispatch() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.saveShipment(shipment(CREATED)).getOrThrow()
+
+        assertTrue(repository.saveShipment(shipment(CREATED).copy(loggerId = "LOG-2")).isSuccess)
+    }
+
+    @Test
+    fun adoptingFromTheServerCannotChangeTheProductOrTheLogger() = runBlocking {
+        val repository = ShipmentRepositoryImpl(FakeShipmentDao())
+        repository.adoptRemoteShipment(shipment(IN_TRANSIT)).getOrThrow()
+
+        assertTrue(repository.adoptRemoteShipment(shipment(ARRIVED).copy(productProfileId = "another")).isFailure)
+        assertTrue(repository.adoptRemoteShipment(shipment(ARRIVED).copy(loggerId = "LOG-2")).isFailure)
+        assertEquals(IN_TRANSIT, repository.getShipment("SHIP-1").first()?.status)
+    }
+
+    @Test
     fun aShipmentsLoggerCannotChangeOnceItIsMoving() = runBlocking {
         val repository = ShipmentRepositoryImpl(FakeShipmentDao())
         repository.adoptRemoteShipment(shipment(IN_TRANSIT)).getOrThrow()
