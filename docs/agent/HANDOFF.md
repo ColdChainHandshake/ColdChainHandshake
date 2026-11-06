@@ -154,8 +154,9 @@ device, so if a screen differs from these steps, note what you saw and carry on.
 
 ### 6. Back up the branch off this PC
 
-`PUSH_POLICY = local-only`, so this work exists only on this PC. Claude made a bundle on 6 Nov:
-`D:\cch-backup-20261106-2158.bundle` (1.9 MB, every branch and tag).
+`PUSH_POLICY = local-only`, so this work exists only on this PC. The newest bundle, made on 7 Nov after `gate-2`, is
+`D:\cch-backup-20261107-0248.bundle` (1.9 MB, every branch and tag up to `7aaf3ba`). The older
+`D:\cch-backup-20261106-2158.bundle` misses that night's work and can be deleted.
 
 1. Copy it to cloud storage or a USB drive.
 2. **Check:** on the copy, `git bundle verify <path to the copy>` ends with "is okay".
