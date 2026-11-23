@@ -469,6 +469,15 @@ emulator: cold start after pm clear, LaunchState COLD, TotalTime 5566 ms, no FAT
     until 5.1c. Full proof: core-domain 118, debug 434, release 377, failed 0; lint and release APK built.
     Emulator, local stack: sign-in reaches "Case, Courier", Sign Out returns to sign-in, local mode survives
     `am kill` in the background, no FATAL or ANR
+  - [x] `DispatchViewModel`: create, add people, dispatch, start a local journey, scan, reset. The shipment on
+    screen is kept by ID in `SavedStateHandle` (before, a rotation lost a shipment just created). The form fields
+    are `rememberSaveable`. `DispatchViewModelTest`, 9 tests, 9 failed against a stub first. `DispatchScreenTest`
+    now builds its own ViewModel from local fakes, with no global client, which removes the order dependence
+    recorded on 7 Nov; its waits idle Robolectric's main looper, which the ViewModel resumes on. Full proof:
+    core-domain 118, debug 443, release 386, failed 0; lint and release APK built. Emulator, local stack: sender
+    created `SHIP-C8AC36`, which stayed on screen through landscape and back, and dispatched it (server:
+    DISPATCHED), no FATAL or ANR
+  - [ ] Next: Transit, Handover, Alerts ViewModels, then 5.1c
 - [ ] 5.1c Hilt builds everything; `RepositoryProvider` deleted
 - [ ] 5.2 Foreground service for recording; WorkManager sync; the Handover screen downloads its own history
 - [ ] 5.3 Multi-leg custody in the UI

@@ -2,6 +2,10 @@ package com.coldchain.handshake.di
 
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.repository.ShipmentRepository
+import com.coldchain.handshake.repository.ShipmentWorkflow
+import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.navigation.SessionGate
 import dagger.Module
 import dagger.Provides
@@ -22,4 +26,16 @@ object LegacyProviderModule {
 
     @Provides
     fun sessionGate(): SessionGate = RepositoryProvider
+
+    @Provides
+    fun shipmentRepository(): ShipmentRepository = RepositoryProvider.shipmentRepository
+
+    @Provides
+    fun shipmentWorkflow(): ShipmentWorkflow = RepositoryProvider.shipmentWorkflow
+
+    @Provides
+    fun temperatureSimulator(): TemperatureSimulator = RepositoryProvider.temperatureSimulator
+
+    @Provides
+    fun historySync(): ShipmentHistorySyncCoordinator = RepositoryProvider.shipmentHistorySyncCoordinator
 }

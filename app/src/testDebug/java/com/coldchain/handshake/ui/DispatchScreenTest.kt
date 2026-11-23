@@ -17,12 +17,18 @@ import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
-import com.coldchain.handshake.repository.AlertRepositoryImpl
-import com.coldchain.handshake.repository.HandoverRepositoryImpl
-import com.coldchain.handshake.repository.RepositoryProvider
+import android.os.Looper
+import androidx.lifecycle.SavedStateHandle
+import org.robolectric.Shadows.shadowOf
+import com.coldchain.handshake.repository.FakeAccountRepository
+import com.coldchain.handshake.repository.FakeColdChainServer
+import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepositoryImpl
+import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
+import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.screens.DispatchScreen
+import com.coldchain.handshake.ui.screens.DispatchViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -47,8 +53,18 @@ class DispatchScreenTest {
     private val db = DatabaseProvider.createInMemoryDatabase(context)
     private val shipments = ShipmentRepositoryImpl(db.shipmentDao())
     private val telemetry = TelemetryRepositoryImpl(db.temperatureEventDao())
-    private val handovers = HandoverRepositoryImpl(db.handoverDao())
-    private val alerts = AlertRepositoryImpl(db.alertDao())
+    // Everything the screen uses is built here, with no global state and no real server client, so the result
+    // doesn't depend on which test ran before (the order dependence recorded on 7 Nov).
+    private val server = FakeColdChainServer(currentUser = "sender")
+    private val simulator = TemperatureSimulator(telemetry, wallClock = System::currentTimeMillis)
+    private val viewModel = DispatchViewModel(
+        account = FakeAccountRepository(),
+        shipments = shipments,
+        workflow = ShipmentWorkflow(server, shipments) { "device-1" },
+        simulator = simulator,
+        history = ShipmentHistorySyncCoordinator(telemetry, server),
+        saved = SavedStateHandle()
+    )
 
     private var navigatedToTransit = false
     private var showing by mutableStateOf(true)
@@ -56,9 +72,8 @@ class DispatchScreenTest {
     @Before
     fun setUp() {
         WorkManagerTestInitHelper.initializeTestWorkManager(context)
-        RepositoryProvider.initialize(shipments, telemetry, alerts, handovers)
         compose.setContent {
-            if (showing) DispatchScreen(onNavigateToTransit = { navigatedToTransit = true })
+            if (showing) DispatchScreen(onNavigateToTransit = { navigatedToTransit = true }, viewModel = viewModel)
         }
     }
 
@@ -67,12 +82,17 @@ class DispatchScreenTest {
         // The screen goes first, or what it's still collecting would outlive the database.
         showing = false
         compose.waitForIdle()
-        RepositoryProvider.temperatureSimulator.stopContinuousSimulation()
-        RepositoryProvider.reset()
+        simulator.stopContinuousSimulation()
         db.close()
     }
 
-    private fun stored(): Shipment? = runBlocking { shipments.getAllShipments().first().singleOrNull() }
+    // The ViewModel resumes on the main looper, which Robolectric pauses and Compose's waitUntil doesn't run.
+    private fun idleMain() = shadowOf(Looper.getMainLooper()).idle()
+
+    private fun stored(): Shipment? {
+        idleMain()
+        return runBlocking { shipments.getAllShipments().first().singleOrNull() }
+    }
 
     private fun click(text: String) {
         compose.waitUntil(10_000) { compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
@@ -92,7 +112,7 @@ class DispatchScreenTest {
         compose.waitUntil(10_000) { stored()?.status == ShipmentStatus.DISPATCHED }
         click("Start Journey → Enter IN_TRANSIT")
         compose.waitUntil(10_000) { stored()?.status == ShipmentStatus.IN_TRANSIT }
-        compose.waitUntil(10_000) { navigatedToTransit }
+        compose.waitUntil(10_000) { idleMain(); navigatedToTransit }
     }
 
     @Test

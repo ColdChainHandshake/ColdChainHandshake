@@ -57,54 +57,53 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coldchain.handshake.alerts.AlertEscalationScheduler
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.coldchain.handshake.models.ProductProfiles
-import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
-import com.coldchain.handshake.repository.AccountState
-import com.coldchain.handshake.repository.RepositoryProvider
-import com.coldchain.handshake.repository.ShipmentDraft
 import com.coldchain.handshake.ui.components.OptionSelector
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.util.QRCodeGenerator
-import java.util.UUID
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
 fun DispatchScreen(
     modifier: Modifier = Modifier,
-    onNavigateToTransit: () -> Unit = {}
+    onNavigateToTransit: () -> Unit = {},
+    viewModel: DispatchViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val ui by viewModel.state.collectAsStateWithLifecycle()
 
-    var origin by remember { mutableStateOf("Central Cold Hub") }
-    var destination by remember { mutableStateOf("St. Jude Pharmacy") }
-    var workerId by remember { mutableStateOf("W-14") }
-    var loggerId by remember { mutableStateOf("LOG-902") }
-
-    // Authoritative scanned QR identifier to bind to Shipment.qrCode
-    var boundQrCode by remember { mutableStateOf<String?>(null) }
+    // The form survives rotation and process death; what has been created lives in the ViewModel.
+    var origin by rememberSaveable { mutableStateOf("Central Cold Hub") }
+    var destination by rememberSaveable { mutableStateOf("St. Jude Pharmacy") }
+    var workerId by rememberSaveable { mutableStateOf("W-14") }
+    var loggerId by rememberSaveable { mutableStateOf("LOG-902") }
     var selectedProfileId by rememberSaveable { mutableStateOf(ProductProfiles.DEFAULT.id) }
-    var infoBannerMessage by remember { mutableStateOf<String?>(null) }
-
-    var currentShipment by remember { mutableStateOf<Shipment?>(null) }
-
-    val accountState by RepositoryProvider.accountRepository.state.collectAsState()
-    val signedIn = accountState is AccountState.Ready
     var courierEmail by rememberSaveable { mutableStateOf("") }
     var receiverEmail by rememberSaveable { mutableStateOf("") }
-    var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var showScannerDialog by remember { mutableStateOf(false) }
+    var showScannerDialog by rememberSaveable { mutableStateOf(false) }
 
-    // Check if simulator already has an active shipment
-    LaunchedEffect(Unit) {
-        val existing = RepositoryProvider.temperatureSimulator.activeShipment.value
-        if (existing != null) {
-            currentShipment = existing
-            qrBitmap = QRCodeGenerator.generateQR(existing.qrCode, 400)
+    val currentShipment = ui.shipment
+    val signedIn = ui.signedIn
+    val boundQrCode = ui.boundQrCode
+    val infoBannerMessage = ui.banner
+    val qrBitmap: Bitmap? = remember(currentShipment?.qrCode) {
+        currentShipment?.let { QRCodeGenerator.generateQR(it.qrCode, 400) }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.events.collect { event ->
+            when (event) {
+                DispatchEvent.OpenTransit -> {
+                    AlertEscalationScheduler.checkNow(context)
+                    onNavigateToTransit()
+                }
+            }
         }
     }
 
@@ -113,75 +112,13 @@ fun DispatchScreen(
             onCodeScanned = { scannedCode ->
                 showScannerDialog = false
                 scope.launch {
-                    val targetId = if (scannedCode.startsWith("CCH:SHIP:")) {
-                        scannedCode.split(":").getOrNull(2) ?: scannedCode
-                    } else {
-                        scannedCode
-                    }
-
-                    // 1. Check local repository
-                    val allShipments = RepositoryProvider.shipmentRepository.getAllShipments().first()
-                    var matchedShipment = allShipments.firstOrNull {
-                        it.qrCode == scannedCode ||
-                                it.id == scannedCode ||
-                                it.id == targetId
-                    }
-
-                    // 2. If absent here, ask the server. A code only names a shipment: nothing is built from it.
-                    if (matchedShipment == null && signedIn) {
-                        matchedShipment = RepositoryProvider.shipmentWorkflow.open(targetId)
-                            .onFailure { infoBannerMessage = it.message }
-                            .getOrNull()
-                    }
-
-                    if (matchedShipment != null) {
-                        // Identified existing shipment via QR! Enter monitor mode and hydrate complete history
-                        currentShipment = matchedShipment
-                        boundQrCode = matchedShipment.qrCode
-                        qrBitmap = QRCodeGenerator.generateQR(matchedShipment.qrCode, 400)
-                        RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(matchedShipment)
-                        scope.launch {
-                            if (matchedShipment.genesisHash != null) {
-                                RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(matchedShipment.id)
-                            } else {
-                                RepositoryProvider.shipmentHistorySyncCoordinator.markReady(matchedShipment.id)
-                            }
-                        }
-                        infoBannerMessage = "Identified consignment ${matchedShipment.id} via QR (Monitor Mode)"
-                        onNavigateToTransit()
-                    } else if (currentShipment != null && currentShipment!!.status == ShipmentStatus.CREATED &&
-                        currentShipment!!.genesisHash == null
-                    ) {
-                        // Associate scanned QR code directly with existing active shipment
-                        val updatedShipment = if (scannedCode.startsWith("LOG-")) {
-                            currentShipment!!.copy(loggerId = scannedCode)
-                        } else {
-                            currentShipment!!.copy(qrCode = scannedCode)
-                        }
-                        currentShipment = updatedShipment
-                        boundQrCode = updatedShipment.qrCode
-                        qrBitmap = QRCodeGenerator.generateQR(updatedShipment.qrCode, 400)
-                        RepositoryProvider.shipmentRepository.saveShipment(updatedShipment)
-                            .onFailure { infoBannerMessage = "Couldn't save: ${it.message}" }
-                        RepositoryProvider.temperatureSimulator.attachShipment(updatedShipment)
-                        infoBannerMessage = "Associated QR payload with consignment ${updatedShipment.id}"
-                    } else {
-                        // Configure new shipment with scanned QR payload bound to Shipment.qrCode
-                        boundQrCode = scannedCode
-
-                        if (scannedCode.startsWith("LOG-")) {
-                            loggerId = scannedCode
-                            infoBannerMessage = "Paired Logger $scannedCode via QR scan"
-                        } else if (scannedCode.startsWith("CCH:SHIP:")) {
-                            val parts = scannedCode.split(":")
-                            if (parts.size >= 6) {
-                                origin = parts[3]
-                                destination = parts[4]
-                                loggerId = parts[5]
-                            }
-                            infoBannerMessage = "Bound scanned manifest QR to new consignment"
-                        } else {
-                            infoBannerMessage = "Bound scanned QR identifier to new consignment"
+                    when (val outcome = viewModel.onCodeScanned(scannedCode)) {
+                        ScanOutcome.Opened -> onNavigateToTransit()
+                        ScanOutcome.Associated -> Unit
+                        is ScanOutcome.FillForm -> {
+                            outcome.loggerId?.let { loggerId = it }
+                            outcome.origin?.let { origin = it }
+                            outcome.destination?.let { destination = it }
                         }
                     }
                 }
@@ -255,7 +192,7 @@ fun DispatchScreen(
                         )
                     }
                     IconButton(
-                        onClick = { infoBannerMessage = null },
+                        onClick = viewModel::dismissBanner,
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(
@@ -331,7 +268,7 @@ fun DispatchScreen(
                                     )
                                 }
                                 IconButton(
-                                    onClick = { boundQrCode = null },
+                                    onClick = viewModel::forgetScannedCode,
                                     modifier = Modifier.size(24.dp)
                                 ) {
                                     Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(14.dp))
@@ -407,7 +344,7 @@ fun DispatchScreen(
                                 destination = "City Central Hospital"
                                 workerId = "W-24"
                                 loggerId = "LOG-505"
-                                boundQrCode = null
+                                viewModel.forgetScannedCode()
                             }
                         ) {
                             Text("Demo Preset")
@@ -415,52 +352,11 @@ fun DispatchScreen(
 
                         Button(
                             onClick = {
-                                val shipmentId = "SHIP-" + UUID.randomUUID().toString().take(6).uppercase()
-                                if (signedIn) {
-                                    scope.launch {
-                                        val draft = ShipmentDraft(
-                                            shipmentId, selectedProfileId, loggerId.trim(), origin.trim(), destination.trim()
-                                        )
-                                        RepositoryProvider.shipmentWorkflow.create(draft)
-                                            .onSuccess { created ->
-                                                currentShipment = created
-                                                qrBitmap = QRCodeGenerator.generateQR(created.qrCode, 400)
-                                                infoBannerMessage = RepositoryProvider.shipmentWorkflow
-                                                    .addPeople(created.id, courierEmail, receiverEmail)
-                                                    .fold(
-                                                        { "Created ${created.id}. The courier and receiver can open it now." },
-                                                        { "Created ${created.id}, but people weren't added: ${it.message}" }
-                                                    )
-                                            }
-                                            .onFailure { infoBannerMessage = "Couldn't create the shipment: ${it.message}" }
-                                    }
-                                    return@Button
-                                }
-                                // The authoritative qrCode is explicitly associated with the scanned code if present
-                                val authoritativeQr = boundQrCode ?: "CCH:SHIP:$shipmentId:$origin:$destination:$loggerId"
-                                val newShipment = Shipment(
-                                    id = shipmentId,
-                                    qrCode = authoritativeQr,
-                                    loggerId = loggerId.trim(),
-                                    origin = origin.trim(),
-                                    destination = destination.trim(),
-                                    workerId = workerId.trim(),
-                                    status = ShipmentStatus.CREATED,
-                                    productProfileId = selectedProfileId
+                                viewModel.create(
+                                    DispatchForm(selectedProfileId, origin, destination, workerId, loggerId),
+                                    courierEmail,
+                                    receiverEmail
                                 )
-                                currentShipment = newShipment
-                                qrBitmap = QRCodeGenerator.generateQR(authoritativeQr, 400)
-
-                                scope.launch {
-                                    val saved = RepositoryProvider.shipmentRepository.saveShipment(newShipment)
-                                    if (saved.isFailure) {
-                                        currentShipment = null
-                                        infoBannerMessage = "Couldn't save: ${saved.exceptionOrNull()?.message}"
-                                        return@launch
-                                    }
-                                    RepositoryProvider.temperatureSimulator.attachShipment(newShipment)
-                                    infoBannerMessage = "Created $shipmentId on this phone only"
-                                }
                             },
                             enabled = origin.isNotBlank() && destination.isNotBlank() && loggerId.isNotBlank()
                         ) {
@@ -626,13 +522,7 @@ fun DispatchScreen(
                             if (shipment.genesisHash != null) {
                                 PeopleFields(courierEmail, { courierEmail = it }, receiverEmail, { receiverEmail = it })
                                 OutlinedButton(
-                                    onClick = {
-                                        scope.launch {
-                                            infoBannerMessage = RepositoryProvider.shipmentWorkflow
-                                                .addPeople(shipment.id, courierEmail, receiverEmail)
-                                                .fold({ "People added to ${shipment.id}" }, { "Couldn't add people: ${it.message}" })
-                                        }
-                                    },
+                                    onClick = { viewModel.addPeople(courierEmail, receiverEmail) },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text("Add People")
@@ -640,32 +530,7 @@ fun DispatchScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
                             Button(
-                                onClick = {
-                                    if (shipment.genesisHash != null) {
-                                        scope.launch {
-                                            RepositoryProvider.shipmentWorkflow.dispatch(shipment.id)
-                                                .onSuccess {
-                                                    currentShipment = it
-                                                    infoBannerMessage =
-                                                        "${it.id} dispatched. The courier takes custody on their own phone."
-                                                }
-                                                .onFailure { infoBannerMessage = "Couldn't dispatch: ${it.message}" }
-                                        }
-                                        return@Button
-                                    }
-                                    val dispatched = shipment.copy(status = ShipmentStatus.DISPATCHED)
-                                    currentShipment = dispatched
-                                    scope.launch {
-                                        val saved = RepositoryProvider.shipmentRepository.saveShipment(dispatched)
-                                        if (saved.isFailure) {
-                                            currentShipment = shipment
-                                            infoBannerMessage = "Couldn't save: ${saved.exceptionOrNull()?.message}"
-                                            return@launch
-                                        }
-                                        RepositoryProvider.temperatureSimulator.attachShipment(dispatched)
-                                        infoBannerMessage = "Consignment ${dispatched.id} DISPATCHED and sealed"
-                                    }
-                                },
+                                onClick = { viewModel.dispatch() },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(
@@ -684,26 +549,7 @@ fun DispatchScreen(
                             )
                         } else {
                             Button(
-                                onClick = {
-                                    val inTransit = shipment.copy(
-                                        status = ShipmentStatus.IN_TRANSIT,
-                                        journeyStartedAt = System.currentTimeMillis()
-                                    )
-                                    currentShipment = inTransit
-                                    scope.launch {
-                                        val saved = RepositoryProvider.shipmentRepository.saveShipment(inTransit)
-                                        if (saved.isFailure) {
-                                            currentShipment = shipment
-                                            infoBannerMessage = "Couldn't save: ${saved.exceptionOrNull()?.message}"
-                                            return@launch
-                                        }
-                                        RepositoryProvider.temperatureSimulator.attachShipment(inTransit)
-                                        RepositoryProvider.shipmentHistorySyncCoordinator.markReady(inTransit.id)
-                                        RepositoryProvider.temperatureSimulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
-                                        AlertEscalationScheduler.checkNow(context)
-                                        onNavigateToTransit()
-                                    }
-                                },
+                                onClick = { viewModel.startLocalJourney() },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = StatusGreen
                                 ),
@@ -747,13 +593,7 @@ fun DispatchScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     OutlinedButton(
-                        onClick = {
-                            RepositoryProvider.temperatureSimulator.reset()
-                            currentShipment = null
-                            boundQrCode = null
-                            qrBitmap = null
-                            infoBannerMessage = "Reset consignment configuration"
-                        },
+                        onClick = viewModel::reset,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(
