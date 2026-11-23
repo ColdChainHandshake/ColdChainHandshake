@@ -11,7 +11,7 @@ Status words: `done`, `doing`, `blocked` (with the reason), or blank for not sta
 - [x] S1 User env vars, checked by reading them back with `[Environment]::GetEnvironmentVariable(..., 'User')`:
   `JAVA_HOME=D:\cch-tools\jdk-17.0.20.1+1`, `ANDROID_HOME=C:\Users\LENOVO\AppData\Local\Android\Sdk`,
   `ANDROID_AVD_HOME=D:\Android\avd`, `GRADLE_USER_HOME=D:\cch-tools\gradle-home` (see `DECISIONS.md`)
-- [ ] S2 Emulator: `doing`. Installing `cmdline-tools/latest`, `emulator` and `system-images/android-36/google_apis/x86_64`
+- [x] S2 Emulator: done, proof below. Installed `cmdline-tools/latest`, `emulator` and `system-images/android-36/google_apis/x86_64`
   with `android sdk install`. The first try failed on `platform-tools`, because the running adb held `adb.exe`; the
   installed platform-tools 37.0.1 is kept
 - [x] S3 Phone: `adb devices -l` lists `RZCY820AG0F device model:SM_S921E`. `getprop`: SM-S921E (Galaxy S24),
@@ -80,7 +80,10 @@ items 1 and 3 after `gate-3`.
   `HandoverOrchestrator` take the outcome and can only lower the verdict (`LoggerCheckVerdictTest`, two orchestrator
   tests). Two mutants applied by hand (a hole treated as a late tail; overwritten readings compared anyway): each
   failed its test, then reverted. The screen wiring waits for item 1
-- [ ] 4.1 Logger readings in the app. Waits for `gate-3`
+- [ ] 4.1 Logger readings in the app. Waits for `gate-3`. Carry forward: `LoggerHandoverCheck` returns NOT_CHECKED
+  whenever no link is passed. The screen wiring must pass UNKNOWN instead when the shipment has a real (hardware)
+  logger enrolled that this phone can't reach, and needs a test for it; only a virtual logger on another phone may
+  stay NOT_CHECKED
 - [ ] 4.3 Server: logger key and start sequence on the shipment. Waits for `gate-3`
 - [ ] Gate 4: app side not done yet; then "waiting for the owner's firmware"
 

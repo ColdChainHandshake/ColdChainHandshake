@@ -1,6 +1,6 @@
 # Status: what is proven, and on what
 
-Updated 7 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock.
+Updated 23 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock.
 
 "Real system" means a hosted Supabase project, an emulator or phone, or a real database running in Docker.
 "Fakes" means tests, fake servers and test vectors that Claude wrote. A fake can agree with the code and still be
@@ -25,6 +25,15 @@ hosted project.
   - Someone not signed in, and a stranger, see nothing.
   - It signs up with passwords, so email-code sign-in itself is still untested.
 
+On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 emulator (Android 16):
+
+- **The phone's signing key:** `KeystoreDeviceSignerTest`, 3 of 3 on each. The key is made in the Android Keystore,
+  stays the same between uses, and its signatures verify with the public key the server is given.
+- **Screens on the emulator:** sign-in; the typed email survives rotation, going to the background and the process
+  being killed; debug local mode creates, dispatches and starts a shipment and records one reading a minute, through
+  rotation. Screenshots in `docs/agent/evidence/`. This found the sign-in title drawn under the status bar (fixed).
+- **On the phone so far:** the app starts in 1.1 s with no stall. The rest of the phone pass is still to do.
+
 ## Proven only against our own fakes and vectors
 
 - **Full unit and screen tests:** counts in `PROGRESS.md`.
@@ -37,13 +46,19 @@ hosted project.
 - **Logger protocol:** Kotlin agrees with a separate Python version on the vectors. Both were written by Claude; one
   signature is checked against an outside source (RFC 6979).
 - **Logger test key refused:** in unit tests for both builds, and neither built APK contains its private key.
+- **Reading a logger over Bluetooth:** the protocol side runs against a fake Bluetooth server and the Python
+  vectors, including lost and silent notifications. The Android Bluetooth code compiles but has never talked to a
+  logger, because there isn't one (`HARDWARE = none`).
+- **Checking the logger at handover:** in tests, a history that was edited, cut short, replayed, signed with the
+  wrong or the test key, or doesn't match the readings fails the handover; one with holes or faults is UNKNOWN.
+  Not on a screen yet.
 - **Firmware:** interfaces and 38 tests build with g++; the code is the owner's to write, so 37 fail by design.
 
 ## Not proven
 
-- Anything on a hosted Supabase project. No migration has reached one.
-- Anything on an emulator or phone: sign-in, the phone's signing key, notifications, real timers, and the handover
-  with each person on their own phone (Gate 3).
+- Anything on a hosted Supabase project. No migration has reached one (the dev project is paused).
+- On a device: email-code sign-in, notifications, real timers, and the handover with each person on their own
+  phone (Gate 3).
 - Recording and sync with the screen off, after the app is killed, or after a long time offline.
 - A real logger. The virtual logger exists in code, but the app doesn't use it yet.
 - The GitHub Actions workflow has never run on GitHub.

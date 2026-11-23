@@ -131,24 +131,12 @@ publishable key (Project Settings, API). Claude doesn't read or change that file
 
 **Check:** a debug build on a phone shows the sign-in screen, and a code arrives by email when you ask for one.
 
-### 5. An emulator or a phone (needed for Gate 3 and Gate 5)
+### 5. An emulator or a phone: done (23 Nov)
 
-Today this PC has no emulator, no system image, no Android Studio, and `adb devices` lists nothing.
-
-**Quickest: your own phone.** Settings, About phone, tap Build number seven times. Then Developer options, USB
-debugging on. Plug it in and accept the prompt. **Check:** `& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices`
-lists it as `device`.
-
-**Emulator:** keep its files on D:, because C: is nearly full.
-
-1. Install Android Studio with the SDK on D: (for example `D:\Android\Sdk`; choose the path in the setup wizard).
-2. Set the emulator's folder to D: once, then open a new terminal:
-
-   ```powershell
-   [Environment]::SetEnvironmentVariable('ANDROID_AVD_HOME', 'D:\Android\avd', 'User')
-   ```
-3. In Android Studio, Device Manager, create a Pixel device with a recent Google APIs image, and start it.
-4. **Check:** `adb devices` lists `emulator-5554  device`.
+Your Galaxy S24 is connected with USB debugging (`RZCY820AG0F`). Claude installed the emulator, an Android 16
+system image and a Pixel 7 device called `cch_pixel_api36`, with its files in `D:\Android\avd`. To start it yourself:
+`& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -avd cch_pixel_api36`. Nothing to do. For the phone part of
+the checks, keep it unlocked while it is plugged in.
 
 **How many devices Gate 3 needs.** The run uses three accounts: sender, courier and receiver. A phone stays with the
 first account that signs in on it, and the courier and receiver must be on different phones. So it needs three
@@ -196,18 +184,11 @@ device, so if a screen differs from these steps, note what you saw and carry on.
 `.claude/settings.json` is in place and holds the deny rules (no reading `local.properties`, keystores or `.env`; no
 force-push, hard reset, `git clean`, branch deletion or stash drop). Nothing to do.
 
-### 8. Set `JAVA_HOME` and `ANDROID_HOME` for your own builds
+### 8. `JAVA_HOME` and `ANDROID_HOME`: done (23 Nov)
 
-Both are still unset on this PC. Claude sets them per command. To build yourself, run this once, then open a new
-terminal:
-
-```powershell
-[Environment]::SetEnvironmentVariable('JAVA_HOME', 'D:\cch-tools\jdk-17.0.20.1+1', 'User')
-[Environment]::SetEnvironmentVariable('ANDROID_HOME', "$env:LOCALAPPDATA\Android\Sdk", 'User')
-```
-
-If you install Android Studio, point `JAVA_HOME` at its `jbr` folder instead. **Check:** `.\gradlew.bat --version`
-shows JVM 17.
+Claude set them for your user account, as `FINISH_PROMPT.md` allowed: `JAVA_HOME`, `ANDROID_HOME`,
+`ANDROID_AVD_HOME` and `GRADLE_USER_HOME` (the last two on D:). Open a new terminal to pick them up.
+**Check:** `.\gradlew.bat --version` shows JVM 17.
 
 ### 9. Optional: `actionlint`
 
