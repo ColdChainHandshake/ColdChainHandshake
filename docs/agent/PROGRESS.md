@@ -54,6 +54,50 @@ BUILD SUCCESSFUL in 4m 36s
 debug tests 423 failures 0 errors 0 skipped 0
 ```
 
+Phone, so far (23 Nov 20:43, after the owner unlocked it): cold start `TotalTime: 1109` ms, no skipped frames, no
+ANR, so the emulator's first-launch ANR came from the emulator. The sign-in title clears the status bar. The
+rest of the phone pass waits: the owner was using the app on the phone, and its screen showed personal data, so
+no phone screenshot was kept.
+
+## FINISH run, Block 4: Phase 4, app side (against the draft protocol)
+
+Order changed so the Gate 3 run still matches HANDOFF's steps (`DECISIONS.md`, 23 Nov): items 4 and 2 first,
+items 1 and 3 after `gate-3`.
+
+- [x] 4.4 BLE adapter. `LoggerGatt` (codec) and `BleLoggerLink` (a `LoggerLink` over a `GattConnection`) in
+  `:core-domain`; `AndroidGattConnection` (Android's `BluetoothGatt`) in `:app`, compiled and linted, not run
+  (`HARDWARE = none`). Tests: `LoggerGattVectorsTest` against new Python GATT vectors, and `BleLoggerLinkTest`
+  against `FakeLoggerGatt`, a `VirtualLogger` behind the byte layout: every MTU from 148 to 517, MTU negotiation,
+  an MTU too small, nothing new, a lost page, a silent logger, the challenge, a wrong protocol version, and
+  `LoggerIngestor` back-filling over Bluetooth and resuming after a failed read. Writing the fake found that the
+  challenge's 104-byte answer needs a larger MTU too. Firmware: `Step4Vectors` added (39 tests, 38 failing by design)
+- [x] 4.2 (domain half) The logger check at handover: `LoggerHandoverCheck` reads every record since custody
+  started and a head over a fresh nonce, verifies against the key on record and compares with the readings.
+  `LoggerHandoverCheckTest`, 19 cases: an honest journey passes; edited, removed and invented readings, another
+  logger's key, another logger's ID, a history edited in transit, a replayed head, a history cut short of the head
+  and the test key all FAIL; no key, an unreadable logger, overwritten records, a sensor fault and records not yet
+  in the shipment are UNKNOWN; no logger reachable is NOT_CHECKED. `HandoverVerdictEngine` and
+  `HandoverOrchestrator` take the outcome and can only lower the verdict (`LoggerCheckVerdictTest`, two orchestrator
+  tests). Two mutants applied by hand (a hole treated as a late tail; overwritten readings compared anyway): each
+  failed its test, then reverted. The screen wiring waits for item 1
+- [ ] 4.1 Logger readings in the app. Waits for `gate-3`
+- [ ] 4.3 Server: logger key and start sequence on the shipment. Waits for `gate-3`
+- [ ] Gate 4: app side not done yet; then "waiting for the owner's firmware"
+
+```text
+./gradlew :core-domain:test --tests '*.ble.*'     against stubs: 19 tests completed, 18 failed
+                                                   implemented: core-domain 94 failed 0
+ctest --preset host-tests                          3% tests passed, 38 tests failed out of 39
+./gradlew :core-domain:test --tests '*LoggerCheckVerdictTest*'   first: compile errors, no 'loggerCheck' parameter
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug --continue
+BUILD SUCCESSFUL in 1m 51s
+core-domain 118 failed 0 | debug 425 failed 0 | release 368 failed 0 | skipped 0
+```
+
+Also fixed on the way: `SupabaseAccountRepositoryTest.aCachedProfileIsReplacedWhenTheServerAnswers` failed once
+in a full run (`expected:<[New] Name> but was:<[Old] Name>`): the account state turned Ready before the profile was
+cached. The cache is now written first.
+
 ## Status at session start (6 Nov 2026, 22:00, new session after a usage limit)
 
 Checked by commands run in this session. `docs/agent/STATUS.md` says what is proven and on what.

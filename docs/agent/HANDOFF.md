@@ -62,6 +62,18 @@ it, so a change later means changing those tests too. Each line is a choice Clau
 
 Reply with "signed off" or with the numbers you want changed.
 
+What a change would touch now (23 Nov), so you can weigh it:
+
+- **1 or 2 (signature):** `LoggerProtocol.verify`, `VirtualLogger`, the Python generator and vectors, and the
+  firmware's signing step and tests.
+- **3 (record):** `LoggerRecord`, the page arithmetic in `LoggerGatt`, the vectors, and firmware step 1.
+- **7 (Bluetooth layout):** `LoggerGatt`, `AndroidGattConnection`, the test `FakeLoggerGatt`, the vectors' `gatt`
+  section, and firmware step 4.
+- **9 and 10 (shipment link, key enrolment):** nothing yet. The server half is written after `gate-3`.
+- **11 (MTU):** splitting the header instead would change `LoggerGatt.decodeHistoryNotification`, how
+  `BleLoggerLink` collects notifications, firmware `history_notifications`, and the vectors. The phone now asks
+  for 517 and refuses below 148; the 104-byte challenge answer needs at least 107 as well.
+
 ## Your list
 
 ### 1. Lock down the old demo project (urgent, 2 minutes)
