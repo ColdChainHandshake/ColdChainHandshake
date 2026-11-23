@@ -25,24 +25,26 @@ checks, not real temperatures. Say so on camera.
 | A2 | Courier: Chaos tab, Inject Heat Spike, wait 10 minutes, deactivate | One alert, not one per reading; escalation notifications if nobody acknowledges; receiver sees FAIL and can't record PASS | The alert list, the notification, the receiver's verdict |
 | A3 | Courier: Chaos tab, Logger Disconnect for over 3 minutes | A data-gap alert; receiver sees UNKNOWN, not PASS | The receiver's "gap in the readings" line |
 | A4 | Courier: aeroplane mode for 10 minutes while recording, then back online | Readings keep being stored on the phone and reach the server afterwards, in order | The telemetry log moving from PENDING to SYNCED |
-| A5 | Courier: confirm the handover, then close the app straight away | Receiver gets UNKNOWN after 3 minutes of silence: the courier's phone must keep recording until the receiver confirms | The receiver's verdict |
+| A5 | Courier confirms the handover; the receiver waits more than 3 minutes before opening Handover | UNKNOWN: confirming stops the courier's recording, and the receiver's verdict covers readings up to their own confirmation. So the receiver inspects first, then the courier confirms, then the receiver confirms within 3 minutes | The receiver's verdict |
 | A6 | Receiver: try to record PASS when the screen says FAIL or UNKNOWN | Not possible; FAIL and UNKNOWN need a reason | The verdict options |
 | A7 | One phone: sign in as the courier, confirm, sign out, sign in as the receiver on the same phone | Refused: a phone stays registered to its first account | The refusal message |
 
 ### Attacks on the server (Part A, dev project only)
 
-In the dev project's SQL editor, signed in as the dashboard owner, these show the rules hold even for direct
-database access through the app's roles. Never run them on the old demo project.
+These must be tried **as a signed-in app user, through the API**, the way a phone talks to the server. Don't use the
+dashboard's SQL editor for them: it runs as the database owner, which bypasses every rule, so an edit there succeeds
+and proves nothing. Never run anything on the old demo project.
 
-| # | Try | Expect |
+| # | Try, as a signed-in user | Expect |
 |---|---|---|
-| A8 | As the courier, through the app's API: update or delete a reading | Refused: no client role may change readings |
+| A8 | Update or delete a reading | Refused: no client role may change readings |
 | A9 | Upload a reading with an edited temperature but the old hash | Refused, "does not match its hash" (CC004) |
 | A10 | Upload a reading dated before the previous one | Refused, "back-dated" (CC009) |
 | A11 | Upload from an account that doesn't hold custody | Refused (CC002) |
 
-Claude has these as automated tests (`supabase/tests/database/`); on camera they are easier to show through
-`LiveSupabaseIntegrationTest` run against the dev project (`CLAUDE.md`, "Build and test").
+The easy way to show all four on camera is `LiveSupabaseIntegrationTest` run against the dev project (`CLAUDE.md`,
+"Build and test"): it signs in as real users and tries each one. The same checks run on every build as database
+tests (`supabase/tests/database/`).
 
 ## Part B: with a hardware logger (later)
 

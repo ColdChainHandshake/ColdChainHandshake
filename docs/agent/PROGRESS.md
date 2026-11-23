@@ -85,9 +85,23 @@ shipments.status: QUARANTINED
 custody_events: START|1|Case   TRANSFER|2|Rita
 ```
 
-- The receiver's screen showed UNKNOWN ("gap in the readings") and offered no PASS, because the courier's recording
-  stopped when its storage was cleared. Correct, and the reason HANDOFF now says the courier's phone keeps recording
-  on Transit until the receiver confirms. A PASS needs both devices at once: phone plus emulator
+- The receiver's screen showed UNKNOWN ("gap in the readings") and offered no PASS, because more than 3 minutes
+  had passed since the courier's last reading: confirming stops the courier's recording (`HandoverScreen` calls
+  `stopContinuousSimulation`), and the receiver's verdict runs to the receiver's own "now"
+- **PASS rehearsed** with a fast switch on the one emulator, `SHIP-744113`, at commit `05b342e`'s app code: the
+  courier confirmed 20 s after the third reading; the receiver signed in, opened the shipment on Transit, let it
+  sync, and recorded PASS 2 min 11 s after that reading. The screen said "Custody has moved. The shipment is now
+  ACCEPTED." (`rehearsal-05-receiver-pass.png`). Server records:
+
+```text
+handover_confirmations: courier|-|5c9d923c   receiver|PASS|97ffaea7
+shipments.status: ACCEPTED
+custody_events: START|1|Case   TRANSFER|2|Rita
+```
+
+- A first PASS attempt (`SHIP-7D445E`) ran out of time: the receiver went straight to Handover, which waited on
+  "Waiting for Complete History" until the Transit screen had downloaded the readings. Found: the Handover screen
+  doesn't fetch the history itself. HANDOFF's steps now say to stay on Transit first. Phase 5's download work fixes it
 - Screens differed from HANDOFF's old steps: the member emails are in the creation form; the scanner's text box is
   "Manual QR Payload" with "Apply Code"; a notifications prompt comes first. HANDOFF's Gate 3 steps rewritten
 - Found and fixed: the Transit screen showed "5.0°C, WITHIN PRODUCT RANGE" before any reading existed (a value

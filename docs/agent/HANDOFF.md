@@ -150,8 +150,8 @@ You need three email addresses you can read: sender, courier and receiver. Gmail
 The server only lets the sender add people who already have an account, so the courier and the receiver sign up
 first. **Claude drives both devices itself**; all it needs from you is each sign-in code as the email arrives.
 
-Rehearsed by Claude on 23 Nov on the emulator against the local stack (`PROGRESS.md`, Block 3 rehearsal). These
-steps are what the screens really do. Device A is your phone, device B the emulator. The run is built from commit
+Rehearsed by Claude on 23 Nov on the emulator against the local stack (`PROGRESS.md`, Block 3 rehearsal), ending
+in PASS and ACCEPTED with custody moved between two device IDs. These steps are what the screens really do. Device A is your phone, device B the emulator. The run is built from commit
 `05b342e` (the code these steps were checked on). If later work changes these screens before you're ready, Claude
 builds that commit in a separate worktree, so the steps still match.
 
@@ -168,13 +168,16 @@ builds that commit in a separate worktree, so the steps still match.
 5. **Device A, courier:** Transit, Scan Consignment QR. Scan the sender's QR code, or type the shipment ID into the
    "Manual QR Payload" box and Apply Code. Take Custody. One reading a minute starts; leave it **on the Transit screen
    for at least 5 minutes**.
-6. **Device B, receiver:** Transit, Scan Consignment QR, the same shipment ID, Apply Code.
+6. **Device B, receiver:** Transit, Scan Consignment QR, the same shipment ID, Apply Code. **Stay on Transit until
+   its telemetry log shows the readings** (a few seconds): the Handover screen doesn't download them itself, and
+   says "Waiting for Complete History" until Transit has. Fill in the vial monitor and shake test on Handover now if
+   you want them, before the courier confirms.
 7. **Device A, courier:** Handover. The receiver is already chosen under "Taking Over"; Confirm Handover. The screen
-   says "Confirmed. Waiting for the other person". **Then go back to Transit and leave device A recording** until
-   step 8 is done.
-8. **Device B, receiver:** Handover. The verdict covers readings right up to this moment, so if the courier's phone
-   stopped recording more than 3 minutes ago it shows UNKNOWN (a gap) and offers no PASS. That is the safety rule
-   working, not a fault. With device A still recording it shows PASS; Confirm Handover.
+   says "Confirmed. Waiting for the other person". Confirming **stops device A's recording**.
+8. **Device B, receiver, within 3 minutes of the courier's last reading:** Handover, Record PASS handover. The
+   receiver's verdict covers readings right up to this moment, so after more than 3 minutes without one it shows
+   UNKNOWN (a gap) and offers no PASS. That is the safety rule working, not a fault; if it happens, run the steps
+   again with a new shipment. The screen then says "Custody has moved. The shipment is now ACCEPTED."
 9. **Check:** Claude checks the server's records through the MCP server before tagging `gate-3`: two confirmations
    from two different devices, custody moved to the receiver, status ACCEPTED.
 
