@@ -18,6 +18,7 @@ import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.models.ChaosScenarioType
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.simulator.TemperatureSimulator
+import com.coldchain.handshake.ui.navigation.SessionGate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +34,7 @@ import kotlinx.coroutines.withContext
  * Bridges Person 1 (Room + Supabase), Person 2 (Dispatch/Transit/Simulator),
  * Person 3 (Safety Decision Layer), and Person 4 (Integrity & Handover Layer).
  */
-object RepositoryProvider {
+object RepositoryProvider : SessionGate {
 
     @Volatile
     private var database: ColdChainDatabase? = null
@@ -75,12 +76,12 @@ object RepositoryProvider {
     private val _localOwnerProblem = MutableStateFlow<String?>(null)
 
     /** Why the last person to sign in was signed straight out again, if they were. */
-    val localOwnerProblem: StateFlow<String?> = _localOwnerProblem.asStateFlow()
+    override val localOwnerProblem: StateFlow<String?> = _localOwnerProblem.asStateFlow()
 
     private val _confirmedOwner = MutableStateFlow<String?>(null)
 
     /** The signed-in person this phone's records have been checked against. The app opens only for them. */
-    val confirmedOwner: StateFlow<String?> = _confirmedOwner.asStateFlow()
+    override val confirmedOwner: StateFlow<String?> = _confirmedOwner.asStateFlow()
 
     /** This install's name to the server. Tests set it; [initialize] reads it from the phone. */
     @Volatile
@@ -299,7 +300,7 @@ object RepositoryProvider {
      * Refused while anything recorded here still has to reach the server, because clearing it would
      * lose evidence.
      */
-    suspend fun signOut(): Result<Unit> {
+    override suspend fun signOut(): Result<Unit> {
         val unsent = database?.let { db -> withContext(Dispatchers.IO) { countUnsent(db) } } ?: 0
         if (unsent > 0) {
             return Result.failure(

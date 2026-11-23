@@ -463,6 +463,12 @@ emulator: cold start after pm clear, LaunchState COLD, TotalTime 5566 ms, no FAT
 
 - [ ] 5.1b One ViewModel per screen, starting with `AppRoot` (which screen to show), then Dispatch (removes the
   order-dependent `DispatchScreenTest`), Transit, Handover, Alerts. Each one's dependencies come through Hilt
+  - [x] `AppRootViewModel`: which top-level screen shows, the owner check, local mode (kept in `SavedStateHandle`,
+    so it survives process death) and sign-out. `AppRootViewModelTest`, 6 tests, 5 failed against a stub first.
+    Hilt gets `AccountRepository` and `SessionGate` from `LegacyProviderModule`, a bridge to `RepositoryProvider`
+    until 5.1c. Full proof: core-domain 118, debug 434, release 377, failed 0; lint and release APK built.
+    Emulator, local stack: sign-in reaches "Case, Courier", Sign Out returns to sign-in, local mode survives
+    `am kill` in the background, no FATAL or ANR
 - [ ] 5.1c Hilt builds everything; `RepositoryProvider` deleted
 - [ ] 5.2 Foreground service for recording; WorkManager sync; the Handover screen downloads its own history
 - [ ] 5.3 Multi-leg custody in the UI
