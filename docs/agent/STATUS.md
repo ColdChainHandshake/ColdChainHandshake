@@ -33,12 +33,18 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
   being killed; debug local mode creates, dispatches and starts a shipment and records one reading a minute, through
   rotation. Screenshots in `docs/agent/evidence/`. This found the sign-in title drawn under the status bar (fixed).
 - **On the phone so far:** the app starts in 1.1 s with no stall. The rest of the phone pass is still to do.
+- **A whole handover through the app's own screens, against the local Docker stack** (not the hosted project), with
+  one emulator playing each person in turn after clearing its storage: email-code sign-in for all three people
+  (codes read from the local mail catcher), create and dispatch, take custody, 3 signed readings, both
+  confirmations from two device IDs, custody moved, status ACCEPTED. A second run showed a receiver past the
+  3-minute window gets UNKNOWN, as it should.
 
 ## Proven only against our own fakes and vectors
 
 - **Full unit and screen tests:** counts in `PROGRESS.md`.
 - **Offline behaviour, retries and timing:** against a fake server that copies the real one's refusal rules.
-- **Email-code sign-in:** against a fake sign-in server only.
+- **Email-code sign-in:** against a fake sign-in server, and on the emulator against the local stack's real
+  auth server (above). Not yet with real emails from the hosted project.
 - **Safety rules:** heat, freeze, gaps, one alert per excursion, escalation timing. These are pure logic tests; the
   timers ran in WorkManager's test harness, not in real time.
 - **Screens:** driven by Robolectric, which runs Android on the PC's JVM. No screen has been seen on a phone.
@@ -57,8 +63,8 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
 ## Not proven
 
 - Anything on a hosted Supabase project. No migration has reached one (the dev project is paused).
-- On a device: email-code sign-in, notifications, real timers, and the handover with each person on their own
-  phone (Gate 3).
+- On a device against the hosted project: email-code sign-in with real emails, and the handover with each person on
+  their own phone at the same time (Gate 3). Also notifications and real timers on any device.
 - Recording and sync with the screen off, after the app is killed, or after a long time offline.
 - A real logger. The virtual logger exists in code, but the app doesn't use it yet.
 - The GitHub Actions workflow has never run on GitHub.
