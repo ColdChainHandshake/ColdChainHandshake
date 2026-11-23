@@ -151,7 +151,9 @@ The server only lets the sender add people who already have an account, so the c
 first. **Claude drives both devices itself**; all it needs from you is each sign-in code as the email arrives.
 
 Rehearsed by Claude on 23 Nov on the emulator against the local stack (`PROGRESS.md`, Block 3 rehearsal). These
-steps are what the screens really do. Device A is your phone, device B the emulator.
+steps are what the screens really do. Device A is your phone, device B the emulator. The run is built from commit
+`05b342e` (the code these steps were checked on). If later work changes these screens before you're ready, Claude
+builds that commit in a separate worktree, so the steps still match.
 
 1. Claude installs the debug app on both, built for the dev project.
 2. **Device A, courier:** a notifications prompt first (Allow). Enter the courier's email, Send Code, type the code
@@ -178,9 +180,9 @@ steps are what the screens really do. Device A is your phone, device B the emula
 
 ### 6. Back up the branch off this PC
 
-`PUSH_POLICY = local-only`, so this work exists only on this PC. The newest bundle, made on 7 Nov after `gate-2`, is
-`D:\cch-backup-20261107-0248.bundle` (1.9 MB, every branch and tag up to `7aaf3ba`). The older
-`D:\cch-backup-20261106-2158.bundle` misses that night's work and can be deleted.
+`PUSH_POLICY = local-only`, so this work exists only on this PC. The newest bundle, made on 23 Nov, is
+`D:\cch-backup-20261123-2123.bundle` (3.6 MB, every branch and tag up to `6509490`, `git bundle verify`: "is okay").
+The two older ones (`20261106-2158` and `20261107-0248`) are covered by it and can be deleted.
 
 1. Copy it to cloud storage or a USB drive.
 2. **Check:** on the copy, `git bundle verify <path to the copy>` ends with "is okay".
