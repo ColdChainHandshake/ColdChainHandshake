@@ -1,5 +1,6 @@
 package com.coldchain.handshake.handover
 
+import com.coldchain.handshake.logger.LoggerCheckOutcome
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.ShipmentStatus
@@ -17,7 +18,9 @@ enum class HandoverFailureReason(val description: String) {
     WORKER_SIGNATURE_MISSING("The courier has not confirmed"),
     PHARMACIST_SIGNATURE_MISSING("The receiver has not confirmed"),
     VVM_PAST_DISCARD_POINT("The vial monitor has reached its discard point"),
-    SHAKE_TEST_FAILED("The shake test shows freeze damage")
+    SHAKE_TEST_FAILED("The shake test shows freeze damage"),
+    LOGGER_CHECK_FAILED("The logger's own history doesn't match the record"),
+    LOGGER_CHECK_UNKNOWN("The logger's own history couldn't be checked in full")
 }
 
 /**
@@ -59,9 +62,14 @@ object HandoverVerdictEngine {
 
     private val UNKNOWN_REASONS = setOf(
         HandoverFailureReason.TEMPERATURE_UNKNOWN,
-        HandoverFailureReason.HISTORY_UNAVAILABLE
+        HandoverFailureReason.HISTORY_UNAVAILABLE,
+        HandoverFailureReason.LOGGER_CHECK_UNKNOWN
     )
 
+    /**
+     * @param loggerCheck What reading the logger directly showed. It can only lower the verdict: a logger that
+     *   wasn't reachable from this phone leaves the other checks to decide.
+     */
     fun evaluate(
         temperature: TemperatureVerdict,
         integrityPassed: Boolean,
@@ -69,7 +77,8 @@ object HandoverVerdictEngine {
         pharmacistSigned: Boolean,
         vvmStage: VvmStage = VvmStage.NOT_RECORDED,
         shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
-        historyAvailable: Boolean = true
+        historyAvailable: Boolean = true,
+        loggerCheck: LoggerCheckOutcome = LoggerCheckOutcome.NOT_CHECKED
     ): HandoverEvaluation {
         val failureReasons = mutableListOf<HandoverFailureReason>()
 
@@ -95,6 +104,11 @@ object HandoverVerdictEngine {
         }
         if (shakeTest == ShakeTestResult.FAILED) {
             failureReasons.add(HandoverFailureReason.SHAKE_TEST_FAILED)
+        }
+        when (loggerCheck) {
+            LoggerCheckOutcome.FAILED -> failureReasons.add(HandoverFailureReason.LOGGER_CHECK_FAILED)
+            LoggerCheckOutcome.UNKNOWN -> failureReasons.add(HandoverFailureReason.LOGGER_CHECK_UNKNOWN)
+            LoggerCheckOutcome.PASSED, LoggerCheckOutcome.NOT_CHECKED -> Unit
         }
 
         val verdict = when {

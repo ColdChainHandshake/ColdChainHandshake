@@ -4,6 +4,7 @@ import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.crypto.IntegrityVerificationState
 import com.coldchain.handshake.crypto.ServerChainHead
 import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
+import com.coldchain.handshake.logger.LoggerCheckOutcome
 import com.coldchain.handshake.models.Handover
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShakeTestResult
@@ -98,6 +99,8 @@ class HandoverOrchestrator(
      * @param shakeTest Shake test result seen at inspection.
      * @param historySynced False if the full history couldn't be fetched. The verdict is then UNKNOWN at
      *   best, but it can still be recorded.
+     * @param loggerCheck What reading the logger directly showed (`LoggerHandoverCheck`). It can only lower the
+     *   verdict; not reaching a logger leaves it to the other checks.
      * @param handoverId Optional deterministic ID for the handover record (defaults to random UUID).
      * @param timestamp Timestamp of custody handover event. Readings are expected up to this moment.
      * @return [Result] containing [HandoverOrchestratorResult] on success, or failure with diagnostic error.
@@ -112,7 +115,8 @@ class HandoverOrchestrator(
         shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
         historySynced: Boolean = true,
         handoverId: String = UUID.randomUUID().toString(),
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        loggerCheck: LoggerCheckOutcome = LoggerCheckOutcome.NOT_CHECKED
     ): Result<HandoverOrchestratorResult> = try {
         // The whole decision is one transaction, so a breach arriving part-way through can't leave a
         // PASS on the record beside a quarantined shipment.
@@ -120,7 +124,7 @@ class HandoverOrchestrator(
             transactions.inTransaction {
                 record(
                     shipmentId, workerSigned, pharmacistSigned, declaredVerdict, reason,
-                    vvmStage, shakeTest, historySynced, handoverId, timestamp
+                    vvmStage, shakeTest, historySynced, handoverId, timestamp, loggerCheck
                 ).getOrThrow()
             }
         )
@@ -146,7 +150,8 @@ class HandoverOrchestrator(
         shakeTest: ShakeTestResult,
         historySynced: Boolean,
         serverHead: ServerChainHead?,
-        timestamp: Long
+        timestamp: Long,
+        loggerCheck: LoggerCheckOutcome = LoggerCheckOutcome.NOT_CHECKED
     ): Result<HandoverAssessment> {
         val shipment = shipmentRepository.getShipment(shipmentId).firstOrNull()
             ?: return Result.failure(IllegalArgumentException("Shipment not found with id: $shipmentId"))
@@ -157,7 +162,7 @@ class HandoverOrchestrator(
 
         return evaluate(
             shipment, events, workerSigned, pharmacistSigned, declaredVerdict, reason,
-            vvmStage, shakeTest, historySynced, serverHead, timestamp
+            vvmStage, shakeTest, historySynced, serverHead, timestamp, loggerCheck
         )
     }
 
@@ -175,7 +180,8 @@ class HandoverOrchestrator(
         shakeTest: ShakeTestResult,
         historySynced: Boolean,
         serverHead: ServerChainHead?,
-        timestamp: Long
+        timestamp: Long,
+        loggerCheck: LoggerCheckOutcome
     ): Result<HandoverAssessment> {
         val integrity = ShipmentIntegrityEvaluator.evaluate(
             events,
@@ -193,7 +199,8 @@ class HandoverOrchestrator(
             pharmacistSigned = pharmacistSigned,
             vvmStage = vvmStage,
             shakeTest = shakeTest,
-            historyAvailable = integrity.state != IntegrityVerificationState.PENDING_SYNC
+            historyAvailable = integrity.state != IntegrityVerificationState.PENDING_SYNC,
+            loggerCheck = loggerCheck
         )
 
         return HandoverVerdictEngine.decide(evaluation, declaredVerdict, reason).map { decision ->
@@ -220,7 +227,8 @@ class HandoverOrchestrator(
         shakeTest: ShakeTestResult,
         historySynced: Boolean,
         handoverId: String,
-        timestamp: Long
+        timestamp: Long,
+        loggerCheck: LoggerCheckOutcome
     ): Result<HandoverOrchestratorResult> {
         // 1. Obtain the shipment
         val shipment = try {
@@ -251,7 +259,7 @@ class HandoverOrchestrator(
         // 4. Authoritative evaluation from the actual events, via HandoverVerdictEngine
         val assessment = evaluate(
             shipment, events, workerSigned, pharmacistSigned, declaredVerdict, reason,
-            vvmStage, shakeTest, historySynced, null, timestamp
+            vvmStage, shakeTest, historySynced, null, timestamp, loggerCheck
         ).getOrElse { return Result.failure(it) }
         val decision = assessment.decision
 

@@ -113,6 +113,37 @@ class HandoverOrchestratorTest {
         assertEquals(ShipmentStatus.ACCEPTED, persistedShipment?.status)
     }
 
+    @Test
+    fun aLoggerThatContradictsTheRecordQuarantinesAnOtherwiseCleanHandover() = runBlocking {
+        telemetryRepo.setEvents(testShipmentId, createValidChain())
+
+        val result = orchestrator.processHandover(
+            shipmentId = testShipmentId,
+            timestamp = handoverTime,
+            workerSigned = true,
+            pharmacistSigned = true,
+            loggerCheck = com.coldchain.handshake.logger.LoggerCheckOutcome.FAILED
+        ).getOrThrow()
+
+        assertEquals(HandoverVerdict.FAIL, result.handover.verdict)
+        assertEquals(ShipmentStatus.QUARANTINED, shipmentRepo.getShipmentDirect(testShipmentId)?.status)
+    }
+
+    @Test
+    fun aLoggerOnAnotherPhoneLeavesACleanHandoverToPass() = runBlocking {
+        telemetryRepo.setEvents(testShipmentId, createValidChain())
+
+        val result = orchestrator.processHandover(
+            shipmentId = testShipmentId,
+            timestamp = handoverTime,
+            workerSigned = true,
+            pharmacistSigned = true,
+            loggerCheck = com.coldchain.handshake.logger.LoggerCheckOutcome.NOT_CHECKED
+        ).getOrThrow()
+
+        assertEquals(HandoverVerdict.PASS, result.handover.verdict)
+    }
+
     /**
      * TEST 16:
      * hot readings, valid hash chain, both signed
