@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.debugtools.DebugTools
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
@@ -75,6 +76,7 @@ import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.components.QRScannerDialog
+import com.coldchain.handshake.ui.components.TemperatureCard
 import com.coldchain.handshake.ui.theme.PrimaryCold
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
@@ -583,9 +585,16 @@ fun TransitScreen(
             // ====================================================
             // PHONE B: LIVE SHIPMENT MONITOR UI (Section 9)
             // ====================================================
-            val displayTemp = sortedEvents.firstOrNull()?.temperature ?: latestTemperature ?: 5.0
-            val isExcursion = displayTemp > 8.0 || displayTemp < 2.0
-            val tempColor = if (isExcursion) StatusRed else StatusGreen
+            // Only this shipment's own newest reading; with none, no temperature is shown at all.
+            val monitorCard = TemperatureCard.of(
+                sortedEvents.firstOrNull()?.temperature,
+                ProductProfiles.byId(currentShipment?.productProfileId ?: ProductProfiles.DEFAULT.id)
+            )
+            val tempColor = when (monitorCard.level) {
+                TemperatureCard.Level.OUT_OF_RANGE -> StatusRed
+                TemperatureCard.Level.IN_RANGE -> StatusGreen
+                TemperatureCard.Level.NONE -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -675,7 +684,7 @@ fun TransitScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = String.format(Locale.US, "%.1f°C", displayTemp),
+                        text = monitorCard.value,
                         style = MaterialTheme.typography.displayMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = tempColor,
@@ -683,7 +692,7 @@ fun TransitScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isExcursion) "⚠️ OUTSIDE PRODUCT RANGE" else "WITHIN PRODUCT RANGE",
+                        text = monitorCard.status,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = tempColor
@@ -921,9 +930,16 @@ fun TransitScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Large Temperature Display Card
-            val currentTemp = latestTemperature ?: 5.0
-            val isExcursion = currentTemp > 8.0 || currentTemp < 2.0
-            val tempColor = if (isExcursion) StatusRed else if (currentTemp in 4.0..6.0) StatusGreen else PrimaryCold
+            val courierCard = TemperatureCard.of(
+                latestTemperature,
+                ProductProfiles.byId(currentShipment?.productProfileId ?: ProductProfiles.DEFAULT.id)
+            )
+            val isExcursion = courierCard.level == TemperatureCard.Level.OUT_OF_RANGE
+            val tempColor = when (courierCard.level) {
+                TemperatureCard.Level.OUT_OF_RANGE -> StatusRed
+                TemperatureCard.Level.IN_RANGE -> StatusGreen
+                TemperatureCard.Level.NONE -> PrimaryCold
+            }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -948,7 +964,7 @@ fun TransitScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = String.format(Locale.US, "%.1f°C", currentTemp),
+                        text = courierCard.value,
                         style = MaterialTheme.typography.displayMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = tempColor,
@@ -984,8 +1000,8 @@ fun TransitScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "IN RANGE",
-                                color = StatusGreen,
+                                text = if (courierCard.level == TemperatureCard.Level.NONE) "NO READING YET" else "IN RANGE",
+                                color = tempColor,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
                             )

@@ -1,0 +1,23 @@
+package com.coldchain.handshake.ui.components
+
+import com.coldchain.handshake.models.ProductProfile
+
+/**
+ * What the Transit screen's large temperature shows. A shipment with no reading yet shows no temperature at all,
+ * never a stand-in value, and the range comes from the shipment's own product.
+ */
+data class TemperatureCard(val value: String, val status: String, val level: Level) {
+
+    enum class Level { NONE, IN_RANGE, OUT_OF_RANGE }
+
+    companion object {
+        fun of(celsius: Double?, profile: ProductProfile): TemperatureCard = when {
+            celsius == null -> TemperatureCard("--", "NO READING YET", Level.NONE)
+            celsius > profile.maxC || celsius < profile.minC ->
+                TemperatureCard(format(celsius), "OUTSIDE PRODUCT RANGE", Level.OUT_OF_RANGE)
+            else -> TemperatureCard(format(celsius), "WITHIN PRODUCT RANGE", Level.IN_RANGE)
+        }
+
+        private fun format(celsius: Double) = String.format(java.util.Locale.US, "%.1f°C", celsius)
+    }
+}
