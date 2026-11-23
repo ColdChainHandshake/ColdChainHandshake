@@ -145,30 +145,36 @@ one emulator plus your phone is the easier pair.
 
 #### The Gate 3 run (after items 3, 4 and 5)
 
-You need three email addresses you can read: sender, courier and receiver. The server only lets the sender add people
-who already have an account, so the courier and the receiver sign up first. Claude has not been able to run this on a
-device, so if a screen differs from these steps, note what you saw and carry on.
+You need three email addresses you can read: sender, courier and receiver. Gmail plus-addresses on one inbox work
+(`you+sender@gmail.com`, `you+courier@gmail.com`, `you+receiver@gmail.com`); Supabase treats them as three accounts.
+The server only lets the sender add people who already have an account, so the courier and the receiver sign up
+first. **Claude drives both devices itself**; all it needs from you is each sign-in code as the email arrives.
 
-1. Install the debug app on each device: with one attached, `./gradlew installDebug` (or
-   `adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk` for each, serials from `adb devices`).
-2. **Device A, courier:** open the app, enter the courier's email, Send Code, type the code from the email, Verify.
-   Enter a name, choose Courier, Continue.
+Rehearsed by Claude on 23 Nov on the emulator against the local stack (`PROGRESS.md`, Block 3 rehearsal). These
+steps are what the screens really do. Device A is your phone, device B the emulator.
+
+1. Claude installs the debug app on both, built for the dev project.
+2. **Device A, courier:** a notifications prompt first (Allow). Enter the courier's email, Send Code, type the code
+   from the email, Verify. On "About you": a name, Courier, Continue.
 3. **Device B, receiver:** the same with the receiver's email, choosing Receiver.
-4. **Sender:** on a third device, or on device B after Settings, Apps, Cold Chain Handshake, Storage, Clear storage.
-   Sign in with the sender's email and choose Sender. On Dispatch, fill in Origin, Destination and Logger ID, then
-   Create Shipment. Enter the Courier's Email and Receiver's Email, then Add People. Then Dispatch Shipment (Seal
-   Cargo). Leave the shipment's QR code on screen.
-   - If you used device B: once dispatched, clear its storage again and sign in as the receiver again.
-5. **Device A, courier:** Transit, Scan Consignment QR, and scan the sender's QR code. On an emulator without a camera,
-   type the shipment ID into the scanner's text box. Then Take Custody. Readings start; leave it running at least
-   5 minutes, with the app open.
-6. **Device B, receiver:** Transit, Scan Consignment QR, the same shipment. Open Handover and wait for the readings to
-   arrive.
-7. **Device A, courier:** Handover, Confirm Handover, naming the receiver.
-8. **Device B, receiver:** choose the verdict the screen offers (PASS if nothing went wrong), then Confirm Handover.
-9. **Check:** the receiver's screen shows the shipment as accepted. Tell Claude the shipment ID. Claude then checks the
-   server's custody and handover records through the MCP server before tagging `gate-3`: two confirmations from two
-   different devices, custody moved to the receiver, status ACCEPTED.
+4. **Sender, on device B** after clearing its storage (`adb shell pm clear`, or Settings, Apps, Cold Chain
+   Handshake, Storage, Clear storage, which also gives it a new device key). Sign in with the sender's email, choose
+   Sender. On Dispatch the form already has Origin, Destination, Worker ID and Logger ID filled in; **type the
+   Courier's Email and Receiver's Email into the same form, then Create Shipment**, which adds both people at once
+   (Add People appears afterwards only to change them). Then Dispatch Shipment (Seal Cargo).
+   Then clear device B's storage again and sign in as the receiver again.
+5. **Device A, courier:** Transit, Scan Consignment QR. Scan the sender's QR code, or type the shipment ID into the
+   "Manual QR Payload" box and Apply Code. Take Custody. One reading a minute starts; leave it **on the Transit screen
+   for at least 5 minutes**.
+6. **Device B, receiver:** Transit, Scan Consignment QR, the same shipment ID, Apply Code.
+7. **Device A, courier:** Handover. The receiver is already chosen under "Taking Over"; Confirm Handover. The screen
+   says "Confirmed. Waiting for the other person". **Then go back to Transit and leave device A recording** until
+   step 8 is done.
+8. **Device B, receiver:** Handover. The verdict covers readings right up to this moment, so if the courier's phone
+   stopped recording more than 3 minutes ago it shows UNKNOWN (a gap) and offers no PASS. That is the safety rule
+   working, not a fault. With device A still recording it shows PASS; Confirm Handover.
+9. **Check:** Claude checks the server's records through the MCP server before tagging `gate-3`: two confirmations
+   from two different devices, custody moved to the receiver, status ACCEPTED.
 
 ### 6. Back up the branch off this PC
 

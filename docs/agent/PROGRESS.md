@@ -59,6 +59,43 @@ ANR, so the emulator's first-launch ANR came from the emulator. The sign-in titl
 rest of the phone pass waits: the owner was using the app on the phone, and its screen showed personal data, so
 no phone screenshot was kept.
 
+## FINISH run, Block 3 rehearsal on the local stack (23 Nov, while the dev project is paused)
+
+Not Gate 3: the local Docker stack, not the hosted dev project, and one emulator standing in for each person by
+clearing its storage between roles (`pm clear`, which also gives a new device ID and key). It shows the screens and
+the server agree before the owner's real run.
+
+- Local stack re-checked at HEAD with Supabase CLI 3.3.0 and Postgres 17.12 (both newer than the last run):
+  `npx supabase db reset && npx supabase test db`: "Files=4, Tests=233 ... Result: PASS";
+  `db advisors --local --fail-on info`: "No issues found"; `LiveSupabaseIntegrationTest` 3 of 3
+  (`someoneNotSignedInSeesNothing`, `aShipmentGoesFromSenderToReceiverAndEveryShortcutIsRefused`,
+  `aStrangerSeesNoneOfAnotherShipment`). `./gradlew assembleRelease`: BUILD SUCCESSFUL
+- **Email-code sign-in on a device, against a real auth server, for the first time:** courier, receiver and sender
+  each signed up with a 6-digit code read from the local mail catcher. The local emails first carried only a link;
+  `supabase/config.toml` now gives them the code (`{{ .Token }}`), as the hosted project's dashboard must too
+- The sender created `SHIP-9E1C93` with both people in one step and dispatched it; the courier opened it by ID,
+  took custody and uploaded 6 signed readings over 5 minutes; the courier confirmed naming the receiver; the
+  receiver opened it on a "new phone" and recorded UNKNOWN with a reason. Server records:
+
+```text
+handover_confirmations: courier|-|-|7a42d6c0   receiver|UNKNOWN|Rehearsal: courier phone stopped recording|fde37766
+shipments.status: QUARANTINED
+custody_events: START|1|Case   TRANSFER|2|Rita
+```
+
+- The receiver's screen showed UNKNOWN ("gap in the readings") and offered no PASS, because the courier's recording
+  stopped when its storage was cleared. Correct, and the reason HANDOFF now says the courier's phone keeps recording
+  on Transit until the receiver confirms. A PASS needs both devices at once: phone plus emulator
+- Screens differed from HANDOFF's old steps: the member emails are in the creation form; the scanner's text box is
+  "Manual QR Payload" with "Apply Code"; a notifications prompt comes first. HANDOFF's Gate 3 steps rewritten
+- Found and fixed: the Transit screen showed "5.0°C, WITHIN PRODUCT RANGE" before any reading existed (a value
+  nobody measured), and in monitor mode could show the simulator's temperature from another shipment. Now
+  `TemperatureCard` shows "--, NO READING YET" and takes its range from the shipment's product
+  (`TemperatureCardTest`, 3 tests, failed first)
+- Noted for Phase 5: "Worker ID" shows the sender's account UUID; jargon such as "Supabase Polling ~3s",
+  "Phone A/B" and "Simulated Time (+60s/tick)" is still on screen
+- Before the owner's run, the debug APK must be rebuilt without `CCH_APP_SUPABASE_*`, so it points at the dev project
+
 ## FINISH run, Block 4: Phase 4, app side (against the draft protocol)
 
 Order changed so the Gate 3 run still matches HANDOFF's steps (`DECISIONS.md`, 23 Nov): items 4 and 2 first,
