@@ -3,9 +3,12 @@ package com.coldchain.handshake.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -35,9 +38,12 @@ private const val PROTOTYPE_NOTICE = "Prototype. Not for real vaccine or medicin
 
 @Composable
 private fun AccountColumn(title: String, content: @Composable () -> Unit) {
+    // These screens sit outside the main Scaffold, so they keep clear of the status bar, the cut-out and the
+    // keyboard themselves. Seen on the emulator: without this the title drew under the clock.
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
