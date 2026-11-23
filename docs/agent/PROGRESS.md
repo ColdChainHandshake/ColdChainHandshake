@@ -1,8 +1,10 @@
 # Progress
 
-**Next action:** Block 2 (instrumented test and smoke pass on the phone, then the emulator), then Block 4 against
-the draft protocol. Blocks 1 and 3 wait on the owner restoring the dev project and removing `read_only`
-(top of `HANDOFF.md`). The run follows `docs/agent/FINISH_PROMPT.md`.
+**Next action (23 Nov, 21:40):** waiting on the owner for two things: the dev project restored with write access
+(unblocks Blocks 1 and 3), and the phone free (finishes Block 2's phone pass and allows a PASS rehearsal with phone
+plus emulator on the local stack). Done meanwhile: Block S, Block 2 on the emulator, Block 4 items 4 and 2 (domain),
+a Gate 3 rehearsal on the local stack, `docs/THREAT_MODEL.md`, `docs/FIELD_TEST.md`. The Gate 3 run is built from
+`05b342e` in a worktree if Phase 5 has changed the screens by then. The run follows `docs/agent/FINISH_PROMPT.md`.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
