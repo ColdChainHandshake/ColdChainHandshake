@@ -1,10 +1,58 @@
 # Progress
 
-**Next action:** blocked on the owner. `gate-2` is tagged. Gate 3 needs the dev project writable (`HANDOFF.md` Q1,
-item 3) and two or three devices (item 5); then Claude applies the migrations, runs the advisors and the device test,
-and waits for the owner's two-device run. Phase 4 app work and Phase 5 wait until `gate-3` is tagged.
+**Next action:** Block 2 (instrumented test and smoke pass on the phone, then the emulator), then Block 4 against
+the draft protocol. Blocks 1 and 3 wait on the owner restoring the dev project and removing `read_only`
+(top of `HANDOFF.md`). The run follows `docs/agent/FINISH_PROMPT.md`.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
+
+## FINISH run, Block S: setup (23 Nov 2026)
+
+- [x] S1 User env vars, checked by reading them back with `[Environment]::GetEnvironmentVariable(..., 'User')`:
+  `JAVA_HOME=D:\cch-tools\jdk-17.0.20.1+1`, `ANDROID_HOME=C:\Users\LENOVO\AppData\Local\Android\Sdk`,
+  `ANDROID_AVD_HOME=D:\Android\avd`, `GRADLE_USER_HOME=D:\cch-tools\gradle-home` (see `DECISIONS.md`)
+- [ ] S2 Emulator: `doing`. Installing `cmdline-tools/latest`, `emulator` and `system-images/android-36/google_apis/x86_64`
+  with `android sdk install`. The first try failed on `platform-tools`, because the running adb held `adb.exe`; the
+  installed platform-tools 37.0.1 is kept
+- [x] S3 Phone: `adb devices -l` lists `RZCY820AG0F device model:SM_S921E`. `getprop`: SM-S921E (Galaxy S24),
+  Android 17, API 37
+- [ ] S4 Dev project: `blocked`. `get_project_url` answers; `list_tables` says "Database is possibly not accessible";
+  `get_publishable_keys` says "Project is paused. Restore it and try again". `.mcp.json` still has `read_only=true`
+  and there is no `apply_migration` tool. Owner asked, top of `HANDOFF.md`
+- [x] S5 Disk: C: 73 GB free (78% used), D: 283 GB free
+- [x] S6 `local.properties`: the dev URL and a placeholder key appended. `./gradlew assembleDebug` then grep of the
+  debug `BuildConfig.java`: demo ref 0, dev ref 1, placeholder key 1; the APK's dex: demo ref 0, dev ref 2
+
+S2 done: `avdmanager create avd -n cch_pixel_api36 -k 'system-images;android-36;google_apis;x86_64' -d pixel_7`
+put the AVD in `D:\Android\avd`; `emulator -accel-check`: "WHPX(10.0.26200) is installed and usable";
+`adb devices` lists `emulator-5554 device`, Android 16 (API 36), `sdk_gphone64_x86_64`.
+
+## FINISH run, Block 2: on a real device
+
+- [x] B2.1 `KeystoreDeviceSignerTest`, its first run on real hardware:
+  `ANDROID_SERIAL=RZCY820AG0F ./gradlew connectedDebugAndroidTest`: "Running tests on devices: SM-S921E - 17",
+  `tests="3" failures="0" errors="0"`. On the emulator: "cch_pixel_api36(AVD) - 16", `tests="3" failures="0"`
+- [ ] B2.2 Smoke pass on the emulator: `done`. On the phone: `blocked`, the phone is locked (`isKeyguardShowing=true`);
+  owner asked to unlock it. Screenshots in `docs/agent/evidence/emu-*.png`:
+  - first launch after install: one ANR, "No response to onStartJob". The ANR trace shows the main thread in
+    Compose's first layout pass (4.3 s of CPU on a fresh, unoptimised debug install with a software GPU), while
+    WorkManager's job waited for it. Not seen on any later launch; cold start 10.3 s, "Skipped 143 frames". To
+    compare on the phone before treating it as an app fault
+  - the sign-in screen's title drew under the status bar (portrait and landscape). Fixed: `AccountColumn` pads
+    for `WindowInsets.safeDrawing` (`emu-09`)
+  - the typed email survives rotation, going to the background and back, and `am kill` while in the background
+    (`rememberSaveable`)
+  - debug local mode: create, dispatch, start journey, and the Transit screen records one reading per real
+    minute (by design since the wall clock was wired in; the "+60s/tick" label is stale), and keeps recording
+    through rotation
+  - noted for Phase 5: the local-mode QR still shows the old `CCH:SHIP:...` text labelled "Authoritative QR
+    Identifier"; the Dispatch "Scan / Identify QR" label wraps mid-word
+
+```text
+./gradlew testDebugUnitTest      (after the insets fix)
+BUILD SUCCESSFUL in 4m 36s
+debug tests 423 failures 0 errors 0 skipped 0
+```
 
 ## Status at session start (6 Nov 2026, 22:00, new session after a usage limit)
 

@@ -1,26 +1,37 @@
 # Handoff: what the owner needs to do
 
-Rewritten on 6 Nov 2026 at the start of a new session. Questions first, then your list, most urgent first. Claude
+Updated on 23 Nov 2026 (the `FINISH_PROMPT.md` run). Questions first, then your list, most urgent first. Claude
 carries on with everything these don't block. `docs/agent/STATUS.md` says what is proven and on what.
+
+## Do this now: it unblocks Gate 1 and Gate 3 (5 minutes)
+
+On 23 Nov the dev project `yjvoxozaoiarwbusyqke` was **paused** ("Project is paused. Restore it and try again") and
+the MCP server was still **read-only** (no `apply_migration` tool).
+
+1. Open https://supabase.com/dashboard/project/yjvoxozaoiarwbusyqke and click **Restore**.
+2. In `.mcp.json`, delete `&read_only=true` from the URL. Claude won't edit that file, because it is your access
+   decision.
+3. Authentication, Sign In / Providers, Email: enabled. Authentication, Emails (Templates): in **Magic link** and
+   **Confirm signup** add `<p>Your code: {{ .Token }}</p>` and Save (details in item 3 below).
+4. Restart Claude Code, and say "dev project restored".
+
+Then Claude applies the migrations, runs the advisors, writes the real publishable key into `local.properties`, and
+runs the two-device handover (it will ask you for each email code as it arrives). Meanwhile `local.properties` has
+the dev URL and a placeholder key appended at the end, overriding the old demo lines, so no phone build talks to the
+demo project.
 
 ## Questions for you
 
-### Q1. Can Claude write to the dev Supabase project? (blocks Gate 1 and Gate 3)
+### Q1. Write access to the dev project: answered by "Do this now" above.
 
-`.mcp.json` points at dev project `yjvoxozaoiarwbusyqke` with `read_only=true`. On 6 Nov at 22:00 the project
-answered `get_project_url` but timed out on `list_migrations`, so it is probably paused. No migration has reached any
-hosted project. Claude won't remove the flag, because that is your access decision. Answer by doing item 3 below.
+### Q2. Tag `gate-1` on local evidence? Settled: no.
 
-### Q2. Should Claude tag `gate-1` on local evidence?
+`FINISH_PROMPT.md` section 5 says `gate-1` waits for the dev project's advisors to be clean, so Claude waits.
 
-`gate-0` is tagged. `gate-1` is not, by design: Gate 1 asks for the dev project's advisors to be clean, and that waits
-on Q1. Everything else Gate 1 asks for is proven locally (`PROGRESS.md`, Phase 1), and on 6 Nov the local Docker
-database passed all 233 checks with no advisor issues. Reply "tag gate-1 now" or "wait for the dev project".
+### Q3. `local.properties`: settled.
 
-### Q3. Does `local.properties` still point at the old demo project?
-
-Claude may not read that file. If it does, any phone build would sign in against the demo project, which has none of
-the new server functions. See item 4.
+`LOCAL_PROPS = yes`. Claude appended the dev URL on 23 Nov without reading the file, and a debug build is checked for
+the demo project's ref before anything is installed on a phone.
 
 ### Q4. Review the logger protocol's open design decisions
 
