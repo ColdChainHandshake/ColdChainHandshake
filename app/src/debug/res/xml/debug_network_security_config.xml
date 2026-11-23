@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug builds only. Plain HTTP is allowed to the phone's own loopback address and nowhere else, so a debug build
+    can reach a local Supabase stack forwarded with `adb reverse tcp:54321 tcp:54321`. Release builds keep Android's
+    default, which refuses plain HTTP everywhere.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

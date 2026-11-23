@@ -22,6 +22,14 @@ if (liveSupabaseUrl?.toLowerCase()?.contains('ljqwaqesiszczixbclwg')) {
     throw new GradleException('Live tests must never run against the demo project.')
 }
 
+// A debug build can be pointed somewhere else for one build, such as the local stack for a rehearsal, without
+// editing local.properties. Release builds never take it.
+def debugAppUrl = System.getenv('CCH_APP_SUPABASE_URL')
+def debugAppKey = System.getenv('CCH_APP_SUPABASE_KEY')
+if (debugAppUrl?.toLowerCase()?.contains('ljqwaqesiszczixbclwg') || supabaseUrl.toLowerCase().contains('ljqwaqesiszczixbclwg')) {
+    throw new GradleException('The app must never be built against the demo project.')
+}
+
 android {
     namespace = 'com.coldchain.handshake'
     compileSdk = 37
@@ -50,6 +58,10 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             debuggable = true
+            if (debugAppUrl && debugAppKey) {
+                buildConfigField "String", "SUPABASE_URL", "\"${debugAppUrl}\""
+                buildConfigField "String", "SUPABASE_ANON_KEY", "\"${debugAppKey}\""
+            }
         }
     }
 
