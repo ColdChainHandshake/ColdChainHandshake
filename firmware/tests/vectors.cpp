@@ -50,6 +50,21 @@ Vectors load() {
     v.head.head_hash = fixed_from_hex<32>(h.at("head_hash").get<std::string>());
     v.head.payload = from_hex(h.at("payload").get<std::string>());
     v.head.signature = fixed_from_hex<64>(h.at("signature_raw").get<std::string>());
+
+    const auto& g = json.at("gatt");
+    v.gatt.firmware_version = g.at("firmware_version").get<std::string>();
+    v.gatt.device_information = from_hex(g.at("device_information").get<std::string>());
+    v.gatt.status = from_hex(g.at("status").get<std::string>());
+    v.gatt.challenge_response = from_hex(g.at("challenge").at("response").get<std::string>());
+    for (const auto& r : g.at("history_requests")) {
+        VectorHistoryRequest request;
+        request.from_seq = r.at("from_seq").get<std::int64_t>();
+        request.max_records = r.at("max_records").get<std::uint16_t>();
+        request.att_mtu = r.at("att_mtu").get<std::size_t>();
+        request.request = from_hex(r.at("request").get<std::string>());
+        for (const auto& n : r.at("notifications")) request.notifications.push_back(from_hex(n.get<std::string>()));
+        v.gatt.history_requests.push_back(request);
+    }
     return v;
 }
 

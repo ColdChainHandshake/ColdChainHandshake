@@ -123,6 +123,15 @@ third and fourth bytes changing:
    `u8(page_kind=2) i64(first_seq) i64(last_seq) raw(h(first_seq - 1)) raw(h(last_seq)) raw(signature)`.
 4. The phone verifies before storing anything. A failed batch is kept apart as evidence and shown.
 
+A logger with nothing at or after `from_seq` sends no notifications at all, so the phone compares `newest_seq`
+from step 1 with its request and doesn't ask when there is nothing new. If the pages and the header disagree, as
+when a notification is lost, the phone treats the read as failed and asks again; it never stores the part that
+arrived as if it were the whole answer.
+
+Draft, waiting on the owner's sign-off (`HANDOFF.md` Q4, item 11): the 145-byte header must fit one notification,
+so a logger sends no history below an ATT MTU of 148, and the 104-byte challenge response needs at least 107. The
+phone asks for 517 (Android's largest) before either, and gives up with "MTU too small" if it gets less than 148.
+
 The phone asks again from where it got to after a dropped connection, so an outage only delays the
 back-fill. A logger should keep at least five days of minutely records. The ring buffer of the reference
 design holds 8,192, which is 5.7 days.
@@ -145,3 +154,8 @@ order and continuity without verifying ECDSA, which Postgres can't do.
 `logger_vectors.json` comes from `tools/protocol/gen_logger_vectors.py`, a separate implementation in plain
 Python. It holds a test key, records, running hashes, batch and head payloads, and RFC 6979 signatures in
 raw and DER form. The private key in it is for tests only.
+
+Its `gatt` section holds the bytes on each characteristic: device information, status, the challenge response,
+and five history requests with every notification the logger sends for them (two pages then a header at MTU 148,
+one page at 185, a later start, nothing that new, and an MTU too small). The phone's Bluetooth code
+(`core-domain/.../logger/ble/`) and the firmware's `Step4Vectors` test both check against these bytes.

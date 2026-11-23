@@ -132,6 +132,67 @@ def head_payload(logger_id, head_seq, head_hash, nonce):
     return b'\x01' + lp('cch-logger-head') + lp(logger_id) + struct.pack('>q', head_seq) + head_hash + nonce
 
 
+PAGE_RECORDS = 1
+PAGE_BATCH_HEADER = 2
+MIN_ATT_MTU = 148
+
+
+def history_notifications(private_key, logger_id, readings, hashes, from_seq, max_records, att_mtu):
+    """Every notification for one history request, as LOGGER_PROTOCOL.md "Reading history" step 3 says: record
+    pages as full as att_mtu - 3 allows, then one signed batch header. Nothing at all below the minimum MTU, or
+    when nothing is that new."""
+    if att_mtu < MIN_ATT_MTU or max_records < 1:
+        return []
+    chosen = [r for r in readings if r[0] >= from_seq][:max_records]
+    if not chosen:
+        return []
+    per_page = (att_mtu - 3 - 3) // 22
+    notifications = []
+    for i in range(0, len(chosen), per_page):
+        page = chosen[i:i + per_page]
+        notifications.append(struct.pack('>BH', PAGE_RECORDS, len(page)) + b''.join(record_bytes(*r) for r in page))
+    first, last = chosen[0][0], chosen[-1][0]
+    payload = batch_payload(logger_id, first, last, hashes[first - 1], hashes[last])
+    r, s = sign(private_key, payload)
+    header = struct.pack('>Bqq', PAGE_BATCH_HEADER, first, last) + hashes[first - 1] + hashes[last] + raw_signature(r, s)
+    if len(header) != 145:
+        sys.exit('batch header is not 145 bytes')
+    notifications.append(header)
+    if any(len(n) > att_mtu - 3 for n in notifications):
+        sys.exit('a notification is longer than the MTU allows')
+    return notifications
+
+
+def gatt_vectors(private_key, public_key, logger_id, readings, hashes, head):
+    """The bytes each characteristic carries, LOGGER_PROTOCOL.md "Bluetooth Low Energy"."""
+    firmware_version = 'vec-fw-1'
+    head_response = struct.pack('>q', head['head_seq']) + bytes.fromhex(head['head_hash']) + bytes.fromhex(head['signature_raw'])
+    if len(head_response) != 104:
+        sys.exit('challenge response is not 104 bytes')
+    return {
+        'firmware_version': firmware_version,
+        'device_information': (lp(logger_id) + bytes([1]) + lp(firmware_version)).hex(),
+        'public_key': (b'\x04' + public_key[0].to_bytes(32, 'big') + public_key[1].to_bytes(32, 'big')).hex(),
+        'status': struct.pack('>qqH', readings[0][0], readings[-1][0], 0).hex(),
+        'history_requests': [
+            {
+                'from_seq': from_seq,
+                'max_records': max_records,
+                'att_mtu': att_mtu,
+                'request': struct.pack('>qH', from_seq, max_records).hex(),
+                'notifications': [n.hex() for n in history_notifications(
+                    private_key, logger_id, readings, hashes, from_seq, max_records, att_mtu)],
+            }
+            # Two pages then a header; one page then a header; a later start; nothing that new; an MTU too small.
+            for from_seq, max_records, att_mtu in [(1, 500, 148), (1, 500, 185), (3, 2, 148), (8, 500, 148), (1, 500, 147)]
+        ],
+        'challenge': {
+            'nonce': head['nonce'],
+            'response': head_response.hex(),
+        },
+    }
+
+
 def check_against_rfc6979():
     """RFC 6979 appendix A.2.5: P-256, SHA-256, message "sample"."""
     key = 0xC9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721
@@ -208,6 +269,8 @@ def main():
         'signature_der': der_signature(r, s).hex(),
     }
 
+    gatt = gatt_vectors(private_key, public_key, logger_id, readings, hashes, head)
+
     # A signature whose s needs no padding and one whose r does, so DER conversion is exercised both ways.
     vectors = {
         'description': 'Logger protocol test vectors. See docs/protocol/LOGGER_PROTOCOL.md. The private key is for tests only.',
@@ -219,6 +282,7 @@ def main():
         'records': records,
         'batches': batches,
         'head': head,
+        'gatt': gatt,
     }
 
     with open('docs/protocol/logger_vectors.json', 'w', encoding='utf-8', newline='\n') as f:

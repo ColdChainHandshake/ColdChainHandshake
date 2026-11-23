@@ -43,6 +43,24 @@ struct VectorHead {
     Signature signature{};
 };
 
+/// One history request and every notification the Python implementation sends for it, in order.
+struct VectorHistoryRequest {
+    std::int64_t from_seq = 0;
+    std::uint16_t max_records = 0;
+    std::size_t att_mtu = 0;
+    Bytes request;
+    std::vector<Bytes> notifications;
+};
+
+/// The bytes on each characteristic, from the "gatt" section of the vectors.
+struct VectorGatt {
+    std::string firmware_version;
+    Bytes device_information;
+    Bytes status;
+    std::vector<VectorHistoryRequest> history_requests;
+    Bytes challenge_response;
+};
+
 struct Vectors {
     std::string logger_id;
     PrivateKey private_key{};
@@ -52,6 +70,7 @@ struct Vectors {
     std::vector<VectorRecord> records;
     std::vector<VectorBatch> batches;
     VectorHead head;
+    VectorGatt gatt;
 };
 
 /// Loaded once, from the path CMake passes as CCH_VECTORS_PATH. Throws if the file is missing or malformed.

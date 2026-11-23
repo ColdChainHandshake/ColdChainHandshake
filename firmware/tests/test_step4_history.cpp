@@ -142,5 +142,31 @@ TEST(Step4DeviceInformation, IsIdProtocolAndFirmware) {
               "00000005" "4c4f472d31" "01" "00000004" "66772d32");
 }
 
+// The phone's Bluetooth code (core-domain, logger/ble) is tested against these same bytes, so matching them
+// byte for byte means a real logger and the app agree on the wire, not only on the hashes.
+TEST(Step4Vectors, EveryCharacteristicMatchesThePythonBytes) {
+    RecordLog log = vector_log();
+    VectorSigner signer;
+    const VectorGatt& g = vectors().gatt;
+
+    EXPECT_EQ(to_hex(device_information(vectors().logger_id, g.firmware_version)), to_hex(g.device_information));
+    EXPECT_EQ(to_hex(status_value(log, 0)), to_hex(g.status));
+    EXPECT_EQ(to_hex(challenge_response(log, vectors().head.nonce, signer)), to_hex(g.challenge_response));
+
+    ASSERT_EQ(g.history_requests.size(), 5u);
+    for (const auto& r : g.history_requests) {
+        auto parsed = parse_history_request(r.request);
+        ASSERT_TRUE(parsed.has_value());
+        EXPECT_EQ(parsed->from_seq, r.from_seq);
+        EXPECT_EQ(parsed->max_records, r.max_records);
+
+        std::vector<Bytes> sent = history_notifications(log, *parsed, r.att_mtu, signer);
+        ASSERT_EQ(sent.size(), r.notifications.size()) << "from " << r.from_seq << " at MTU " << r.att_mtu;
+        for (std::size_t i = 0; i < sent.size(); ++i) {
+            EXPECT_EQ(to_hex(sent[i]), to_hex(r.notifications[i])) << "notification " << i << " from " << r.from_seq;
+        }
+    }
+}
+
 }  // namespace
 }  // namespace cch::test
