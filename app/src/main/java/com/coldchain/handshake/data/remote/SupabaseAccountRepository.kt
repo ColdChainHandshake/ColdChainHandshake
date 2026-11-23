@@ -73,16 +73,16 @@ class SupabaseAccountRepository(
         val fetched = fetchProfile(user.id)
         val profile = fetched.getOrNull() ?: cached
 
+        // Cached before it is shown, so whoever sees the new state finds the same profile in the cache.
+        if (profile != null) profileCache.save(user.id, profile)
+
         _state.value = when {
             profile != null -> AccountState.Ready(user.id, user.email, profile)
             fetched.isSuccess -> AccountState.NeedsProfile(user.id, user.email)
             else -> AccountState.Unreachable(user.id, user.email)
         }
 
-        if (profile != null) {
-            profileCache.save(user.id, profile)
-            registerDevice()
-        }
+        if (profile != null) registerDevice()
     }
 
     private suspend fun fetchProfile(userId: String): Result<UserProfile?> = attempt {
