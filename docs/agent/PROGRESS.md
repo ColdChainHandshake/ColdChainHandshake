@@ -444,3 +444,28 @@ The sanitizer and fuzz presets were not built: MinGW has no ASan and libFuzzer n
 - [ ] No secrets in git history added by you; `local.properties` untouched by you
 - [ ] README, THREAT_MODEL, FIELD_TEST and FINAL_REPORT written; no overclaiming text in the app
 - [ ] HANDOFF lists every action the owner still has to take
+
+## FINISH run, Block 5: Phase 5 (started 23 Nov, while Blocks 1 and 3 wait)
+
+Done in small steps, each with the full proof, so the screens the Gate 3 run uses only change one at a time. The
+Gate 3 run itself is built from `05b342e`, the code it was rehearsed on.
+
+- [x] 5.1a Hilt in the build (`com.google.dagger.hilt.android` 2.60.1, AndroidX Hilt 1.4.0), `ColdChainApp` as the
+  `@HiltAndroidApp` application, `MainActivity` an `@AndroidEntryPoint`. No behaviour change: everything still comes
+  from `RepositoryProvider`, which `MainActivity` still initializes
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+BUILD SUCCESSFUL in 7m 29s
+core-domain 118 failed 0 | debug 428 failed 0 | release 371 failed 0 | skipped 0
+emulator: cold start after pm clear, LaunchState COLD, TotalTime 5566 ms, no FATAL or ANR, the sign-in screen shows
+```
+
+- [ ] 5.1b One ViewModel per screen, starting with `AppRoot` (which screen to show), then Dispatch (removes the
+  order-dependent `DispatchScreenTest`), Transit, Handover, Alerts. Each one's dependencies come through Hilt
+- [ ] 5.1c Hilt builds everything; `RepositoryProvider` deleted
+- [ ] 5.2 Foreground service for recording; WorkManager sync; the Handover screen downloads its own history
+- [ ] 5.3 Multi-leg custody in the UI
+- [ ] 5.4 Opaque QR codes
+- [ ] 5.5 Android audits on the emulator
+- [ ] 5.6 Release build settings

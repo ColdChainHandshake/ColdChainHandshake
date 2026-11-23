@@ -16,7 +16,9 @@ import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.navigation.AppRoot
 import com.coldchain.handshake.ui.theme.ColdChainTheme
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val notificationPermission =
