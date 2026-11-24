@@ -1,6 +1,6 @@
 # Status: what is proven, and on what
 
-Updated 23 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock.
+Updated 24 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock.
 
 "Real system" means a hosted Supabase project, an emulator or phone, or a real database running in Docker.
 "Fakes" means tests, fake servers and test vectors that Claude wrote. A fake can agree with the code and still be
@@ -54,7 +54,9 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
 - **Logger test key refused:** in unit tests for both builds, and neither built APK contains its private key.
 - **Reading a logger over Bluetooth:** the protocol side runs against a fake Bluetooth server and the Python
   vectors, including lost and silent notifications. The Android Bluetooth code compiles but has never talked to a
-  logger, because there isn't one (`HARDWARE = none`).
+  logger, because there isn't one (`HARDWARE = none`). Since the 24 Nov security review, a hostile device's
+  forged header (which used to run the phone out of memory), extra records and stray Bluetooth callbacks are
+  refused in tests.
 - **Checking the logger at handover:** in tests, a history that was edited, cut short, replayed, signed with the
   wrong or the test key, or doesn't match the readings fails the handover; one with holes or faults is UNKNOWN.
   Not on a screen yet.
@@ -71,8 +73,9 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
 
 ## Gates
 
-`gate-0` and `gate-2` are tagged. `gate-1` waits for the owner's answer (`HANDOFF.md` Q2). `gate-3` needs the dev
-project and devices.
+`gate-0` and `gate-2` are tagged. `gate-1` waits for write access to the dev project: on 24 Nov it was restored,
+but the MCP connection was still read-only (`HANDOFF.md`, top). `gate-3` also needs the hosted email templates and
+the owner online for the sign-in codes.
 
 ## The 16 findings
 
