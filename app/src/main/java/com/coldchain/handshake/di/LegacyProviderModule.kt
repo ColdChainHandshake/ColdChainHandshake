@@ -1,15 +1,22 @@
 package com.coldchain.handshake.di
 
+import android.content.Context
+import com.coldchain.handshake.alerts.AlertChecks
+import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.repository.AccountRepository
+import com.coldchain.handshake.repository.ColdChainRemote
 import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepository
 import com.coldchain.handshake.repository.ShipmentWorkflow
+import com.coldchain.handshake.repository.SyncService
+import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.navigation.SessionGate
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 
 /**
@@ -38,4 +45,21 @@ object LegacyProviderModule {
 
     @Provides
     fun historySync(): ShipmentHistorySyncCoordinator = RepositoryProvider.shipmentHistorySyncCoordinator
+
+    @Provides
+    fun remote(): ColdChainRemote = RepositoryProvider.remote
+
+    @Provides
+    fun telemetryRepository(): TelemetryRepository = RepositoryProvider.telemetryRepository
+
+    @Provides
+    fun syncService(): SyncService = RepositoryProvider.syncService
+
+    @Provides
+    @DeviceId
+    fun deviceId(): String = RepositoryProvider.deviceId
+
+    @Provides
+    fun alertChecks(@ApplicationContext context: Context): AlertChecks =
+        AlertChecks { AlertEscalationScheduler.checkNow(context) }
 }

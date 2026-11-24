@@ -49,11 +49,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,16 +65,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
-import com.coldchain.handshake.repository.AccountState
-import com.coldchain.handshake.repository.GpsPoint
-import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.components.TemperatureCard
 import com.coldchain.handshake.ui.theme.PrimaryCold
@@ -90,13 +86,6 @@ import com.google.android.gms.location.Priority
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 /**
  * Lightweight in-memory data holder for foreground GPS fix.
@@ -112,54 +101,34 @@ data class GpsLocationData(
 @Composable
 fun TransitScreen(
     modifier: Modifier = Modifier,
-    onNavigateToDispatch: () -> Unit = {}
+    onNavigateToDispatch: () -> Unit = {},
+    viewModel: TransitViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val simulator = RepositoryProvider.temperatureSimulator
-    val accountState by RepositoryProvider.accountRepository.state.collectAsState()
-    val me = accountState as? AccountState.Ready
-    var custodyNotice by remember { mutableStateOf<String?>(null) }
+    val ui by viewModel.state.collectAsStateWithLifecycle()
+    val signedIn = ui.signedInAs != null
+    val custodyNotice = ui.notice
 
     // Authoritative session shipment: only what was explicitly created or scanned
-    val activeShipment by simulator.activeShipment.collectAsState()
-    val currentShipment = activeShipment
+    val currentShipment = ui.shipment
 
-    val latestTemperature by simulator.latestTemperature.collectAsState()
-    val isRunning by simulator.isRunning.collectAsState()
-    val isHeatSpikeMode by simulator.isHeatSpikeMode.collectAsState()
-    val simulatedTimestamp by simulator.simulatedTimestamp.collectAsState()
-    val lastPersistenceError by simulator.lastPersistenceError.collectAsState()
+    val latestTemperature by viewModel.latestTemperature.collectAsStateWithLifecycle()
+    val isRunning by viewModel.isRecording.collectAsStateWithLifecycle()
+    val isHeatSpikeMode by viewModel.isHeatSpikeMode.collectAsStateWithLifecycle()
+    val simulatedTimestamp by viewModel.simulatedTimestamp.collectAsStateWithLifecycle()
+    val lastPersistenceError by viewModel.lastPersistenceError.collectAsStateWithLifecycle()
 
     // Mode: Transporter (Phone A) vs Shipment Monitor (Phone B)
-    var isCurrentCustodyDevice by remember { mutableStateOf(false) }
-    var showHandedOverDialog by remember { mutableStateOf(false) }
-    var handedOverShipmentId by remember { mutableStateOf("") }
+    val isMonitorMode = ui.watching
 
-    var isMonitorMode by remember {
-        mutableStateOf(currentShipment?.workerId == "W-MONITOR")
-    }
-
-    // Only the server knows who has custody. A shipment kept on this phone alone has no custodian there.
-    LaunchedEffect(currentShipment?.id, me?.userId) {
-        val ship = currentShipment
-        if (ship != null && me != null && ship.genesisHash != null) {
-            RepositoryProvider.remote.getCustody(ship.id).getOrNull()?.let { custody ->
-                isCurrentCustodyDevice = custody.custodianId == me.userId
-                if (!isCurrentCustodyDevice) isMonitorMode = true
-            }
-        }
-    }
+    // The ViewModel's polling runs only while this screen is shown.
+    LaunchedEffect(viewModel) { viewModel.runWhileVisible() }
 
     // QR scanner dialog for Phone B live monitor pairing
     var showQrScanner by remember { mutableStateOf(false) }
 
     // Observable telemetry stream strictly from Room
-    val telemetryEvents by (if (currentShipment != null) {
-        RepositoryProvider.telemetryRepository.getTemperatures(currentShipment.id)
-    } else {
-        flowOf(emptyList())
-    }).collectAsState(initial = emptyList())
+    val telemetryEvents by viewModel.readings.collectAsStateWithLifecycle()
 
     val sortedEvents = remember(telemetryEvents) {
         telemetryEvents.sortedByDescending { it.timestamp }
@@ -175,22 +144,18 @@ fun TransitScreen(
     var isWaitingForFix by remember { mutableStateOf(false) }
     var locationPermissionDenied by remember { mutableStateOf(false) }
     var locationServiceDisabled by remember { mutableStateOf(false) }
-    var lastGpsUploadStatus by remember { mutableStateOf<String?>(null) }
+    val lastGpsUploadStatus = ui.gpsUploadStatus
 
     // Remote GPS for Phone B (Monitor)
-    var remoteGpsLocation by remember { mutableStateOf<GpsLocationData?>(null) }
+    val remoteGpsLocation = ui.remoteGps
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // Only for a shipment the server holds, which then decides whether this person may report it.
+    // The location client stays here until 5.2 moves recording into a foreground service; uploads go through the
+    // ViewModel, which sends them only for a shipment the server holds.
+    @Suppress("UNUSED_PARAMETER")
     fun uploadLocation(ship: Shipment, latitude: Double, longitude: Double, accuracy: Float, timestamp: Long) {
-        if (RepositoryProvider.accountRepository.state.value !is AccountState.Ready || ship.genesisHash == null) return
-        scope.launch(Dispatchers.IO) {
-            val point = GpsPoint(UUID.randomUUID().toString(), ship.id, latitude, longitude, accuracy, timestamp)
-            RepositoryProvider.remote.appendGpsPoints(ship.id, RepositoryProvider.deviceId, listOf(point))
-                .onSuccess { lastGpsUploadStatus = "Synced ${timeFormatter.format(Date(timestamp))}" }
-                .onFailure { e -> lastGpsUploadStatus = "Not sent: ${e.message ?: "network issue"}" }
-        }
+        viewModel.uploadLocation(latitude, longitude, accuracy, timestamp)
     }
 
     // Callback invoked on Phone A when foreground GPS yields new coordinates
@@ -304,88 +269,9 @@ fun TransitScreen(
         }
     }
 
-    // ----------------------------------------------------
-    // PHONE A: PERIODIC CLOUD SYNC FOR TELEMETRY & STATUS
-    // ----------------------------------------------------
-    LaunchedEffect(isRunning, currentShipment?.id) {
-        if (isRunning && currentShipment != null) {
-            while (isActive) {
-                delay(2500L)
-                runCatching {
-                    RepositoryProvider.getSyncService(context).syncPendingData()
-                }
-            }
-        }
-    }
-
-
-    // ----------------------------------------------------
-    // PHONE A: CUSTODY POLLING (Detect Handover Transfer)
-    // ----------------------------------------------------
-    LaunchedEffect(currentShipment?.id, isMonitorMode) {
-        val ship = currentShipment
-        if (!isMonitorMode && ship != null && ship.genesisHash != null) {
-            val activeShipId = ship.id
-            while (isActive) {
-                delay(3500L)
-                runCatching {
-                    val custody = RepositoryProvider.remote.getCustody(activeShipId).getOrNull()
-                    val holder = RepositoryProvider.accountRepository.state.value as? AccountState.Ready
-                    if (custody != null && holder != null && custody.custodianId != holder.userId) {
-                        // Custody transferred to receiving device!
-                        stopGpsTracking()
-                        simulator.reset()
-                        handedOverShipmentId = activeShipId
-                        showHandedOverDialog = true
-                    }
-                }
-            }
-        }
-    }
-
-    // ----------------------------------------------------
-    // PHONE B: 3-SECOND POLLING LOOP FOR LIVE MONITORING
-    // ----------------------------------------------------
-    LaunchedEffect(isMonitorMode, currentShipment?.id) {
-        if (isMonitorMode && currentShipment != null && currentShipment.genesisHash != null) {
-            val shipId = currentShipment.id
-            while (isActive) {
-                // 1. Fetch latest shared GPS location from Supabase
-                runCatching {
-                    val point = RepositoryProvider.remote.getLatestGpsPoint(shipId).getOrNull()
-                    if (point != null) {
-                        remoteGpsLocation = GpsLocationData(
-                            latitude = point.latitude,
-                            longitude = point.longitude,
-                            accuracy = point.accuracyMeters,
-                            timestamp = point.deviceTimestamp
-                        )
-                    }
-                }
-
-                // 2. Hydrate latest telemetry events from Supabase atomically into Room
-                runCatching {
-                    RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipId)
-                }
-
-                // 3. Fetch latest shipment status
-                runCatching {
-                    RepositoryProvider.shipmentWorkflow.open(shipId)
-                }
-
-                // 4. Poll custody state: if transferred to this device, become active holder
-                runCatching {
-                    val custody = RepositoryProvider.remote.getCustody(shipId).getOrNull()
-                    val holder = RepositoryProvider.accountRepository.state.value as? AccountState.Ready
-                    if (custody != null && holder != null && custody.custodianId == holder.userId) {
-                        isCurrentCustodyDevice = true
-                        isMonitorMode = false
-                    }
-                }
-
-                delay(3000L)
-            }
-        }
+    // Custody moved away while this phone was recording: its location reports stop too.
+    LaunchedEffect(ui.handedOverShipmentId) {
+        if (ui.handedOverShipmentId != null) stopGpsTracking()
     }
 
     // ----------------------------------------------------
@@ -395,33 +281,7 @@ fun TransitScreen(
         QRScannerDialog(
             onCodeScanned = { scannedCode ->
                 showQrScanner = false
-                val targetId = if (scannedCode.startsWith("CCH:SHIP:")) {
-                    scannedCode.split(":").getOrNull(2) ?: scannedCode
-                } else {
-                    scannedCode
-                }
-
-                scope.launch {
-                    var resolvedShipment = RepositoryProvider.getShipmentRepository(context)
-                        .getShipment(targetId).firstOrNull()
-
-                    // A code only names a shipment. Nothing is ever built from its text.
-                    if (resolvedShipment == null && RepositoryProvider.accountRepository.state.value is AccountState.Ready) {
-                        resolvedShipment = RepositoryProvider.shipmentWorkflow.open(targetId)
-                            .onFailure { custodyNotice = it.message }
-                            .getOrNull()
-                    }
-
-                    if (resolvedShipment != null) {
-                        simulator.attachShipmentForMonitoring(resolvedShipment)
-                        isMonitorMode = true
-                        runCatching {
-                            if (resolvedShipment.genesisHash != null) {
-                                RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(resolvedShipment.id)
-                            }
-                        }
-                    }
-                }
+                viewModel.onCodeScanned(scannedCode)
             },
             onDismiss = { showQrScanner = false }
         )
@@ -430,16 +290,17 @@ fun TransitScreen(
     // ----------------------------------------------------
     // UI LAYOUT
     // ----------------------------------------------------
-    if (showHandedOverDialog) {
+    val handedOverShipmentId = ui.handedOverShipmentId
+    if (handedOverShipmentId != null) {
         AlertDialog(
-            onDismissRequest = { showHandedOverDialog = false },
+            onDismissRequest = viewModel::acknowledgeHandover,
             icon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = StatusGreen) },
             title = { Text("Shipment Handed Over") },
             text = {
                 Text("Custody for $handedOverShipmentId is now with the receiving device.\n\nActive tracking on this device has concluded. All historical telemetry, GPS updates, and audit records remain preserved in your local Room storage.")
             },
             confirmButton = {
-                Button(onClick = { showHandedOverDialog = false }) {
+                Button(onClick = viewModel::acknowledgeHandover) {
                     Text("Acknowledge")
                 }
             }
@@ -454,22 +315,9 @@ fun TransitScreen(
     ) {
         // A courier takes custody on their own phone, and the server records it.
         val waiting = currentShipment
-        if (me != null && waiting != null && waiting.genesisHash != null && waiting.status == ShipmentStatus.DISPATCHED) {
+        if (signedIn && waiting != null && waiting.genesisHash != null && waiting.status == ShipmentStatus.DISPATCHED) {
             Button(
-                onClick = {
-                    scope.launch {
-                        RepositoryProvider.shipmentWorkflow.takeCustody(waiting.id)
-                            .onSuccess { taken ->
-                                custodyNotice = null
-                                isMonitorMode = false
-                                simulator.attachShipment(taken)
-                                RepositoryProvider.shipmentHistorySyncCoordinator.markReady(taken.id)
-                                simulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
-                                AlertEscalationScheduler.checkNow(context)
-                            }
-                            .onFailure { custodyNotice = it.message }
-                    }
-                },
+                onClick = { viewModel.takeCustody() },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Take Custody")
@@ -489,7 +337,7 @@ fun TransitScreen(
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { isMonitorMode = false },
+                    onClick = { viewModel.setWatching(false) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (!isMonitorMode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = if (!isMonitorMode) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -501,7 +349,7 @@ fun TransitScreen(
                 }
 
                 Button(
-                    onClick = { isMonitorMode = true },
+                    onClick = { viewModel.setWatching(true) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isMonitorMode) StatusGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = if (isMonitorMode) StatusGreen else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1027,13 +875,7 @@ fun TransitScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = {
-                            if (isRunning) {
-                                simulator.stopContinuousSimulation()
-                            } else {
-                                simulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
-                            }
-                        },
+                        onClick = viewModel::pauseOrResumeRecording,
                         modifier = Modifier.weight(1f).height(38.dp)
                     ) {
                         Icon(
@@ -1046,11 +888,7 @@ fun TransitScreen(
                     }
 
                     OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                simulator.tickOnce(simulatedStepDurationSeconds = 60L)
-                            }
-                        },
+                        onClick = { viewModel.recordOneReading() },
                         modifier = Modifier.weight(1f).height(38.dp)
                     ) {
                         Icon(
@@ -1063,9 +901,7 @@ fun TransitScreen(
                     }
 
                     OutlinedButton(
-                        onClick = {
-                            simulator.setHeatSpikeMode(!isHeatSpikeMode)
-                        },
+                        onClick = viewModel::toggleHeatSpike,
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (isHeatSpikeMode) StatusRed.copy(alpha = 0.2f) else Color.Transparent
                         ),

@@ -1,0 +1,281 @@
+package com.coldchain.handshake.ui.screens
+
+import androidx.lifecycle.SavedStateHandle
+import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.models.SyncStatus
+import com.coldchain.handshake.repository.AccountState
+import com.coldchain.handshake.repository.CustodyState
+import com.coldchain.handshake.repository.FakeAccountRepository
+import com.coldchain.handshake.repository.FakeColdChainServer
+import com.coldchain.handshake.repository.GpsPoint
+import com.coldchain.handshake.repository.MemberRole
+import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.repository.ShipmentWorkflow
+import com.coldchain.handshake.repository.SyncService
+import com.coldchain.handshake.repository.UserProfile
+import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
+import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
+import com.coldchain.handshake.simulator.TemperatureSimulator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import java.io.IOException
+
+/**
+ * The Transit screen without the screen: taking custody, opening a shipment by its code, noticing custody move on
+ * the server, and coming back after the process was killed. Its polling runs only while the screen is visible,
+ * as it did when it lived in the screen's own effects.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class TransitViewModelTest {
+
+    private val dispatcher = UnconfinedTestDispatcher()
+    private val account = FakeAccountRepository()
+    private val shipments = InMemoryShipmentRepository()
+    private val telemetry = InMemoryTelemetryRepository()
+    private val server = FakeColdChainServer(currentUser = "courier")
+    private val workflow = ShipmentWorkflow(server, shipments) { "device-1" }
+    // Its own real dispatcher: its recording loop never ends, so on the test clock runTest would wait on it forever.
+    private var simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
+    private val history = ShipmentHistorySyncCoordinator(telemetry, server)
+    private var alertChecks = 0
+    private val sync = object : SyncService {
+        var calls = 0
+        override suspend fun syncPendingData(): Result<Unit> { calls++; return Result.success(Unit) }
+        override fun isOnline() = true
+        override fun getSyncStatus(): Flow<SyncStatus> = flowOf(SyncStatus.SYNCED)
+    }
+
+    @Before
+    fun setUp() = Dispatchers.setMain(dispatcher)
+
+    @After
+    fun tearDown() {
+        simulator.stopContinuousSimulation()
+        Dispatchers.resetMain()
+    }
+
+    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = TransitViewModel(
+        account, shipments, workflow, simulator, history, server, telemetry, sync, "device-1", { alertChecks++ }, saved
+    )
+
+    private fun signInAs(user: String, role: MemberRole) {
+        server.currentUser = user
+        account.setState(AccountState.Ready(user, null, UserProfile(user, role)))
+    }
+
+    /** A shipment the sender has dispatched, which nobody has taken yet. */
+    private fun dispatched(id: String) {
+        server.seedShipment(id, custodian = "sender")
+        server.shipments[id] = server.shipments.getValue(id).copy(status = ShipmentStatus.DISPATCHED)
+        server.custody.remove(id)
+    }
+
+    @Test
+    fun takingCustodyStartsRecordingOnThisPhone() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+
+        vm.takeCustody().join()
+
+        assertEquals("SHIP-1", simulator.activeShipment.value?.id)
+        assertTrue(simulator.isRunning.value)
+        assertFalse(simulator.isMonitorOnly.value)
+        assertFalse(vm.state.value.watching)
+        assertNull(vm.state.value.notice)
+        assertEquals(1, alertChecks)
+        assertEquals("courier", server.custody["SHIP-1"]?.custodianId)
+    }
+
+    @Test
+    fun aRefusedTakeCustodySaysWhyAndStartsNothing() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        server.offlineError = IOException("No signal")
+
+        vm.takeCustody().join()
+
+        assertEquals("No signal", vm.state.value.notice)
+        assertFalse(simulator.isRunning.value)
+        assertEquals(0, alertChecks)
+    }
+
+    @Test
+    fun aCodeOpensOnlyAShipmentThisPhoneOrTheServerKnows() = runTest {
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+
+        vm.onCodeScanned("CCH:SHIP:SHIP-NOPE:Hub:Clinic:LOG-1").join()
+
+        assertNull(simulator.activeShipment.value)
+        assertTrue(shipments.getAllShipments().first().isEmpty())
+        assertNotNull(vm.state.value.notice)
+    }
+
+    @Test
+    fun aKnownCodeOpensTheShipmentToWatch() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+
+        vm.onCodeScanned("SHIP-1").join()
+
+        assertEquals("SHIP-1", vm.state.value.shipment?.id)
+        assertTrue(vm.state.value.watching)
+        assertTrue(simulator.isMonitorOnly.value)
+    }
+
+    @Test
+    fun whenCustodyMovesAwayRecordingStopsAndTheHandoverIsShown() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        vm.takeCustody().join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+        advanceTimeBy(4_000)
+
+        assertEquals("SHIP-1", vm.state.value.handedOverShipmentId)
+        assertFalse(simulator.isRunning.value)
+        assertNull(simulator.activeShipment.value)
+        visible.cancel()
+    }
+
+    @Test
+    fun whileWatchingCustodyComingToMeMakesMeTheCustodian() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(3_500)
+        assertFalse(vm.state.value.isCustodian)
+
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+        advanceTimeBy(3_500)
+
+        assertTrue(vm.state.value.isCustodian)
+        assertFalse(vm.state.value.watching)
+        visible.cancel()
+    }
+
+    @Test
+    fun whileWatchingTheCouriersLocationIsFetched() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        server.gpsPoints += GpsPoint("G-1", "SHIP-1", 1.5, 2.5, 10f, 1_700_000_100_000)
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+
+        advanceTimeBy(500)
+
+        assertEquals(1.5, vm.state.value.remoteGps?.latitude ?: 0.0, 0.0)
+        visible.cancel()
+    }
+
+    @Test
+    fun nothingIsPolledOnceTheScreenIsAway() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        vm.takeCustody().join()
+        backgroundScope.launch { vm.runWhileVisible() }.cancel()
+
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+        advanceTimeBy(30_000)
+
+        assertNull(vm.state.value.handedOverShipmentId)
+        assertEquals(0, sync.calls)
+    }
+
+    @Test
+    fun whileRecordingVisibleReadingsAreSentRegularly() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        vm.takeCustody().join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+
+        advanceTimeBy(10_100)
+
+        assertEquals(4, sync.calls)
+        visible.cancel()
+    }
+
+    @Test
+    fun theCustodianReportsTheirLocation() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        vm.takeCustody().join()
+
+        vm.uploadLocation(1.0, 2.0, 5f, 1_700_000_200_000).join()
+
+        assertEquals(1, server.gpsPoints.size)
+        assertTrue(vm.state.value.gpsUploadStatus!!.startsWith("Synced"))
+    }
+
+    @Test
+    fun afterProcessDeathTheShipmentComesBackButRecordingWaitsForThePerson() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val saved = SavedStateHandle()
+        val first = viewModel(saved)
+        first.onCodeScanned("SHIP-1").join()
+        first.takeCustody().join()
+        simulator.stopContinuousSimulation()
+
+        // The process dies: the simulator and the ViewModel are new, the saved state and the database remain.
+        simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
+        val restored = viewModel(SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) }))
+
+        assertEquals("SHIP-1", restored.state.value.shipment?.id)
+        assertEquals("SHIP-1", simulator.activeShipment.value?.id)
+        assertFalse(simulator.isRunning.value)
+        assertTrue(restored.state.value.isCustodian)
+        assertFalse(restored.state.value.watching)
+        // The custodian can resume recording; someone watching couldn't.
+        assertFalse(simulator.isMonitorOnly.value)
+    }
+
+    @Test
+    fun afterProcessDeathSomeoneWatchingIsStillOnlyWatching() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val saved = SavedStateHandle()
+        viewModel(saved).onCodeScanned("SHIP-1").join()
+
+        simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
+        val restored = viewModel(SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) }))
+
+        assertEquals("SHIP-1", restored.state.value.shipment?.id)
+        assertTrue(restored.state.value.watching)
+        assertTrue(simulator.isMonitorOnly.value)
+    }
+}

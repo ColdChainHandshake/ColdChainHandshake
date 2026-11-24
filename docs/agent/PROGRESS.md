@@ -91,6 +91,33 @@ BUILD SUCCESSFUL in 2m 50s
 core-domain 122 failed 0 | debug 455 failed 0 | release 398 failed 0 | skipped 0
 ```
 
+### Step 2 — Finish 5.1
+
+- [x] `TransitViewModel`: take custody, open by code (nothing built from the code's text), notice custody moving
+  away (recording stops, the handed-over dialog shows) or coming here while watching, the custodian's location
+  upload and a watcher's location fetch, and sending readings while recording. Its polling runs only inside
+  `runWhileVisible()`, which the screen runs from a `LaunchedEffect`, so it stops when the screen leaves, as before
+  (a navigation entry's ViewModel outlives a tab switch). The shipment and the mode are in `SavedStateHandle`: after
+  process death the shipment comes back attached as the custodian's or a watcher's, as the server says, and
+  recording does **not** restart on its own; that waits for 5.2's foreground service (in a release build there is
+  no Resume button, so it stays stopped until then). The location client and permission prompt stay in the screen
+  until 5.2. New Hilt bindings in `LegacyProviderModule`: `ColdChainRemote`, `TelemetryRepository`, `SyncService`,
+  `@DeviceId String`, `AlertChecks`. No visible text changed (the honesty pass is Step 4)
+  - `TransitViewModelTest`, 12 tests: 10 of the first 11 failed against a stub. `nothingIsPolledOnceTheScreenIsAway`
+    passed against the stub (it polls nothing), so it was checked with a mutant that starts the polling in `init`:
+    the run then hangs on the endless loops, each test failing at `runTest`'s 60 s timeout. Stopped by hand
+  - Emulator, debug local mode: create, dispatch, Start Journey; Transit records (`transit-vm-01-recording.png`);
+    landscape and back keep the shipment and recording (`transit-vm-02`); `am kill` in the background, relaunch:
+    Transit shows `SHIP-1CC9B9` with both readings and "Resume" (`transit-vm-03-after-kill.png`); Resume records a
+    third reading. `logcat`: 0 FATAL, 0 ANR
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*TransitViewModelTest*'      against the stub: 11 tests completed, 10 failed
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+BUILD SUCCESSFUL in 5m 7s
+core-domain 122 failed 0 | debug 467 failed 0 | release 410 failed 0 | skipped 0
+```
+
 ## FINISH run, Block S: setup (23 Nov 2026)
 
 - [x] S1 User env vars, checked by reading them back with `[Environment]::GetEnvironmentVariable(..., 'User')`:
