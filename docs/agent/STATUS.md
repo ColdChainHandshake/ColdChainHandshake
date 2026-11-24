@@ -11,7 +11,13 @@ wrong about the world: the first real run found a server rule the fake server di
 - **The hosted dev project (24 Nov):** migrations `0000` to `0003` applied. Its schema is the one the local tests
   ran on: definitions, constraints, policies and the privilege matrix hash the same on both. Every deny-by-default
   rule from the tests, run as a query on hosted (including for newly created objects), finds nothing. Supabase's advisors show no errors. Through the real API, a signed-out caller is
-  refused (`permission denied`). Nothing has been signed in or handed over on it yet; that is Gate 3.
+  refused (`permission denied`).
+- **Gate 3, a whole handover on the hosted dev project with two real devices at once (24 Nov):** the app built from
+  `05b342e`. Email-code sign-in with real emails for all three people. The sender (emulator) created and dispatched
+  `SHIP-3E4005`. The courier (the Galaxy S24) took custody and uploaded 6 signed readings over 5 minutes, then
+  confirmed. The receiver (emulator) recorded PASS on the same history. The server shows two confirmations from two
+  device IDs, custody moved to the receiver, status ACCEPTED. The readings are simulated on the courier's phone; no
+  logger was involved.
 
 The rest ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
 hosted project.
@@ -69,18 +75,16 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
 
 ## Not proven
 
-- Any app use of a hosted Supabase project: the dev project has the schema (above) but no account or shipment yet.
-- On a device against the hosted project: email-code sign-in with real emails, and the handover with each person on
-  their own phone at the same time (Gate 3). Also notifications and real timers on any device.
-- Recording and sync with the screen off, after the app is killed, or after a long time offline.
+- Notifications and real timers on any device.
+- Recording and sync with the screen off, after the app is killed, or after a long time offline. The Gate 3 run
+  showed the gap: the pinned build stops recording as soon as the courier's app leaves the screen.
 - A real logger. The virtual logger exists in code, but the app doesn't use it yet.
 - The GitHub Actions workflow has never run on GitHub.
 
 ## Gates
 
-`gate-0`, `gate-1` (24 Nov, on the dev project's own advisors and a fresh clone's build) and `gate-2` are tagged.
-`gate-3` needs the two-device run on the dev project with the owner online for the sign-in codes; the email
-templates are done (owner, 24 Nov).
+`gate-0`, `gate-1` (24 Nov, on the dev project's own advisors and a fresh clone's build), `gate-2` and `gate-3`
+(24 Nov, the two-device handover on the dev project) are tagged.
 
 ## The 16 findings
 

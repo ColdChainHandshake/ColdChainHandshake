@@ -1,8 +1,8 @@
 # Progress
 
-**Next action (24 Nov, evening):** Block 1 is done and `gate-1` tagged (below). Next: prepare the hosted Gate 3 run
-(CONTINUE_PROMPT section 5: worktree at `05b342e`, debug APK built with `CCH_APP_SUPABASE_URL`/`KEY` for the dev
-project, the S24 plus one emulator), then the phone pass of Block 2 and the Handover/Alerts process-kill checks.
+**Next action (24 Nov, 22:05):** `gate-1` and `gate-3` are tagged (below). Next: the rest of Block 2's phone
+pass and the Handover/Alerts process-kill checks on the emulator (HEAD build, local mode), then 5.1c. Step 5's
+server work (4.3) must stay compatible with the `05b342e` app.
 Memory rule (owner, 24 Nov): 16 GB RAM; never Gradle and the emulator at once; full proof in the foreground, then
 `./gradlew --stop`, then the emulator; one emulator only. Switches now `PHONE = present`, `EMULATORS = 1`.
 
@@ -82,6 +82,59 @@ hosted the same rules' queries plus the REST refusal); advisors show no RLS erro
 beyond the deliberate `legacy_*` deny-all); schema exported, yes (`app/schemas`, `ColdChainDatabaseMigrationTest`).
 The Gate 1 reviewer ran on 30 Oct (`DECISIONS.md`, "Gate 1 review" lines); its findings were fixed then. What was
 missing since was only the dev project, checked here mechanically against the same tests.
+
+### Block 3 — Gate 3 on the hosted dev project: `done`
+
+- [x] Worktree `D:\cch-tools\wt-gate3-05b342e` at `05b342e` (`git worktree add --detach`); `assembleDebug` with
+  `CCH_APP_SUPABASE_URL`/`KEY` (dev URL, publishable key): BUILD SUCCESSFUL in 2m 44s. Its `BuildConfig`: dev ref 1,
+  demo ref 0, `127.0.0.1` 0, `placeholder` 0, `sb_publishable_` 1, `sb_secret_` 0. `./gradlew --stop`, then the
+  emulator
+- [x] The S24's old debug app data cleared with the owner's yes (`pm clear`), the build installed; the emulator's app
+  uninstalled and installed fresh
+- [x] Hosted email-code sign-in through the app, supabase-kt with the `sb_publishable_` key: courier on the S24 (the
+  owner typed the code there), receiver and sender on the emulator (codes from the owner). `profiles`: Gate3
+  Courier/courier, Gate3 Receiver/receiver, Gate3 Sender/sender, each with a device
+- [x] Sender created `SHIP-D9E438` with both people in the form (members: sender, courier, receiver) and dispatched it
+  (server `DISPATCHED`)
+- [x] Courier on the S24 opened it by ID through "Manual QR Payload" and took custody at 20:56:32 (server:
+  `IN_TRANSIT`, `START` leg 1 to Gate3 Courier, first reading uploaded). Found: the owner's YouTube picture-in-picture
+  window covered the Take Custody button; tapping the button's right part worked
+- [x] Receiver signed in again on the cleared emulator and opened it on Transit: `IN_TRANSIT`, telemetry log 2
+  readings at 20:58:37
+- [ ] `SHIP-D9E438` can't reach PASS. At about 21:01 the S24 went to another app (Brave) and the `05b342e` build
+  records only while Transit is on screen (no foreground service until 5.2), so the last reading is seq 5, received
+  21:00:38. The gap is past the 3-minute limit, so this shipment can only end UNKNOWN. It is left IN_TRANSIT on the
+  server. A real-world case for 5.2's foreground service
+- [x] Then Claude Code stopped the emulator for low memory while the session waited for the owner. Restarted on
+  his "go", with the phone left alone
+- [x] **The run, `SHIP-3E4005`, PASS:** the sender (emulator, new code) created it with both people and dispatched it
+  (21:51:58). The courier (S24, still signed in) opened it by ID and took custody at 21:53:12, and recorded 6
+  readings. The receiver (emulator cleared, new code) watched them sync on Transit. The courier confirmed at
+  21:59:04, 48 s after the last reading, naming the receiver; the screen said "Confirmed. Waiting for the other person". The receiver
+  recorded PASS at 22:00:56, 2 min 40 s after the last reading, and the screen said "Custody has moved. The shipment
+  is now ACCEPTED."
+- [x] Server records (MCP): `shipments.status = ACCEPTED`; `handover_confirmations`: courier, no verdict, head
+  `864c5b67`, device `f79114ed` at 21:59:04, and receiver PASS, head `864c5b67`, device `c49cdc4a` at 22:00:56: 2
+  distinct devices, both on the server head; `custody_events`: leg 1 START → Gate3 Courier, leg 2 TRANSFER → Gate3
+  Receiver; 6 readings. `f79114ed` is the courier's only device, and the courier only ever signed in on the S24
+- [x] Security advisor afterwards: no ERROR; the 13 RPC WARNs and 6 `legacy_*` INFOs as accepted, plus a new auth
+  WARN "leaked password protection disabled" (a project setting, and the app signs in with email codes, not
+  passwords; owner's choice, HANDOFF). `gate-3` tagged
+- Found on the way, for Phase 5 (the pinned build's screens):
+  - The receiver's Handover screen stayed on "Waiting for Complete History" for more than 50 s with all 6 readings
+    already on the phone. It went to PASS only after going back to Transit for a few seconds and returning. The
+    history is marked complete by Transit's polling, not by having the readings
+  - The `05b342e` build stops recording as soon as the courier's app leaves the screen (`SHIP-D9E438`). 5.2's
+    foreground service is the fix
+  - On the phone, a picture-in-picture window from another app can cover the Take Custody button; the button still
+    works where it isn't covered
+  - The emulator was used only with the phone; no two emulators at once, and none during a Gradle run
+
+```text
+MCP: shipments SHIP-3E4005 ACCEPTED | confirmations courier/-/864c5b67/f79114ed, receiver/PASS/864c5b67/c49cdc4a
+     distinct_devices 2 | custody 1 START Gate3 Courier, 2 TRANSFER Gate3 Receiver | readings 6 | head 864c5b67
+MCP get_advisors security: 0 ERROR | WARN 13 RPCs + 1 auth_leaked_password_protection | INFO 6 legacy_*
+```
 
 ## CONTINUE run (from 24 Nov 2026)
 

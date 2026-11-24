@@ -3,6 +3,16 @@
 Updated on 23 Nov 2026 (the `FINISH_PROMPT.md` run). Questions first, then your list, most urgent first. Claude
 carries on with everything these don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
+## Done on 24 Nov (evening): Gate 3 passed on the dev project, `gate-3` tagged
+
+With your phone as the courier and the emulator as the sender and receiver, `SHIP-3E4005` went from creation to
+ACCEPTED with two confirmations from two devices (`PROGRESS.md`, Block 3). Thank you for the codes. You can use the
+phone normally again. Nothing to do for this.
+
+Optional, a project setting Claude doesn't change: the security advisor now also warns "leaked password protection
+disabled" (Authentication, Providers, Email, or Attack Protection). The app signs in with email codes, not
+passwords, so it doesn't affect it; turning it on only clears the warning.
+
 ## Done on 24 Nov (evening): the dev project is set up and `gate-1` is tagged
 
 The migrations `0000` to `0003` are on the dev project `yjvoxozaoiarwbusyqke`, its schema is proven equal to the
