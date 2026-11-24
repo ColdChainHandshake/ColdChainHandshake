@@ -45,6 +45,15 @@ class ShipmentHistorySyncCoordinator(
         stateFor(shipmentId).value = state
     }
 
+    /**
+     * Forgets every shipment's state and server head, for the next person on this phone. The flows are reset
+     * rather than dropped, so a screen already collecting one sees the reset.
+     */
+    fun clear() {
+        syncStates.values.forEach { it.value = HistorySyncState.IDLE }
+        serverHeads.values.forEach { it.value = null }
+    }
+
     fun markReady(shipmentId: String) {
         stateFor(shipmentId).value = HistorySyncState.HISTORY_READY
     }

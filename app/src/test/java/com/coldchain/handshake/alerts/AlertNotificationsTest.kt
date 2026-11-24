@@ -14,6 +14,7 @@ import androidx.work.ListenableWorker
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
@@ -26,11 +27,11 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
-import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.AlertEscalationEngine
 import com.coldchain.handshake.safety.FakeAlertRepository
 import com.coldchain.handshake.safety.FakeShipmentRepository
+import com.coldchain.handshake.safety.SafetyEngine
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -72,18 +73,22 @@ class AlertNotificationsTest {
         shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    /** Builds the escalation worker with this test's repositories, as Hilt's factory does with the app's. */
+    private val workers = object : WorkerFactory() {
+        override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters) =
+            if (workerClassName == AlertEscalationWorker::class.java.name) {
+                AlertEscalationWorker(appContext, workerParameters, alerts, shipments, telemetry, SafetyEngine(alerts, shipments))
+            } else {
+                null
+            }
+    }
+
     @Before
     fun setUp() {
         WorkManagerTestInitHelper.initializeTestWorkManager(
             context,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build()
+            Configuration.Builder().setExecutor(SynchronousExecutor()).setWorkerFactory(workers).build()
         )
-        RepositoryProvider.initialize(shipments, telemetry, alerts)
-    }
-
-    @After
-    fun tearDown() {
-        RepositoryProvider.reset()
     }
 
     @Test
@@ -136,7 +141,7 @@ class AlertNotificationsTest {
         val interval = AlertEscalationEngine.ESCALATION_INTERVAL_MS
         alerts.saveAlert(alert(createdAt = System.currentTimeMillis() - interval - 1_000L))
 
-        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workers).build().doWork()
 
         assertEquals(ListenableWorker.Result.success(), result)
         assertEquals(EscalationLevel.SUPERVISOR, alerts.savedAlerts.single().escalationLevel)
@@ -148,7 +153,7 @@ class AlertNotificationsTest {
     fun theWorkerBooksNothingOnceNothingCanEscalate() = runBlocking {
         alerts.saveAlert(alert(level = EscalationLevel.PHARMACIST))
 
-        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workers).build().doWork()
 
         assertEquals(ListenableWorker.Result.success(), result)
         assertEquals(0, pendingChecks())
@@ -159,7 +164,7 @@ class AlertNotificationsTest {
         alerts.saveAlert(alert(createdAt = System.currentTimeMillis() - AlertEscalationEngine.ESCALATION_INTERVAL_MS))
         alerts.shouldFail = true
 
-        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workers).build().doWork()
 
         assertEquals(ListenableWorker.Result.retry(), result)
     }
@@ -216,7 +221,7 @@ class AlertNotificationsTest {
             )
         )
 
-        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workers).build().doWork()
 
         assertEquals(ListenableWorker.Result.success(), result)
         assertEquals(AlertType.DATA_GAP, alerts.savedAlerts.single().type)
@@ -234,7 +239,7 @@ class AlertNotificationsTest {
         ).getOrThrow()
         alerts.saveAlert(alert(createdAt = now))
 
-        TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+        TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workers).build().doWork()
 
         // The logger would go quiet in about three minutes, long before the alert's escalation is due.
         val delay = awaitBookedDelay { it > 0 }

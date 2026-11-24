@@ -3,6 +3,7 @@ package com.coldchain.handshake.repository
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.di.AppModule
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.local.RoomTransactionRunner
 import com.coldchain.handshake.handover.HandoverOrchestrator
@@ -207,7 +208,7 @@ class RoomRepositoriesTest {
                     shipments.saveShipment(shipment)
                 }
         }
-        val orchestrator = RepositoryProvider.handoverOrchestratorFor(database, refusing, telemetry, handovers)
+        val orchestrator = AppModule.handoverOrchestratorFor(database, refusing, telemetry, handovers)
 
         assertTrue(handOver(orchestrator, HandoverVerdict.UNKNOWN, "Logger damaged").isFailure)
 

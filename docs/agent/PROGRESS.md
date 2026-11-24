@@ -332,6 +332,23 @@ core-domain 122 failed 0 | debug 484 failed 0 | release 427 failed 0 | skipped 0
     removed from `InitializationProvider` (Supabase Auth needs androidx.startup); (5) delete `RepositoryProvider`,
     proof `grep -rn RepositoryProvider app/` empty; (6) role-based navigation, test-first. Converted tests keep their
     assertions (diff the `assert` lines), recorded in DECISIONS. Emulator check after (4) and (5)
+- [x] 5.1c steps 1 to 5 done: `LocalSession` (`6a521f6`); then `AppModule`, `ServerModule`, `AppStartup`,
+  `HiltWorker` with `Configuration.Provider`, the manifest entry, the debug chaos lab's entry point, tests converted,
+  `RepositoryProvider` and `LegacyProviderModule` deleted (commit below). `ShipmentHistorySyncCoordinator.clear()`
+  failed first (`clearingForgetsEveryShipmentsStateAndServerHead`, AssertionError), then passed. Test setup changes
+  and the three retired tests are in DECISIONS; the assertion diff shows only provider mechanics removed
+- [ ] 5.1c step 6: role-based navigation, test-first. And the emulator check of the Hilt wiring (cold launch,
+  sign-in, local mode, kill on Handover, escalation booked, 0 FATAL/ANR)
+
+```text
+grep -rn RepositoryProvider app/ --include=*.kt          (no code references; comments only, if any)
+./gradlew assembleDebug assembleRelease                   BUILD SUCCESSFUL (Hilt validated the graph)
+./gradlew :app:testDebugUnitTest --tests '*ShipmentHistorySyncCoordinatorTest*'   against an empty clear(): 6 tests, 1 failed
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+BUILD SUCCESSFUL in 3m 50s
+core-domain 122 failed 0 | debug 482 failed 0 | release 425 failed 0   (484 + 1 new - 3 retired = 482)
+```
+
 - [ ] How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
   `./gradlew --stop`, and only then start the emulator. Never end a turn with a heavy job running in the background
 - [ ] Next: the full proof and the device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,

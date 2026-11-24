@@ -38,7 +38,13 @@ import com.coldchain.handshake.repository.HandoverRepositoryImpl
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.FakeNetworkMonitor
 import com.coldchain.handshake.repository.ReadingUploader
-import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.debugtools.DebugTools
+import com.coldchain.handshake.handover.HandoverOrchestrator
+import com.coldchain.handshake.handover.ServerHandover
+import com.coldchain.handshake.repository.AccountRepository
+import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.safety.SafetyEngine
+import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.repository.SyncServiceImpl
 import com.coldchain.handshake.repository.ShipmentRepositoryImpl
 import com.coldchain.handshake.repository.ShipmentWorkflow
@@ -100,6 +106,28 @@ class HandoverScreenTest {
         account, FakeNetworkMonitor(), { "this-phone" }
     )
 
+    // What the app's module builds, here from this test's repositories and fake server.
+    private val safetyEngine = SafetyEngine(alerts, shipments)
+    private val simulator = TemperatureSimulator(
+        telemetryRepository = telemetry,
+        chaosEngineService = DebugTools.createChaosService(),
+        safetyEngine = safetyEngine
+    )
+    private val orchestrator = HandoverOrchestrator(shipments, telemetry, handovers)
+    private val history = ShipmentHistorySyncCoordinator(telemetry, server)
+    private val serverHandover = ServerHandover(
+        remote = server,
+        orchestrator = orchestrator,
+        shipments = shipments,
+        handovers = handovers,
+        history = history,
+        uploadPending = { shipmentId -> sync.uploadReadings(shipmentId) },
+        deviceId = { "this-phone" }
+    )
+
+    /** Signed out until a test opens a shipment from the server as someone. */
+    private var screenAccount: AccountRepository = AccountRepository.NONE
+
     private val localShipment = Shipment(
         "SHIP-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.ARRIVED, ProductProfiles.DEFAULT.id, now - 11 * minute
     )
@@ -115,24 +143,20 @@ class HandoverScreenTest {
     @Before
     fun setUp() {
         WorkManagerTestInitHelper.initializeTestWorkManager(context)
-        RepositoryProvider.initialize(shipments, telemetry, alerts, handovers, sync)
-        RepositoryProvider.remoteService = server
-        RepositoryProvider.deviceIdValue = "this-phone"
     }
 
     private val viewModels = mutableListOf<HandoverViewModel>()
 
-    /** Built from what `RepositoryProvider` hands out, as the app's own Hilt bridge does. */
     private fun screenViewModel() = HandoverViewModel(
-        RepositoryProvider.accountRepository,
-        RepositoryProvider.temperatureSimulator,
-        RepositoryProvider.shipmentHistorySyncCoordinator,
+        screenAccount,
+        simulator,
+        history,
         telemetry,
         alerts,
         handovers,
         server,
-        RepositoryProvider.serverHandover,
-        RepositoryProvider.handoverOrchestrator,
+        serverHandover,
+        orchestrator,
         SavedStateHandle()
     ).also { viewModels += it }
 
@@ -142,7 +166,6 @@ class HandoverScreenTest {
         showing = false
         compose.waitForIdle()
         viewModels.forEach { it.viewModelScope.cancel() }
-        RepositoryProvider.reset()
         db.close()
     }
 
@@ -152,9 +175,9 @@ class HandoverScreenTest {
             telemetry.saveTemperatures(events).getOrThrow()
         }
         if (monitorOnly) {
-            RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(localShipment)
+            simulator.attachShipmentForMonitoring(localShipment)
         } else {
-            RepositoryProvider.temperatureSimulator.attachShipment(localShipment)
+            simulator.attachShipment(localShipment)
         }
         val viewModel = screenViewModel()
         compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }
@@ -177,8 +200,8 @@ class HandoverScreenTest {
             server.currentUser = user
             val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
             account.setState(AccountState.Ready(user, null, UserProfile(user, role)))
-            RepositoryProvider.accountRepo = account
-            RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(opened)
+            screenAccount = account
+            simulator.attachShipmentForMonitoring(opened)
         }
         if (offlineOnArrival) server.offlineError = IOException("No connection")
         val viewModel = screenViewModel()
@@ -283,7 +306,7 @@ class HandoverScreenTest {
         showLocal()
         await("Record PASS handover")
         runBlocking {
-            RepositoryProvider.handoverOrchestrator.processHandover(
+            orchestrator.processHandover(
                 shipmentId = "SHIP-1",
                 workerSigned = true,
                 pharmacistSigned = true,
@@ -305,9 +328,9 @@ class HandoverScreenTest {
         // Waiting on the status itself: the logger was already running before, so nothing else proves it stopped.
         compose.waitUntil(10_000) {
             idleMain()
-            RepositoryProvider.temperatureSimulator.activeShipment.value?.status == ShipmentStatus.ACCEPTED
+            simulator.activeShipment.value?.status == ShipmentStatus.ACCEPTED
         }
-        assertTrue(RepositoryProvider.temperatureSimulator.isMonitorOnly.value)
+        assertTrue(simulator.isMonitorOnly.value)
     }
 
     @Test
@@ -315,7 +338,7 @@ class HandoverScreenTest {
         runBlocking {
             server.appendReadings("SHIP-1", readings(genesisHash = genesis), genesis, "courier-phone", "s").getOrThrow()
             val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
-            RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(opened)
+            simulator.attachShipmentForMonitoring(opened)
         }
         val viewModel = screenViewModel()
         compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }

@@ -321,17 +321,6 @@ class SyncServiceTest {
         assertEquals(SyncStatus.SYNCED, db.handoverDao().getHandoverDirect("SHIP-1")?.syncStatus)
         assertEquals(1, server.confirmations.size)
     }
-
-    @Test
-    fun resettingTheProviderStopsItsSyncScope() {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        RepositoryProvider.syncScope = scope
-
-        RepositoryProvider.reset()
-
-        assertNull(RepositoryProvider.syncScope)
-        assertFalse(scope.isActive)
-    }
 }
 
 class FakeNetworkMonitor(isInitiallyOnline: Boolean = true) : NetworkMonitor {

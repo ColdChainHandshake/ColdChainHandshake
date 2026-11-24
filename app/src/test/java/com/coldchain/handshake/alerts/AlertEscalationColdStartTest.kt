@@ -1,6 +1,7 @@
 package com.coldchain.handshake.alerts
 
 import android.content.Context
+import androidx.hilt.work.HiltWorkerFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.ListenableWorker
@@ -8,61 +9,78 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.coldchain.handshake.data.local.DatabaseProvider
+import com.coldchain.handshake.di.AppStartup
+import com.coldchain.handshake.di.ServerModule
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
-import com.coldchain.handshake.repository.AlertRepositoryImpl
-import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.repository.AccountRepository
+import com.coldchain.handshake.repository.AlertRepository
+import com.coldchain.handshake.repository.ColdChainRemote
+import com.coldchain.handshake.repository.FakeAccountRepository
+import com.coldchain.handshake.repository.FakeColdChainServer
 import com.coldchain.handshake.safety.AlertEscalationEngine
-import kotlinx.coroutines.isActive
+import dagger.hilt.android.testing.BindValue
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
+import dagger.hilt.android.testing.HiltTestApplication
+import dagger.hilt.android.testing.UninstallModules
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import androidx.startup.InitializationProvider
-import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import javax.inject.Inject
 
 /**
- * WorkManager can start the process for the escalation worker with no activity ever created, so nothing has
- * called `RepositoryProvider.initialize` yet. The worker must still reach the stored alerts, and an activity
- * opening afterwards must not build a second set of everything beside the first.
+ * WorkManager can start the process for the escalation worker with no activity ever created. The worker must still
+ * reach the stored alerts, through the same objects the screens use, and an activity created again (a rotation)
+ * must not start a second set of background jobs beside the first.
  */
+@HiltAndroidTest
+@UninstallModules(ServerModule::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = HiltTestApplication::class)
 class AlertEscalationColdStartTest {
+
+    @get:Rule
+    val hilt = HiltAndroidRule(this)
+
+    @BindValue @JvmField
+    val account: AccountRepository = FakeAccountRepository()
+
+    @BindValue @JvmField
+    val remote: ColdChainRemote = FakeColdChainServer(currentUser = "courier")
+
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var alerts: AlertRepository
+    @Inject lateinit var startup: AppStartup
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Before
     fun setUp() {
-        // A real process runs its content providers first, whichever component started it; App Startup's is
-        // where supabase-kt's session storage gets its context.
-        Robolectric.setupContentProvider(InitializationProvider::class.java, "${context.packageName}.androidx-startup")
+        hilt.inject()
         WorkManagerTestInitHelper.initializeTestWorkManager(
             context,
-            Configuration.Builder().setExecutor(SynchronousExecutor()).build()
+            Configuration.Builder().setExecutor(SynchronousExecutor()).setWorkerFactory(workerFactory).build()
         )
-        RepositoryProvider.reset()
     }
 
     @After
     fun tearDown() {
-        RepositoryProvider.reset()
         DatabaseProvider.closeForTesting()
     }
 
     @Test
     fun theWorkerEscalatesAStoredAlertWhenNoActivityHasStarted() = runBlocking {
-        val stored = AlertRepositoryImpl(DatabaseProvider.getDatabase(context).alertDao())
-        stored.saveAlert(
+        alerts.saveAlert(
             Alert(
                 id = "SHIP-1:TEMPERATURE_BREACH:1000",
                 shipmentId = "SHIP-1",
@@ -74,45 +92,21 @@ class AlertEscalationColdStartTest {
             )
         )
 
-        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).build().doWork()
+        val result = TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workerFactory).build().doWork()
 
         assertEquals(ListenableWorker.Result.success(), result)
-        assertEquals(EscalationLevel.SUPERVISOR, stored.getOpenAlerts().single().escalationLevel)
-    }
-
-    @Test
-    fun anActivityOpeningAfterTheWorkerReusesWhatTheWorkerBuilt() {
-        val workerRepository = RepositoryProvider.getAlertRepository(context)
-        val workerScope = RepositoryProvider.syncScope
-        assertNotNull(workerScope)
-
-        RepositoryProvider.initialize(context) // what MainActivity.onCreate does, on every creation
-
-        assertSame(workerRepository, RepositoryProvider.alertRepository)
-        assertSame(workerScope, RepositoryProvider.syncScope)
-        assertTrue(workerScope!!.isActive)
+        assertEquals(EscalationLevel.SUPERVISOR, alerts.getOpenAlerts().single().escalationLevel)
     }
 
     @Test
     fun rotatingTheActivityDoesNotStartASecondSetOfBackgroundJobs() {
-        RepositoryProvider.initialize(context)
-        val first = RepositoryProvider.syncScope!!
+        startup.start()
+        val first = startup.jobs
 
-        RepositoryProvider.initialize(context)
+        startup.start() // what MainActivity.onCreate does, on every creation
 
-        assertSame(first, RepositoryProvider.syncScope)
-        assertTrue(first.isActive)
-    }
-
-    @Test
-    fun afterAResetTheNextInitializeBuildsAFreshSet() {
-        RepositoryProvider.initialize(context)
-        val first = RepositoryProvider.syncScope!!
-
-        RepositoryProvider.reset()
-        RepositoryProvider.initialize(context)
-
-        assertFalse(first.isActive)
-        assertTrue(RepositoryProvider.syncScope!!.isActive)
+        assertEquals(2, first.size)
+        assertSame(first, startup.jobs)
+        assertTrue(first.all { it.isActive })
     }
 }

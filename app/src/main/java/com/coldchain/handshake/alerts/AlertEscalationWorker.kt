@@ -1,34 +1,45 @@
 package com.coldchain.handshake.alerts
 
 import android.content.Context
+import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.repository.AlertRepository
+import com.coldchain.handshake.repository.ShipmentRepository
+import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.safety.AlertEscalationRunner
 import com.coldchain.handshake.safety.LoggerSilenceCheck
+import com.coldchain.handshake.safety.SafetyEngine
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 import java.util.concurrent.TimeUnit
 
 /**
  * Looks for loggers that have gone quiet, applies due escalations, then books itself for the next
  * time either could matter. All state is stored, so it recovers from process death and reboots.
  */
-class AlertEscalationWorker(
-    context: Context,
-    params: WorkerParameters
+@HiltWorker
+class AlertEscalationWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted params: WorkerParameters,
+    private val alerts: AlertRepository,
+    private val shipments: ShipmentRepository,
+    private val telemetry: TelemetryRepository,
+    private val safetyEngine: SafetyEngine
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
         val runner = AlertEscalationRunner(
-            alertRepository = RepositoryProvider.getAlertRepository(applicationContext),
+            alertRepository = alerts,
             alertNotifier = AndroidAlertNotifier(applicationContext)
         )
         val silenceCheck = LoggerSilenceCheck(
-            shipmentRepository = RepositoryProvider.getShipmentRepository(applicationContext),
-            telemetryRepository = RepositoryProvider.getTelemetryRepository(applicationContext),
-            safetyEngine = RepositoryProvider.safetyEngine
+            shipmentRepository = shipments,
+            telemetryRepository = telemetry,
+            safetyEngine = safetyEngine
         )
 
         return runCatching { listOfNotNull(silenceCheck.run(), runner.run()).minOrNull() }.fold(

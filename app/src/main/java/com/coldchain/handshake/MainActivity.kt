@@ -13,20 +13,23 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.coldchain.handshake.alerts.AlertEscalationScheduler
-import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.di.AppStartup
 import com.coldchain.handshake.ui.navigation.AppRoot
 import com.coldchain.handshake.ui.theme.ColdChainTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var startup: AppStartup
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        RepositoryProvider.initialize(applicationContext)
+        startup.start()
         requestNotificationPermission()
         AlertEscalationScheduler.checkNow(applicationContext)
         setContent {

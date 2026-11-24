@@ -30,8 +30,18 @@ import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.FakeAccountRepository
 import com.coldchain.handshake.repository.MemberRole
-import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.repository.UserProfile
+import com.coldchain.handshake.di.ServerModule
+import com.coldchain.handshake.repository.AccountRepository
+import com.coldchain.handshake.repository.ColdChainRemote
+import com.coldchain.handshake.repository.FakeColdChainServer
+import com.coldchain.handshake.safety.SafetyEngine
+import dagger.hilt.android.testing.BindValue
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
+import dagger.hilt.android.testing.HiltTestApplication
+import dagger.hilt.android.testing.UninstallModules
+import javax.inject.Inject
 import com.coldchain.handshake.ui.navigation.Screen
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -51,12 +61,26 @@ import org.robolectric.annotation.Config
  * how a first launch looks. This is the startup check available without an emulator: it catches a
  * crash on launch or a screen that throws on first render, not how anything looks.
  */
+@HiltAndroidTest
+@UninstallModules(ServerModule::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = HiltTestApplication::class)
 class AppSmokeTest {
 
-    @get:Rule
+    @get:Rule(order = 0)
+    val hilt = HiltAndroidRule(this)
+
+    @get:Rule(order = 1)
     val compose = createEmptyComposeRule()
+
+    /** Signed out unless a test says otherwise, before it launches the app. */
+    @BindValue @JvmField
+    var account: AccountRepository = AccountRepository.NONE
+
+    @BindValue @JvmField
+    val remote: ColdChainRemote = FakeColdChainServer(currentUser = "user-1")
+
+    @Inject lateinit var safetyEngine: SafetyEngine
 
     private val ready = AccountState.Ready("user-1", "ana@example.com", UserProfile("Ana", MemberRole.COURIER))
 
@@ -85,7 +109,6 @@ class AppSmokeTest {
 
     @After
     fun tearDown() {
-        RepositoryProvider.reset()
         DatabaseProvider.closeForTesting()
     }
 
@@ -118,9 +141,9 @@ class AppSmokeTest {
         val shipment = Shipment(
             "SHIP-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.IN_TRANSIT, ProductProfiles.DEFAULT.id, t0
         )
-        RepositoryProvider.initialize(context)
+        hilt.inject()
 
-        RepositoryProvider.safetyEngine.processTelemetryAndEnforceSafety(
+        safetyEngine.processTelemetryAndEnforceSafety(
             shipment,
             listOf(TemperatureEvent("TE-1", "SHIP-1", "LOG-1", t0, -3.0, "", "", SyncStatus.PENDING, 1L))
         )
@@ -143,7 +166,7 @@ class AppSmokeTest {
     @Test
     fun signingOutReturnsToSignIn() {
         val account = FakeAccountRepository(ready)
-        RepositoryProvider.accountRepo = account
+        this.account = account
 
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNode(hasText("Sign Out")).performClick()
@@ -155,7 +178,7 @@ class AppSmokeTest {
 
     @Test
     fun aPhoneThatBelongsToSomeoneElseSaysSo() {
-        RepositoryProvider.accountRepo = FakeAccountRepository(
+        account = FakeAccountRepository(
             ready.copy(deviceProblem = "This phone is registered to another account.")
         )
 
@@ -166,7 +189,7 @@ class AppSmokeTest {
 
     @Test
     fun theAppStartsAndEveryTabOpens() {
-        RepositoryProvider.accountRepo = FakeAccountRepository(ready)
+        account = FakeAccountRepository(ready)
 
         ActivityScenario.launch(MainActivity::class.java).use {
             Screen.bottomNavItems.forEach { screen ->

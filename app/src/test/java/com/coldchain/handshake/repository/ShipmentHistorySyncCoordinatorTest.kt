@@ -32,6 +32,19 @@ class ShipmentHistorySyncCoordinatorTest {
         server.appendReadings("SHIP-1", readings, genesis, "phone", "signature").getOrThrow()
     }
 
+    // One coordinator lives as long as the process (5.1c). When the phone is cleared for the next person, what it
+    // knew about the last person's shipments must go too, or their history would look complete before it is fetched.
+    @Test
+    fun clearingForgetsEveryShipmentsStateAndServerHead() = runBlocking {
+        serverHas(chain)
+        coordinator.hydrateHistory("SHIP-1").getOrThrow()
+
+        coordinator.clear()
+
+        assertEquals(HistorySyncState.IDLE, coordinator.getSyncState("SHIP-1").first())
+        assertNull(coordinator.getServerHead("SHIP-1").value)
+    }
+
     @Test
     fun theServersReadingsAndHeadComeDown() = runBlocking {
         serverHas(chain)

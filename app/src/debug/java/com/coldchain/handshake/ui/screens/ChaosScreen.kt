@@ -53,7 +53,8 @@ import androidx.compose.ui.unit.sp
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.models.ChaosScenarioType
-import com.coldchain.handshake.repository.RepositoryProvider
+import com.coldchain.handshake.debugtools.ChaosLabEntryPoint
+import dagger.hilt.android.EntryPointAccessors
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.ui.theme.StatusRed
@@ -74,11 +75,13 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
-    val simulator = RepositoryProvider.temperatureSimulator
+    val tools = remember { EntryPointAccessors.fromApplication(context.applicationContext, ChaosLabEntryPoint::class.java) }
+    val simulator = tools.simulator()
+    val chaosEngineService = tools.chaos()
     val activeShipment by simulator.activeShipment.collectAsState()
     val shipmentId = activeShipment?.id ?: ""
 
-    val activeScenarios by RepositoryProvider.chaosEngineService.observeActiveScenarios().collectAsState(initial = emptyList())
+    val activeScenarios by chaosEngineService.observeActiveScenarios().collectAsState(initial = emptyList())
     val isHeatSpike = activeScenarios.any { it.scenarioType == ChaosScenarioType.HEAT_SPIKE && it.isActive }
     val isDisconnectActive = activeScenarios.any { it.scenarioType == ChaosScenarioType.LOGGER_DISCONNECT && it.isActive }
     val isNetworkFailureActive = activeScenarios.any { it.scenarioType == ChaosScenarioType.NETWORK_FAILURE && it.isActive }
@@ -193,7 +196,7 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
             buttonColor = StatusAmber,
             onAction = {
                 coroutineScope.launch {
-                    RepositoryProvider.chaosEngineService.injectScenario(ChaosScenarioType.LOGGER_DISCONNECT)
+                    chaosEngineService.injectScenario(ChaosScenarioType.LOGGER_DISCONNECT)
                     actionFeedback = "Logger Disconnect triggered! Alert created and visible in Alerts tab."
                     if (shipmentId.isNotBlank()) {
                         DebugTools.logChaosEvent(
@@ -221,7 +224,7 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
             onAction = {
                 coroutineScope.launch {
                     if (isNetworkFailureActive) {
-                        RepositoryProvider.chaosEngineService.resetScenario(ChaosScenarioType.NETWORK_FAILURE)
+                        chaosEngineService.resetScenario(ChaosScenarioType.NETWORK_FAILURE)
                         actionFeedback = "Network restored! Automatic sync to Supabase engaged."
                         if (shipmentId.isNotBlank()) {
                             DebugTools.logChaosEvent(
@@ -232,7 +235,7 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
                             )
                         }
                     } else {
-                        RepositoryProvider.chaosEngineService.injectScenario(ChaosScenarioType.NETWORK_FAILURE)
+                        chaosEngineService.injectScenario(ChaosScenarioType.NETWORK_FAILURE)
                         actionFeedback = "Offline mode active! Telemetry will buffer in local Room as PENDING."
                         if (shipmentId.isNotBlank()) {
                             DebugTools.logChaosEvent(
@@ -286,7 +289,7 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
         Button(
             onClick = {
                 coroutineScope.launch {
-                    RepositoryProvider.chaosEngineService.resetAllScenarios()
+                    chaosEngineService.resetAllScenarios()
                     simulator.reset()
                     actionFeedback = "System Reset! All chaos scenarios cleared and simulator reset to nominal baseline."
                     if (shipmentId.isNotBlank()) {
