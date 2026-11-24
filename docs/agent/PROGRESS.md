@@ -44,6 +44,33 @@ mutants, the trigger rewritten in the local DB without one column each:
 npx supabase db reset && npx supabase test db     Tests=238 ... Result: PASS
 ```
 
+- [x] 1.4 Escalation worker on a cold start. **The worker already got its repositories**: its lazy
+  `RepositoryProvider.getAlertRepository(context)` builds everything, and the Supabase client takes its settings from
+  `BuildConfig`, not the activity. `theWorkerEscalatesAStoredAlertWhenNoActivityHasStarted` (a real Room database, no
+  activity, App Startup run as a real process start does) passed as soon as it compiled, so it is a guard for later,
+  not a failed-first test. **The defect found next to it:** `MainActivity.onCreate` called `initialize(context)` on
+  every creation, rotation included, and each call built a second set (new scope, a second owner-check collector,
+  a second `SyncServiceImpl`, a new history coordinator) while the first set's jobs kept running, so a retained
+  ViewModel and the screens could hold different coordinators. `initialize(context)` now runs once per process (an
+  `initialized` flag set by its last line, so a call that failed part-way is retried; `reset()` clears it). A test
+  of that retry was tried and dropped: no input made the build fail part-way in Robolectric (a blank URL doesn't
+  throw), and `RepositoryProvider` is deleted in 5.1c. `HiltWorker` in 5.1c is still the real fix
+  - `AlertEscalationColdStartTest`: `anActivityOpeningAfterTheWorkerReusesWhatTheWorkerBuilt` and
+    `rotatingTheActivityDoesNotStartASecondSetOfBackgroundJobs` failed first (`expected same:<AlertRepositoryImpl@…>
+    was not:<AlertRepositoryImpl@…>`, `expected same:<CoroutineScope(…)>`); `afterAResetTheNextInitializeBuildsAFreshSet`
+  - The guard exposed a test-isolation gap: `AppSmokeTest.someoneSignedOutCanOnlySeeSignIn` failed in 3 of 4 full
+    runs (hung past 10 s; 0.3 s when it passes). A launch books an escalation check that ran on WorkManager's real
+    threads and could finish after the test's `reset()`, building everything on that test's context for the next
+    test to inherit; the old rebuild on every `onCreate` hid it. `AppSmokeTest` now uses a test WorkManager whose
+    workers do nothing (it checks a check is booked; two other classes run the worker)
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*AlertEscalationColdStartTest*'   first: 2 of 4 failed (above)
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --rerun-tasks --continue
+run 1: BUILD SUCCESSFUL in 3m 59s   run 2: BUILD SUCCESSFUL in 3m 50s
+core-domain 118 failed 0 | debug 447 failed 0 | release 390 failed 0 | skipped 0     (both runs)
+```
+
 ## FINISH run, Block S: setup (23 Nov 2026)
 
 - [x] S1 User env vars, checked by reading them back with `[Environment]::GetEnvironmentVariable(..., 'User')`:

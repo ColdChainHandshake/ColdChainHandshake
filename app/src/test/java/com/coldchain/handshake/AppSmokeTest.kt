@@ -12,8 +12,14 @@ import androidx.compose.ui.test.performClick
 import androidx.startup.InitializationProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.Configuration
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.Worker
+import androidx.work.WorkerFactory
+import androidx.work.WorkerParameters
+import androidx.work.testing.SynchronousExecutor
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.coldchain.handshake.alerts.AlertEscalationScheduler
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.models.ProductProfiles
@@ -56,8 +62,25 @@ class AppSmokeTest {
 
     @Before
     fun setUp() {
-        val packageName = ApplicationProvider.getApplicationContext<Context>().packageName
-        Robolectric.setupContentProvider(InitializationProvider::class.java, "$packageName.androidx-startup")
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        Robolectric.setupContentProvider(InitializationProvider::class.java, "${context.packageName}.androidx-startup")
+        // Launching books an escalation check. Here it is booked but not run: run on WorkManager's own threads, it
+        // could finish after this test's reset and build the app's objects on this test's context, for the next
+        // test to inherit. `AlertNotificationsTest` and `AlertEscalationColdStartTest` run the worker itself.
+        WorkManagerTestInitHelper.initializeTestWorkManager(
+            context,
+            Configuration.Builder()
+                .setExecutor(SynchronousExecutor())
+                .setWorkerFactory(BookedOnlyWorkerFactory)
+                .build()
+        )
+    }
+
+    private object BookedOnlyWorkerFactory : WorkerFactory() {
+        override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters) =
+            object : Worker(appContext, workerParameters) {
+                override fun doWork() = Result.success()
+            }
     }
 
     @After

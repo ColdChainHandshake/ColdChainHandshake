@@ -165,8 +165,15 @@ object RepositoryProvider : SessionGate {
         }
         set(value) { simulator = value }
 
+    /**
+     * Builds everything once per process. Later calls do nothing: `MainActivity` calls this on every creation,
+     * rotation included, and a worker may already have called it when WorkManager started the process. Building
+     * again would leave the first set's background jobs running beside the second's. [reset] starts over. A call
+     * that failed part-way didn't count, so the next one tries again.
+     */
     fun initialize(context: Context) {
         synchronized(this) {
+            if (initialized) return
             val appContext = context.applicationContext
             val db = DatabaseProvider.getDatabase(appContext)
             database = db
@@ -281,8 +288,13 @@ object RepositoryProvider : SessionGate {
                     wasDisconnectActive = isDisconnectActive
                 }
             }
+            initialized = true
         }
     }
+
+    /** Set by the last line of [initialize] from a context, cleared by [reset]. */
+    @Volatile
+    private var initialized = false
 
     /**
      * The app's own orchestrator. A handover runs in one database transaction, so a breach arriving
@@ -406,6 +418,7 @@ object RepositoryProvider : SessionGate {
         synchronized(this) {
             syncScope?.cancel()
             syncScope = null
+            initialized = false
             database = null
             _confirmedOwner.value = null
             _localOwnerProblem.value = null
