@@ -34,8 +34,17 @@ kb_off() {
     sleep 1
 }
 
+# plain <text>: true for text that is safe to hand to the device's shell. `adb shell` joins its arguments and the
+# device's sh parses them again, so `;`, a backtick or `$(` would run there (security review S9).
+plain() {
+    case "$1" in
+        ''|*[!A-Za-z0-9@._%+-]*) echo "refusing text with characters outside A-Z a-z 0-9 @ . _ % + -: $1" >&2; return 1 ;;
+    esac
+}
+
 # focus_type <x> <y> <text>: spaces as %s
 focus_type() {
+    plain "$1" && plain "$2" && plain "$3" || return 1
     for _ in 1 2 3 4; do
         "$A" -s "$S" shell input tap "$1" "$2"; sleep 2
         "$A" -s "$S" shell dumpsys input_method | grep -q 'mInputShown=true' && break
@@ -55,6 +64,7 @@ fresh_app() {
 
 # code_for <email>: the newest 6-digit code the local mail catcher holds for it
 code_for() {
+    plain "$1" || return 1
     curl -s "http://127.0.0.1:54324/api/v1/search?query=to:$1" | python -I -c "
 import sys, json, re, urllib.request
 messages = json.load(sys.stdin)['messages']

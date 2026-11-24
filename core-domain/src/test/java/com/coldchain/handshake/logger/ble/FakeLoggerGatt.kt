@@ -1,5 +1,6 @@
 package com.coldchain.handshake.logger.ble
 
+import com.coldchain.handshake.logger.LoggerBatch
 import com.coldchain.handshake.logger.VirtualLogger
 import com.coldchain.handshake.logger.hexToBytes
 import kotlinx.coroutines.flow.Flow
@@ -16,13 +17,17 @@ import java.util.UUID
  * @param grantedMtu The largest MTU it agrees to; it starts at Bluetooth's default of 23.
  * @param dropPage A page index to lose in transit, as a radio might.
  * @param silent Never answers a history request or a challenge.
+ * @param forgeHeader Rewrites each batch header before it is sent, as a hostile device might.
+ * @param oversend Sends this many records more than were asked for.
  */
 class FakeLoggerGatt(
     private val logger: VirtualLogger,
     private val grantedMtu: Int = 247,
     private val protocolVersion: Int = 1,
     var dropPage: Int? = null,
-    var silent: Boolean = false
+    var silent: Boolean = false,
+    var forgeHeader: (LoggerBatch) -> LoggerBatch = { it },
+    var oversend: Int = 0
 ) : GattConnection {
 
     override var attMtu: Int = 23
@@ -78,7 +83,7 @@ class FakeLoggerGatt(
         val max = buffer.short.toInt() and 0xFFFF
         // The logger sends nothing at all below the minimum MTU, or when nothing is that new.
         if (attMtu < LoggerGatt.MIN_ATT_MTU) return
-        val batch = logger.readHistory(fromSeq, max).getOrThrow() ?: return
+        val batch = logger.readHistory(fromSeq, max + oversend).getOrThrow() ?: return
 
         val perPage = (attMtu - 3 - 3) / 22
         batch.records.chunked(perPage).forEachIndexed { index, page ->
@@ -87,8 +92,9 @@ class FakeLoggerGatt(
             page.forEach { bytes.put(it.encode()) }
             notify(LoggerGatt.HISTORY_DATA, bytes.array())
         }
-        val header = ByteBuffer.allocate(145).put(2).putLong(batch.firstSeq).putLong(batch.lastSeq)
-            .put(batch.startHash.hexToBytes()).put(batch.endHash.hexToBytes()).put(batch.signature.hexToBytes())
+        val sent = forgeHeader(batch)
+        val header = ByteBuffer.allocate(145).put(2).putLong(sent.firstSeq).putLong(sent.lastSeq)
+            .put(sent.startHash.hexToBytes()).put(sent.endHash.hexToBytes()).put(sent.signature.hexToBytes())
         notify(LoggerGatt.HISTORY_DATA, header.array())
     }
 

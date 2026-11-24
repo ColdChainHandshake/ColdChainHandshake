@@ -6,6 +6,7 @@ import com.coldchain.handshake.logger.LoggerInfo
 import com.coldchain.handshake.logger.LoggerLink
 import com.coldchain.handshake.logger.LoggerProtocol
 import com.coldchain.handshake.logger.LoggerStatus
+import com.coldchain.handshake.logger.recordsRunExactly
 import com.coldchain.handshake.logger.ble.LoggerGatt.HistoryNotification
 import com.coldchain.handshake.logger.ble.LoggerGattException.Kind
 import kotlinx.coroutines.CancellationException
@@ -55,16 +56,25 @@ class BleLoggerLink(
         ensureMtu()
         if (readStatus().newestSeq < fromSeq) return@attempt null
 
-        val request = LoggerGatt.encodeHistoryRequest(fromSeq, minOf(maxRecords, LoggerGatt.MAX_RECORDS_PER_REQUEST))
-        val answers = writeThenCollect(LoggerGatt.HISTORY_REQUEST, request, LoggerGatt.HISTORY_DATA) {
-            it.isNotEmpty() && it[0].toInt() == LoggerGatt.PAGE_BATCH_HEADER
+        val asked = minOf(maxRecords, LoggerGatt.MAX_RECORDS_PER_REQUEST)
+        val request = LoggerGatt.encodeHistoryRequest(fromSeq, asked)
+        // More records than were asked for breaks the protocol, and is refused as they arrive rather than kept
+        // (security review S2).
+        var arrived = 0
+        val answers = writeThenCollect(LoggerGatt.HISTORY_REQUEST, request, LoggerGatt.HISTORY_DATA) { bytes ->
+            val page = LoggerGatt.decodeHistoryNotification(bytes)
+            if (page is HistoryNotification.Records) {
+                arrived += page.records.size
+                if (arrived > asked) throw LoggerGattException(Kind.MALFORMED, "asked for $asked records, got $arrived")
+            }
+            page is HistoryNotification.BatchHeader
         }.map(LoggerGatt::decodeHistoryNotification)
 
         // The answers end at the first header, so anything else last means the notifications stopped early.
         val header = answers.lastOrNull() as? HistoryNotification.BatchHeader
             ?: throw LoggerGattException(Kind.INCOMPLETE, "the logger stopped before sending its batch header")
         val records = answers.dropLast(1).flatMap { (it as HistoryNotification.Records).records }
-        if (records.map { it.seq } != (header.firstSeq..header.lastSeq).toList()) {
+        if (!recordsRunExactly(records, header.firstSeq, header.lastSeq)) {
             throw LoggerGattException(
                 Kind.INCOMPLETE,
                 "the header covers ${header.firstSeq} to ${header.lastSeq} but ${records.size} records arrived"

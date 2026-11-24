@@ -41,7 +41,7 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
     private lateinit var service: android.bluetooth.BluetoothGattService
 
     private val operations = Mutex()
-    private var pending: CompletableDeferred<Any>? = null
+    private val pending = GattOperationSlot()
     private val connected = CompletableDeferred<Unit>()
     private val discovered = CompletableDeferred<Unit>()
 
@@ -65,7 +65,7 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
                 val lost = IOException("The logger disconnected (status $status)")
                 connected.completeExceptionally(lost)
                 discovered.completeExceptionally(lost)
-                pending?.completeExceptionally(lost)
+                pending.failWaiting(lost)
             }
         }
 
@@ -74,9 +74,10 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
             else discovered.completeExceptionally(IOException("Service discovery failed (status $status)"))
         }
 
+        // An MTU change the peer or the stack started still updates the MTU, but finishes only an MTU request.
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) attMtu = mtu
-            finish(status, attMtu)
+            pending.finish(GattOp.MTU, null, status, attMtu)
         }
 
         override fun onCharacteristicRead(
@@ -84,19 +85,21 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray,
             status: Int
-        ) = finish(status, value.copyOf())
+        ) = pending.finish(GattOp.READ, characteristic.uuid, status, value.copyOf())
 
         @Deprecated("Called before Android 13 instead of the overload with the value")
         @Suppress("DEPRECATION")
         override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) finish(status, characteristic.value?.copyOf() ?: ByteArray(0))
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                pending.finish(GattOp.READ, characteristic.uuid, status, characteristic.value?.copyOf() ?: ByteArray(0))
+            }
         }
 
         override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) =
-            finish(status, Unit)
+            pending.finish(GattOp.WRITE, characteristic.uuid, status, Unit)
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) =
-            finish(status, Unit)
+            pending.finish(GattOp.DESCRIPTOR, descriptor.characteristic.uuid, status, Unit)
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             notified.tryEmit(characteristic.uuid to value.copyOf())
@@ -111,23 +114,20 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
         }
     }
 
-    private fun finish(status: Int, result: Any) {
-        val waiting = pending ?: return
-        if (status == BluetoothGatt.GATT_SUCCESS) waiting.complete(result)
-        else waiting.completeExceptionally(IOException("GATT operation failed (status $status)"))
-    }
-
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    override suspend fun requestMtu(mtu: Int): Int = operation("request the MTU") { gatt.requestMtu(mtu) } as Int
+    override suspend fun requestMtu(mtu: Int): Int =
+        operation(GattOp.MTU, null, "request the MTU") { gatt.requestMtu(mtu) } as Int
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     override suspend fun read(characteristic: UUID): ByteArray =
-        operation("read $characteristic") { gatt.readCharacteristic(characteristicOf(characteristic)) } as ByteArray
+        operation(GattOp.READ, characteristic, "read $characteristic") {
+            gatt.readCharacteristic(characteristicOf(characteristic))
+        } as ByteArray
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     override suspend fun write(characteristic: UUID, value: ByteArray) {
         val target = characteristicOf(characteristic)
-        operation("write $characteristic") {
+        operation(GattOp.WRITE, characteristic, "write $characteristic") {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gatt.writeCharacteristic(target, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
                     BluetoothStatusCodes.SUCCESS
@@ -147,23 +147,25 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun close() {
         closed = true
-        pending?.completeExceptionally(IOException("Closed"))
+        pending.failWaiting(IOException("Closed"))
         gatt.disconnect()
         gatt.close()
     }
 
-    /** Starts one GATT operation and waits for its callback. [start] returns false if Android refused to start it. */
-    private suspend fun operation(what: String, start: () -> Boolean): Any = operations.withLock {
+    /**
+     * Starts one GATT operation and waits for the callback of that [op] on [target]. [start] returns false if
+     * Android refused to start it.
+     */
+    private suspend fun operation(op: GattOp, target: UUID?, what: String, start: () -> Boolean): Any = operations.withLock {
         if (closed) throw IOException("The logger is not connected")
-        val result = CompletableDeferred<Any>()
-        pending = result
+        val result = pending.open(op, target)
         try {
             if (!start()) throw IOException("Android refused to $what")
             withTimeout(timeoutMs) { result.await() }
         } catch (e: TimeoutCancellationException) {
             throw IOException("No answer to $what within $timeoutMs ms")
         } finally {
-            pending = null
+            pending.clear()
         }
     }
 
@@ -199,7 +201,7 @@ class AndroidGattConnection private constructor(private val timeoutMs: Long) : G
         val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION)
             ?: throw IOException("$uuid can't notify")
         val enable = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        operation("enable notifications on $uuid") {
+        operation(GattOp.DESCRIPTOR, uuid, "enable notifications on $uuid") {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gatt.writeDescriptor(descriptor, enable) == BluetoothStatusCodes.SUCCESS
             } else {

@@ -13,9 +13,9 @@ data class TemperatureCard(val value: String, val status: String, val level: Lev
     companion object {
         fun of(celsius: Double?, profile: ProductProfile): TemperatureCard = when {
             celsius == null -> TemperatureCard("--", "NO READING YET", Level.NONE)
-            celsius > profile.maxC || celsius < profile.minC ->
-                TemperatureCard(format(celsius), "OUTSIDE PRODUCT RANGE", Level.OUT_OF_RANGE)
-            else -> TemperatureCard(format(celsius), "WITHIN PRODUCT RANGE", Level.IN_RANGE)
+            // Asked positively, so a value that isn't a number (NaN compares false both ways) is never in range.
+            celsius in profile.minC..profile.maxC -> TemperatureCard(format(celsius), "WITHIN PRODUCT RANGE", Level.IN_RANGE)
+            else -> TemperatureCard(format(celsius), "OUTSIDE PRODUCT RANGE", Level.OUT_OF_RANGE)
         }
 
         private fun format(celsius: Double) = String.format(java.util.Locale.US, "%.1f°C", celsius)

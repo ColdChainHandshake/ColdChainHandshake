@@ -37,4 +37,12 @@ class TemperatureCardTest {
         assertEquals(TemperatureCard.Level.IN_RANGE, TemperatureCard.of(vaccine.maxC, vaccine).level)
         assertTrue(TemperatureCard.of(vaccine.maxC + 0.1, vaccine).status.contains("OUTSIDE"))
     }
+
+    // Security review S5: a value that isn't a number must never read as within range.
+    @Test
+    fun aValueThatIsNotANumberIsNeverWithinRange() {
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY).forEach {
+            assertTrue("$it", TemperatureCard.of(it, vaccine).level != TemperatureCard.Level.IN_RANGE)
+        }
+    }
 }

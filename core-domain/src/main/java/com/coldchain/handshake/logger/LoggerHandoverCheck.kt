@@ -72,7 +72,11 @@ class LoggerHandoverCheck(
 
         val info = link.info().getOrElse { return unreadable(it) }
         if (info.loggerId != loggerId) {
-            return result(FAILED, "This is logger ${info.loggerId}, not the shipment's logger $loggerId.")
+            // The ID is the device's own text: quoted, cut short and stripped of control characters, so it can't
+            // pass for a reason line of its own (security review S4).
+            val shown = info.loggerId.filterNot { it.isISOControl() }.take(SHOWN_ID_LENGTH)
+            val cut = if (info.loggerId.length > shown.length) "…" else ""
+            return result(FAILED, "This logger calls itself \"$shown$cut\", not the shipment's logger $loggerId.")
         }
 
         val newest = link.status().getOrElse { return unreadable(it) }.newestSeq
@@ -146,5 +150,6 @@ class LoggerHandoverCheck(
         const val NONCE_SIZE = 16
         const val DEFAULT_PAGE_SIZE = 500
         const val DEFAULT_MAX_PAGES = 64
+        private const val SHOWN_ID_LENGTH = 40
     }
 }

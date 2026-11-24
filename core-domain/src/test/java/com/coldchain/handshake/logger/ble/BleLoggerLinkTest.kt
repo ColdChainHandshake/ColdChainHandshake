@@ -86,6 +86,33 @@ class BleLoggerLinkTest {
         assertEquals(LoggerGattException.Kind.INCOMPLETE, kindOf(result))
     }
 
+    // Security review S1: the range a header claims comes from the device, so nothing may be built in its size.
+    @Test(timeout = 10_000)
+    fun aHeaderClaimingAHugeRangeIsRefusedWithoutBuildingIt() = runTest {
+        val fake = FakeLoggerGatt(logger).apply { forgeHeader = { it.copy(lastSeq = Long.MAX_VALUE) } }
+        assertEquals(LoggerGattException.Kind.INCOMPLETE, kindOf(BleLoggerLink(fake).readHistory(1, 500)))
+
+        fake.forgeHeader = { it.copy(firstSeq = Long.MIN_VALUE) }
+        assertEquals(LoggerGattException.Kind.INCOMPLETE, kindOf(BleLoggerLink(fake).readHistory(1, 500)))
+    }
+
+    @Test(timeout = 10_000)
+    fun theVerifierRefusesAHugeClaimedRangeWithoutBuildingIt() = runTest {
+        val honest = logger.readHistory(1, 500).getOrThrow()!!
+        val forged = honest.copy(lastSeq = Long.MAX_VALUE)
+
+        val verification = LoggerHistoryVerifier.verify("LOG-BLE-1", logger.publicKeyUncompressed, listOf(forged))
+
+        assertTrue(!verification.trusted)
+    }
+
+    // Security review S2: a device that sends more than was asked for is not following the protocol.
+    @Test
+    fun aBatchWithMoreRecordsThanAskedForIsMalformed() = runTest {
+        val result = BleLoggerLink(FakeLoggerGatt(logger, oversend = 1)).readHistory(fromSeq = 1, maxRecords = 5)
+        assertEquals(LoggerGattException.Kind.MALFORMED, kindOf(result))
+    }
+
     @Test
     fun aLoggerThatNeverAnswersTimesOut() = runTest {
         val history = BleLoggerLink(FakeLoggerGatt(logger, silent = true), timeoutMs = 5_000).readHistory(1, 500)

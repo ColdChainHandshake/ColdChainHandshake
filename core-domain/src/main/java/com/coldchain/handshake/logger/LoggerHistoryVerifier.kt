@@ -107,7 +107,7 @@ object LoggerHistoryVerifier {
                 ),
                 batch.signature.hexToBytes()
             )
-            val joined = batch.records.map { it.seq } == (batch.firstSeq..batch.lastSeq).toList() &&
+            val joined = recordsRunExactly(batch.records, batch.firstSeq, batch.lastSeq) &&
                 batch.records.fold(batch.startHash.hexToBytes()) { hash, record -> LoggerProtocol.chain(hash, record) }
                     .toHex() == batch.endHash
 

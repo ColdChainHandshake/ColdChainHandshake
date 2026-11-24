@@ -30,6 +30,34 @@ def debugAppKey = System.getenv('CCH_APP_SUPABASE_KEY')
 if (debugAppUrl?.toLowerCase()?.contains('ljqwaqesiszczixbclwg') || supabaseUrl.toLowerCase().contains('ljqwaqesiszczixbclwg')) {
     throw new GradleException('The app must never be built against the demo project.')
 }
+// That check is a tripwire on the project ref, not a control: a custom domain in front of the demo project passes it.
+
+// Whatever goes into BuildConfig ships inside the APK (security review S6). The values are pasted into Java source,
+// so they must be plain, and the only key an app may hold is a publishable (anon) one. Messages never show a value.
+def refuseUnsafeAppValue = { String name, String value ->
+    if (value != null && (value.contains('"') || value.contains('\\'))) {
+        throw new GradleException("$name contains a quote or a backslash.")
+    }
+}
+def refuseSecretKey = { String name, String key ->
+    if (!key) return
+    refuseUnsafeAppValue(name, key)
+    def secret = key.startsWith('sb_secret_')
+    def parts = key.split('\\.')
+    if (!secret && parts.length == 3) {
+        try {
+            def payload = new String(Base64.urlDecoder.decode(parts[1].replace('=', '')), 'UTF-8')
+            secret = payload.replaceAll('\\s', '').contains('"role":"service_role"')
+        } catch (IllegalArgumentException ignored) {
+            // Not a JWT: nothing more to check.
+        }
+    }
+    if (secret) throw new GradleException("$name is a secret key. An app may only hold a publishable (anon) key.")
+}
+refuseUnsafeAppValue('supabase.url', supabaseUrl)
+refuseSecretKey('supabase.anon.key', supabaseAnonKey)
+refuseUnsafeAppValue('CCH_APP_SUPABASE_URL', debugAppUrl)
+refuseSecretKey('CCH_APP_SUPABASE_KEY', debugAppKey)
 
 android {
     namespace = 'com.coldchain.handshake'

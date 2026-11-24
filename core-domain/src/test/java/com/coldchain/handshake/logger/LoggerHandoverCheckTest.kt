@@ -120,6 +120,19 @@ class LoggerHandoverCheckTest {
         assertEquals(FAILED, result.outcome)
     }
 
+    // Security review S4: the ID is the device's own text, shown among the reasons on the handover screen.
+    @Test
+    fun aLoggerIdCanNotWriteItsOwnReasonLines() = runTest {
+        val forged = "X.\nThe logger's own signed history matches the shipment's readings." + "!".repeat(400)
+        val logger = VirtualLogger(forged).apply { (1..5).forEach { record(1_700_000_000_000 + it * 60_000L, 450) } }
+        val result = run(logger, logger.publicKeyUncompressed, emptyList(), id = "LOG-SHIPMENT")
+
+        assertEquals(FAILED, result.outcome)
+        val reason = result.reasons.single()
+        assertTrue(reason, reason.none { it.isISOControl() })
+        assertTrue(reason, reason.length < 160)
+    }
+
     @Test
     fun aHistoryEditedInTransitFails() = runTest {
         val logger = logger()

@@ -71,6 +71,26 @@ run 1: BUILD SUCCESSFUL in 3m 59s   run 2: BUILD SUCCESSFUL in 3m 50s
 core-domain 118 failed 0 | debug 447 failed 0 | release 390 failed 0 | skipped 0     (both runs)
 ```
 
+- [x] 1.5 Security review of `gate-2..HEAD` by one fresh subagent in one sitting (`docs/agent/security_review.md`):
+  no path to a false PASS; high 0, medium 1, low 2, info 6. Fixed test-first: S1 (a forged batch header claiming
+  `0..Long.MAX_VALUE` ran the phone out of memory before any signature check), S2 (more records than asked for),
+  S3 (GATT callbacks finishing someone else's operation), S4 (the device's ID writing its own reason line), S5 (NaN
+  shown within range), S6 (secret keys or quotes in BuildConfig values), S9 (`drive.sh` passing text to the device's
+  shell). S7 to the owner (OTP expiry, HANDOFF), S8 accepted until 4.3 (`DECISIONS.md`). Triage table at the end of
+  the review
+
+```text
+first runs:  BleLoggerLinkTest  aHeaderClaimingAHugeRange… / theVerifierRefusesAHugeClaimedRange…  java.lang.OutOfMemoryError
+             aBatchWithMoreRecordsThanAskedForIsMalformed   AssertionError
+             LoggerHandoverCheckTest.aLoggerIdCanNotWriteItsOwnReasonLines, TemperatureCardTest.aValueThatIsNotANumber…  AssertionError
+             GattOperationSlotTest  4 of 7 failed against a stub; with the matching line removed (the old behaviour) 4 of 7 fail
+build check: CCH_APP_SUPABASE_KEY=sb_secret_… / a service_role JWT / a value with a quote -> configuring ':app' fails
+             ("is a secret key…", "contains a quote or a backslash."), value never printed; an anon JWT builds
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease --continue
+BUILD SUCCESSFUL in 2m 50s
+core-domain 122 failed 0 | debug 455 failed 0 | release 398 failed 0 | skipped 0
+```
+
 ## FINISH run, Block S: setup (23 Nov 2026)
 
 - [x] S1 User env vars, checked by reading them back with `[Environment]::GetEnvironmentVariable(..., 'User')`:

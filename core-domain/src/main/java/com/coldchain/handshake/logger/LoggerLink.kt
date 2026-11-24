@@ -27,6 +27,17 @@ data class LoggerBatch(
 )
 
 /**
+ * True when [records] are exactly [firstSeq], [firstSeq] + 1, … [lastSeq], in order. The range comes from the
+ * device, so it is checked record by record and nothing is built in its size (security review S1: a header
+ * claiming `0..Long.MAX_VALUE` ran the phone out of memory). No records fits only a range with nothing in it.
+ */
+internal fun recordsRunExactly(records: List<LoggerRecord>, firstSeq: Long, lastSeq: Long): Boolean {
+    if (records.isEmpty()) return lastSeq < firstSeq
+    if (records.first().seq != firstSeq || records.last().seq != lastSeq) return false
+    return records.zipWithNext().all { (a, b) -> a.seq != Long.MAX_VALUE && b.seq == a.seq + 1 }
+}
+
+/**
  * The logger's newest record, signed with the reader's nonce, which shows it is present now.
  */
 data class LoggerHead(

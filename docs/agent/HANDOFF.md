@@ -16,7 +16,9 @@ probably keeps the access it was first given until it reconnects.
    `supabase_read_only_user`.
 2. Custom SMTP, then the email templates (you said you'll do this before the Gate 3 run): in **Magic link** and
    **Confirm signup** add `<p>Your code: {{ .Token }}</p>` and Save (details in item 3 below). Claude won't change
-   the sign-in flow meanwhile.
+   the sign-in flow meanwhile. While you're there (security review S7, optional): Authentication, Providers, Email,
+   set the **Email OTP Expiration** to 600 seconds or less. A 6-digit code is one in a million, so it shouldn't stay
+   valid for the default hour.
 3. Say "dev project writable". Claude then applies the migrations, runs the advisors, writes the real publishable
    key into `local.properties`, and prepares the two-device run. It asks you to be online for about 30 minutes before
    starting, because it needs each sign-in code from your inbox.
