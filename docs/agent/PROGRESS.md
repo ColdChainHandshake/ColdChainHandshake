@@ -1,8 +1,9 @@
 # Progress
 
 **Next action (24 Nov, 22:20):** `gate-1` and `gate-3` are tagged; the phone pass and the Handover/Alerts kill
-checks are done (Step 2 below). Next: fix test-first that Handover and Alerts come back without their shipment
-after a kill, as part of 5.1c. Step 5's
+checks are done, and Handover and Alerts now come back with their shipment after a kill (Step 2 below, proven on
+the S24). Next: the rest of 5.1c (Hilt builds everything, `HiltWorker`, `RepositoryProvider` and
+`LegacyProviderModule` deleted, role-based navigation). Step 5's
 server work (4.3) must stay compatible with the `05b342e` app.
 Memory rule (owner, 24 Nov): 16 GB RAM; never Gradle and the emulator at once; full proof in the foreground, then
 `./gradlew --stop`, then the emulator; one emulator only. Switches now `PHONE = present`, `EMULATORS = 1`.
@@ -297,8 +298,25 @@ BUILD SUCCESSFUL in 1m 11s      56 tests, 0 failed (AppSmokeTest opens every tab
     `SHIP-7976E2` again. Whether the ACKED filter survived can't be read from the layout dump (the chips expose no
     selected state), so it stays proven at the ViewModel level only
   - `logcat`: 0 FATAL EXCEPTION, 0 ANR in the app
-- [ ] **Fix, test-first:** restore the saved shipment where every screen goes through it, so Handover and Alerts
-  come back attached after a kill without opening Transit (5.1c)
+- [x] **Fixed test-first:** the saved shipment is restored where every screen goes through it. `AppRootViewModel`
+  saves the simulator's shipment and whether it is watched, and puts it back through `ActiveShipmentRestorer` once
+  the main app opens (local mode, or after the owner check); the restorer is Transit's old restore, moved, which
+  Transit now also calls. `AppRootViewModelTest`: `aShipmentOpenOnAnyScreenComesBackAfterTheProcessIsKilled`,
+  `aShipmentBeingWatchedComesBackOnlyWatched`, `nothingComesBackUntilThePhoneHasCheckedWhoIsSignedIn` failed
+  against the stub; `aShipmentThisPhoneNoLongerHoldsDoesNotComeBack` passed against it (a guard). Mutant: without
+  the wait for the main app, `nothingComesBack…` fails. Transit's 13 tests unchanged apart from the constructor
+  - S24, local mode `SHIP-D77515`: killed on Handover, back from Recents straight onto `SHIP-D77515` with Stage 3
+    and Failed (freeze damage) still selected; killed on Alerts, back on `SHIP-D77515`; recording waits ("Resume");
+    logcat 0 FATAL, 0 ANR
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*AppRootViewModelTest*' --tests '*TransitViewModelTest*'
+    against the stub: 23 tests completed, 3 failed
+    mutant (no wait for RootScreen.Main): 10 tests completed, 1 failed (nothingComesBack…)
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+BUILD SUCCESSFUL in 4m 19s
+core-domain 122 failed 0 | debug 484 failed 0 | release 427 failed 0 | skipped 0
+```
 - [ ] How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
   `./gradlew --stop`, and only then start the emulator. Never end a turn with a heavy job running in the background
 - [ ] Next: the full proof and the device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
