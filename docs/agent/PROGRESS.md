@@ -147,7 +147,20 @@ core-domain 122 failed 0 | debug 467 failed 0 | release 410 failed 0 | skipped 0
 BUILD SUCCESSFUL in 1m 11s      56 tests, 0 failed (AppSmokeTest opens every tab through Hilt)
 ```
 
-- [ ] Next: the full proof and the two device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
+- [x] Fix found by review before stopping: these ViewModels outlive a tab switch, and per-shipment state (a
+  recorded result, the server's notice, custody and members, the courier's last location, the inspection answers)
+  carried over to the next shipment opened, where the old `remember` state had reset. Now reset whenever the
+  shipment changes, and the VVM and shake answers are saved with the shipment they were given for.
+  `openingAnotherShipmentClearsWhatBelongedToTheLastOne`, `inspectionAnswersSavedForOneShipmentAreNotRestoredForAnother`
+  (Handover) and `openingAnotherShipmentClearsTheLastOnesLocationAndCustody` (Transit) failed first; with the reset
+  removed again, the first fails on shipment A's result showing under B. Same targeted classes afterwards: 45 tests, 0 failed
+- [ ] Device checks still to do, besides rotation: kill the process **while on Handover** and **while on Alerts**.
+  Only `TransitViewModel` restores the saved shipment into the simulator, so those screens may come back empty
+  unless Transit is opened; if so, move the restore where every screen goes through it (fits 5.1c). Until that
+  passes, the inspection answers surviving a kill are proven only at the ViewModel level
+- [ ] How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
+  `./gradlew --stop`, and only then start the emulator. Never end a turn with a heavy job running in the background
+- [ ] Next: the full proof and the device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
   `RepositoryProvider` and `LegacyProviderModule` deleted, role-based navigation)
 
 ## FINISH run, Block S: setup (23 Nov 2026)

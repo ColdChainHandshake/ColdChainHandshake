@@ -196,6 +196,28 @@ class TransitViewModelTest {
         visible.cancel()
     }
 
+    // The ViewModel outlives a tab switch, so one shipment's courier location must not show for the next.
+    @Test
+    fun openingAnotherShipmentClearsTheLastOnesLocationAndCustody() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        server.seedShipment("SHIP-2", custodian = "courier")
+        server.gpsPoints += GpsPoint("G-1", "SHIP-1", 1.5, 2.5, 10f, 1_700_000_100_000)
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(500)
+        assertNotNull(vm.state.value.remoteGps)
+
+        vm.onCodeScanned("SHIP-2").join()
+        advanceTimeBy(500)
+
+        assertEquals("SHIP-2", vm.state.value.shipment?.id)
+        assertNull(vm.state.value.remoteGps)
+        assertNull(vm.state.value.gpsUploadStatus)
+        visible.cancel()
+    }
+
     @Test
     fun nothingIsPolledOnceTheScreenIsAway() = runTest {
         dispatched("SHIP-1")

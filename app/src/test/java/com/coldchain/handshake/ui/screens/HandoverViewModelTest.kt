@@ -126,6 +126,42 @@ class HandoverViewModelTest {
         assertEquals(ShakeTestResult.PASSED, restored.state.value.shakeTest)
     }
 
+    // The ViewModel outlives a tab switch, so nothing about one shipment may stay on screen for the next.
+    @Test
+    fun openingAnotherShipmentClearsWhatBelongedToTheLastOne() = runBlocking {
+        val first = Shipment("SHIP-A", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.ARRIVED, ProductProfiles.DEFAULT.id, now - 11 * minute)
+        val second = first.copy(id = "SHIP-B")
+        shipments.adoptRemoteShipment(first).getOrThrow()
+        shipments.adoptRemoteShipment(second).getOrThrow()
+        simulator.attachShipment(first)
+        val vm = viewModel()
+        vm.setVvmStage(VvmStage.STAGE_2)
+        vm.record(HandoverVerdict.FAIL, "Seal broken").join()
+        assertEquals("SHIP-A", vm.state.value.result?.handover?.shipmentId)
+
+        simulator.attachShipment(second)
+
+        val after = vm.awaitState { it.shipment?.id == "SHIP-B" }
+        assertNull(after.result)
+        assertNull(after.notice)
+        assertNull(after.error)
+        assertNull(after.custody)
+        assertEquals(VvmStage.NOT_RECORDED, after.vvmStage)
+    }
+
+    @Test
+    fun inspectionAnswersSavedForOneShipmentAreNotRestoredForAnother() {
+        val first = Shipment("SHIP-A", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.ARRIVED, ProductProfiles.DEFAULT.id)
+        simulator.attachShipment(first)
+        val saved = SavedStateHandle()
+        viewModel(saved).setShakeTest(ShakeTestResult.PASSED)
+
+        simulator.attachShipment(first.copy(id = "SHIP-B"))
+        val restored = viewModel(SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) }))
+
+        assertEquals(ShakeTestResult.NOT_DONE, restored.state.value.shakeTest)
+    }
+
     @Test
     fun whileShownItFetchesTheHistoryAndWhoIsOnTheShipment() = runBlocking {
         openOnServer("receiver", MemberRole.RECEIVER)

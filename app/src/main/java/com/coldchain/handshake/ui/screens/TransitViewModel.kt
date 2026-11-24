@@ -118,8 +118,13 @@ class TransitViewModel @Inject constructor(
             viewModelScope.launch { restore(savedId) }
         }
         viewModelScope.launch {
+            // This ViewModel outlives a tab switch, so another shipment starts without the last one's location and
+            // custody. The handed-over notice stays: it is set just as the shipment is let go.
             simulator.activeShipment.collect { shipment ->
-                _state.update { it.copy(shipment = shipment) }
+                _state.update {
+                    if (shipment?.id == it.shipment?.id) it.copy(shipment = shipment)
+                    else it.copy(shipment = shipment, isCustodian = false, remoteGps = null, gpsUploadStatus = null)
+                }
                 saved[KEY_SHIPMENT_ID] = shipment?.id
             }
         }

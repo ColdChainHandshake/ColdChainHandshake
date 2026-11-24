@@ -102,12 +102,7 @@ class HandoverViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
-        HandoverUiState(
-            shipment = simulator.activeShipment.value,
-            me = account.state.value as? AccountState.Ready,
-            vvmStage = saved[KEY_VVM] ?: VvmStage.NOT_RECORDED,
-            shakeTest = saved[KEY_SHAKE] ?: ShakeTestResult.NOT_DONE
-        )
+        freshFor(simulator.activeShipment.value).copy(me = account.state.value as? AccountState.Ready)
     )
     val state: StateFlow<HandoverUiState> = _state.asStateFlow()
 
@@ -139,7 +134,16 @@ class HandoverViewModel @Inject constructor(
     private val serverRefresh = MutableStateFlow(0)
 
     init {
-        viewModelScope.launch { simulator.activeShipment.collect { s -> _state.update { it.copy(shipment = s) } } }
+        // This ViewModel outlives a tab switch, so another shipment starts from nothing: no result, notice or
+        // server view of the last one, and its inspection answers only if they were given for it.
+        viewModelScope.launch {
+            simulator.activeShipment.collect { s ->
+                _state.update { current ->
+                    if (s?.id == current.shipment?.id) current.copy(shipment = s)
+                    else freshFor(s).copy(me = current.me)
+                }
+            }
+        }
         viewModelScope.launch {
             account.state.collect { s -> _state.update { it.copy(me = s as? AccountState.Ready) } }
         }
@@ -176,13 +180,32 @@ class HandoverViewModel @Inject constructor(
     }
 
     fun setVvmStage(stage: VvmStage) {
-        saved[KEY_VVM] = stage
+        saveInspection(vvmStage = stage)
         _state.update { it.copy(vvmStage = stage) }
     }
 
     fun setShakeTest(result: ShakeTestResult) {
-        saved[KEY_SHAKE] = result
+        saveInspection(shakeTest = result)
         _state.update { it.copy(shakeTest = result) }
+    }
+
+    /** The answers are kept with the shipment they were given for, so they can't be restored onto another. */
+    private fun saveInspection(
+        vvmStage: VvmStage = _state.value.vvmStage,
+        shakeTest: ShakeTestResult = _state.value.shakeTest
+    ) {
+        saved[KEY_INSPECTED] = _state.value.shipment?.id
+        saved[KEY_VVM] = vvmStage
+        saved[KEY_SHAKE] = shakeTest
+    }
+
+    private fun freshFor(shipment: Shipment?): HandoverUiState {
+        val mine = saved.get<String>(KEY_INSPECTED) == shipment?.id
+        return HandoverUiState(
+            shipment = shipment,
+            vvmStage = (if (mine) saved.get<VvmStage>(KEY_VVM) else null) ?: VvmStage.NOT_RECORDED,
+            shakeTest = (if (mine) saved.get<ShakeTestResult>(KEY_SHAKE) else null) ?: ShakeTestResult.NOT_DONE
+        )
     }
 
     /** The custodian names who takes over. The handover is held against the readings so far, so the logger stops first. */
@@ -274,6 +297,7 @@ class HandoverViewModel @Inject constructor(
         private const val STOP_SHARING_MS = 5_000L
         private const val KEY_VVM = "vvmStage"
         private const val KEY_SHAKE = "shakeTest"
+        private const val KEY_INSPECTED = "inspectedShipmentId"
     }
 }
 
