@@ -1,7 +1,8 @@
 # Progress
 
-**Next action (24 Nov, 22:05):** `gate-1` and `gate-3` are tagged (below). Next: the rest of Block 2's phone
-pass and the Handover/Alerts process-kill checks on the emulator (HEAD build, local mode), then 5.1c. Step 5's
+**Next action (24 Nov, 22:20):** `gate-1` and `gate-3` are tagged; the phone pass and the Handover/Alerts kill
+checks are done (Step 2 below). Next: fix test-first that Handover and Alerts come back without their shipment
+after a kill, as part of 5.1c. Step 5's
 server work (4.3) must stay compatible with the `05b342e` app.
 Memory rule (owner, 24 Nov): 16 GB RAM; never Gradle and the emulator at once; full proof in the foreground, then
 `./gradlew --stop`, then the emulator; one emulator only. Switches now `PHONE = present`, `EMULATORS = 1`.
@@ -281,10 +282,23 @@ BUILD SUCCESSFUL in 1m 11s      56 tests, 0 failed (AppSmokeTest opens every tab
   `openingAnotherShipmentClearsWhatBelongedToTheLastOne`, `inspectionAnswersSavedForOneShipmentAreNotRestoredForAnother`
   (Handover) and `openingAnotherShipmentClearsTheLastOnesLocationAndCustody` (Transit) failed first; with the reset
   removed again, the first fails on shipment A's result showing under B. Same targeted classes afterwards: 45 tests, 0 failed
-- [ ] Device checks still to do, besides rotation: kill the process **while on Handover** and **while on Alerts**.
-  Only `TransitViewModel` restores the saved shipment into the simulator, so those screens may come back empty
-  unless Transit is opened; if so, move the restore where every screen goes through it (fits 5.1c). Until that
-  passes, the inspection answers surviving a kill are proven only at the ViewModel level
+- [x] Device checks on the S24 (24 Nov, 22:05 to 22:20, HEAD `87d130e` debug build, owner's go; the phone's
+  rotation settings saved first and restored after: `accelerometer_rotation=1 user_rotation=0`). Return after a kill
+  is through Recents, as a user does: `monkey`'s launcher intent made Samsung start a *new* activity record with no
+  saved state, so that first result says nothing about the app
+  - Sign-in: cold start `TotalTime: 1190` ms; a typed email survives landscape and back, and `am kill` in the
+    background with the return from Recents (redrawn from a cold process in 995 ms)
+  - Local mode `SHIP-7976E2`: create, dispatch, Resume records (1 reading)
+  - **Handover, killed while open: comes back "No Active Shipment"** (the defect predicted above). After opening
+    Transit, which re-attaches the shipment, Handover shows it again with **Stage 2 and Passed still selected**: the
+    inspection answers survive the kill (`SavedStateHandle`). Recording doesn't restart by itself ("Resume"), by
+    design until 5.2
+  - **Alerts, killed while open: comes back "No Active Shipment"**, the same defect. After Transit, Alerts shows
+    `SHIP-7976E2` again. Whether the ACKED filter survived can't be read from the layout dump (the chips expose no
+    selected state), so it stays proven at the ViewModel level only
+  - `logcat`: 0 FATAL EXCEPTION, 0 ANR in the app
+- [ ] **Fix, test-first:** restore the saved shipment where every screen goes through it, so Handover and Alerts
+  come back attached after a kill without opening Transit (5.1c)
 - [ ] How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
   `./gradlew --stop`, and only then start the emulator. Never end a turn with a heavy job running in the background
 - [ ] Next: the full proof and the device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
@@ -342,6 +356,10 @@ Phone, so far (23 Nov 20:43, after the owner unlocked it): cold start `TotalTime
 ANR, so the emulator's first-launch ANR came from the emulator. The sign-in title clears the status bar. The
 rest of the phone pass waits: the owner was using the app on the phone, and its screen showed personal data, so
 no phone screenshot was kept.
+
+Phone pass finished on 24 Nov (CONTINUE run, Step 2 device checks): sign-in visible, rotation, background and
+return, and process death with the return from Recents, read through the layout dump rather than screenshots. B2.2
+`done`.
 
 ## FINISH run, Block 3 rehearsal on the local stack (23 Nov, while the dev project is paused)
 
