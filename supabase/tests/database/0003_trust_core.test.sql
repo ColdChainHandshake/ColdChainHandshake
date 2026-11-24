@@ -5,7 +5,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(164);
+select plan(169);
 
 \set sender   '''aaaaaaaa-0000-0000-0000-000000000001'''
 \set courier  '''aaaaaaaa-0000-0000-0000-000000000002'''
@@ -929,6 +929,27 @@ reset role;
 select throws_ok(
   $$ update public.shipments set logger_id = 'LOG-2' where id = 'SHIP-1' $$,
   'CC010', null, 'the shipment manifest is immutable'
+);
+-- Each column the genesis hash commits to is locked on its own, so dropping one from the trigger fails a test.
+select throws_ok(
+  $$ update public.shipments set id = 'SHIP-1-RENAMED' where id = 'SHIP-1' $$,
+  'CC010', null, 'a shipment''s ID cannot change'
+);
+select throws_ok(
+  format('update public.shipments set sender_id = %L where id = %L', :courier::uuid, 'SHIP-1'),
+  'CC010', null, 'a shipment''s sender cannot change'
+);
+select throws_ok(
+  $$ update public.shipments set product_profile_id = 'test-2-8-freeze-tolerant' where id = 'SHIP-1' $$,
+  'CC010', null, 'a shipment''s product profile cannot change'
+);
+select throws_ok(
+  $$ update public.shipments set created_at = created_at - interval '1 hour' where id = 'SHIP-1' $$,
+  'CC010', null, 'a shipment''s creation time cannot change'
+);
+select lives_ok(
+  $$ update public.shipments set destination = destination where id = 'SHIP-1' $$,
+  'the manifest lock leaves the other columns to their own rules'
 );
 
 select * from finish();

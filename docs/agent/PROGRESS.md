@@ -33,6 +33,17 @@ npx supabase db reset && npx supabase test db    Files=4, Tests=233 ... Result: 
 npx supabase db advisors --local --fail-on info  No issues found
 ```
 
+- [x] 1.3 CC010 (manifest lock): one test covered it, through `logger_id` only. The trigger compares five columns
+  (those the genesis hash commits to), so dropping any of the other four from it passed every test. Added one check
+  per column and one that other columns still update (`0003_trust_core.test.sql`, plan 164 → 169)
+
+```text
+npx supabase test db                              Files=4, Tests=238 ... Result: PASS
+mutants, the trigger rewritten in the local DB without one column each:
+  without id | sender_id | product_profile_id | created_at:   Failed 1/169 subtests, Result: FAIL (each)
+npx supabase db reset && npx supabase test db     Tests=238 ... Result: PASS
+```
+
 ## FINISH run, Block S: setup (23 Nov 2026)
 
 - [x] S1 User env vars, checked by reading them back with `[Environment]::GetEnvironmentVariable(..., 'User')`:
