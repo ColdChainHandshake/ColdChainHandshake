@@ -45,6 +45,12 @@ import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.ui.screens.HandoverScreen
+import android.os.Looper
+import androidx.lifecycle.SavedStateHandle
+import org.robolectric.Shadows.shadowOf
+import androidx.lifecycle.viewModelScope
+import com.coldchain.handshake.ui.screens.HandoverViewModel
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -114,11 +120,28 @@ class HandoverScreenTest {
         RepositoryProvider.deviceIdValue = "this-phone"
     }
 
+    private val viewModels = mutableListOf<HandoverViewModel>()
+
+    /** Built from what `RepositoryProvider` hands out, as the app's own Hilt bridge does. */
+    private fun screenViewModel() = HandoverViewModel(
+        RepositoryProvider.accountRepository,
+        RepositoryProvider.temperatureSimulator,
+        RepositoryProvider.shipmentHistorySyncCoordinator,
+        telemetry,
+        alerts,
+        handovers,
+        server,
+        RepositoryProvider.serverHandover,
+        RepositoryProvider.handoverOrchestrator,
+        SavedStateHandle()
+    ).also { viewModels += it }
+
     @After
     fun tearDown() {
-        // The screen goes first, or what it's still collecting would outlive the database.
+        // The screen and its ViewModel go first, or what they're still collecting would outlive the database.
         showing = false
         compose.waitForIdle()
+        viewModels.forEach { it.viewModelScope.cancel() }
         RepositoryProvider.reset()
         db.close()
     }
@@ -133,7 +156,8 @@ class HandoverScreenTest {
         } else {
             RepositoryProvider.temperatureSimulator.attachShipment(localShipment)
         }
-        compose.setContent { if (showing) HandoverScreen() }
+        val viewModel = screenViewModel()
+        compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }
     }
 
     /**
@@ -157,7 +181,8 @@ class HandoverScreenTest {
             RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(opened)
         }
         if (offlineOnArrival) server.offlineError = IOException("No connection")
-        compose.setContent { if (showing) HandoverScreen() }
+        val viewModel = screenViewModel()
+        compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }
     }
 
     private fun courierReleases() {
@@ -173,7 +198,7 @@ class HandoverScreenTest {
 
     private fun await(text: String): SemanticsNodeInteraction {
         try {
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { idleMain(); compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
         } catch (e: ComposeTimeoutException) {
             val shown = compose.onRoot(useUnmergedTree = true).printToString()
                 .lines().filter { "Text = " in it }.joinToString(" | ") { it.trim() }
@@ -186,13 +211,16 @@ class HandoverScreenTest {
         compose.onNode(hasText(label) and isSelectable()).performClick()
     }
 
-    private fun storedHandover() = runBlocking { handovers.getHandover("SHIP-1").first() }
+    private fun storedHandover() = idleMain().let { runBlocking { handovers.getHandover("SHIP-1").first() } }
 
-    private fun storedStatus() = runBlocking { shipments.getShipment("SHIP-1").first()?.status }
+    private fun storedStatus() = idleMain().let { runBlocking { shipments.getShipment("SHIP-1").first()?.status } }
 
     private fun awaitStored() {
-        compose.waitUntil(10_000) { storedHandover() != null }
+        compose.waitUntil(10_000) { idleMain(); storedHandover() != null }
     }
+
+    // The ViewModel resumes on the main looper, which Robolectric pauses and Compose's waitUntil doesn't run.
+    private fun idleMain() = shadowOf(Looper.getMainLooper()).idle()
 
     // Local mode
 
@@ -276,6 +304,7 @@ class HandoverScreenTest {
 
         // Waiting on the status itself: the logger was already running before, so nothing else proves it stopped.
         compose.waitUntil(10_000) {
+            idleMain()
             RepositoryProvider.temperatureSimulator.activeShipment.value?.status == ShipmentStatus.ACCEPTED
         }
         assertTrue(RepositoryProvider.temperatureSimulator.isMonitorOnly.value)
@@ -288,7 +317,8 @@ class HandoverScreenTest {
             val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
             RepositoryProvider.temperatureSimulator.attachShipmentForMonitoring(opened)
         }
-        compose.setContent { if (showing) HandoverScreen() }
+        val viewModel = screenViewModel()
+        compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }
 
         await("Sign in to confirm this shipment. It's on the server.")
 

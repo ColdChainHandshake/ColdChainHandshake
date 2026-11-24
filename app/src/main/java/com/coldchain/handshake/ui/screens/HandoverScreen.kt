@@ -40,19 +40,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -63,24 +60,13 @@ import com.coldchain.handshake.crypto.ClockSkewDetector
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.crypto.IntegrityVerificationState
 import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
-import com.coldchain.handshake.crypto.UploadAudit
 import com.coldchain.handshake.crypto.UploadIssue
-import com.coldchain.handshake.handover.HandoverOrchestratorResult
-import com.coldchain.handshake.handover.HandoverResult
 import com.coldchain.handshake.handover.HandoverVerdictEngine
 import com.coldchain.handshake.models.HandoverVerdict
-import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
-import com.coldchain.handshake.models.VvmStage
-import com.coldchain.handshake.repository.AccountState
-import com.coldchain.handshake.repository.CustodyState
-import com.coldchain.handshake.repository.GpsPoint
-import com.coldchain.handshake.repository.HandoverOutcome
-import com.coldchain.handshake.repository.HandoverState
 import com.coldchain.handshake.repository.HistorySyncState
 import com.coldchain.handshake.repository.MemberRole
-import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.safety.BreachDetector
 import com.coldchain.handshake.safety.TemperatureVerdict
@@ -93,7 +79,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 
 /**
  * Destination Custody Handover Screen.
@@ -102,52 +87,28 @@ import kotlinx.coroutines.launch
  */
 
 @Composable
-fun HandoverScreen(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
+fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel = hiltViewModel()) {
     val scrollState = rememberScrollState()
-    val accountState by RepositoryProvider.accountRepository.state.collectAsState()
-    val me = accountState as? AccountState.Ready
+    val ui by viewModel.state.collectAsStateWithLifecycle()
+    val me = ui.me
 
-    val activeShipment by RepositoryProvider.temperatureSimulator.activeShipment.collectAsState()
-    val shipment = activeShipment
+    val shipment = ui.shipment
     val shipmentId = shipment?.id ?: ""
 
-    // History sync status for this shipment
-    val syncState by (if (shipmentId.isNotBlank()) {
-        RepositoryProvider.shipmentHistorySyncCoordinator.getSyncState(shipmentId)
-    } else {
-        kotlinx.coroutines.flow.flowOf(HistorySyncState.IDLE)
-    }).collectAsState(initial = HistorySyncState.IDLE)
+    // The ViewModel fetches the history and the server's view only while this screen is shown.
+    LaunchedEffect(viewModel) { viewModel.runWhileVisible() }
 
-    // Trigger history hydration if not ready
-    // A shipment kept on this phone alone has nothing on the server to fetch.
-    LaunchedEffect(shipmentId) {
-        if (shipmentId.isNotBlank()) {
-            if (shipment?.genesisHash != null) {
-                RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipmentId)
-            } else {
-                RepositoryProvider.shipmentHistorySyncCoordinator.markReady(shipmentId)
-            }
-        }
-    }
+    // History sync status for this shipment
+    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
 
     // What the server holds, which is what catches a removed tail or a rewritten history
-    val serverHead by RepositoryProvider.shipmentHistorySyncCoordinator.getServerHead(shipmentId).collectAsState()
+    val serverHead by viewModel.serverHead.collectAsStateWithLifecycle()
 
     // Chronological telemetry events strictly for this shipment
-    val telemetryEvents by (if (shipmentId.isNotBlank()) {
-        RepositoryProvider.telemetryRepository.getTemperatures(shipmentId)
-    } else {
-        kotlinx.coroutines.flow.flowOf(emptyList())
-    }).collectAsState(initial = emptyList())
+    val telemetryEvents by viewModel.readings.collectAsStateWithLifecycle()
 
     // Historical alerts strictly for this shipment
-    val tripAlerts by (if (shipmentId.isNotBlank()) {
-        RepositoryProvider.alertRepository.getAllAlerts(shipmentId)
-    } else {
-        kotlinx.coroutines.flow.flowOf(emptyList())
-    }).collectAsState(initial = emptyList())
+    val tripAlerts by viewModel.tripAlerts.collectAsStateWithLifecycle()
 
     // Derived Trip Summary Metrics
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
@@ -189,33 +150,19 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
     val isSyncing = syncState == HistorySyncState.HISTORY_LOADING || syncState == HistorySyncState.HISTORY_SYNCING
 
     // A handover already recorded for this shipment, which this screen must show rather than replace
-    val storedHandover by (if (shipmentId.isNotBlank()) {
-        RepositoryProvider.handoverRepository.getHandover(shipmentId)
-    } else {
-        kotlinx.coroutines.flow.flowOf(null)
-    }).collectAsState(initial = null)
+    val storedHandover by viewModel.storedHandover.collectAsStateWithLifecycle()
 
     // Who confirms is decided on the server: each person on their own phone, and custody only moves
     // when both have. A shipment kept on this phone alone has nobody else to confirm.
-    val onServer = me != null && shipment?.genesisHash != null
-    var custody by remember(shipmentId) { mutableStateOf<CustodyState?>(null) }
-    var members by remember(shipmentId) { mutableStateOf<List<ShipmentMember>>(emptyList()) }
-    var uploadIssues by remember(shipmentId) { mutableStateOf<List<UploadIssue>?>(null) }
-    var serverRefresh by remember { mutableIntStateOf(0) }
-    var serverNotice by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(shipmentId, onServer, serverRefresh, telemetryEvents.size) {
-        if (onServer) {
-            val remote = RepositoryProvider.remote
-            custody = remote.getCustody(shipmentId).getOrNull()
-            members = remote.getMembers(shipmentId).getOrDefault(emptyList())
-            uploadIssues = remote.getBatches(shipmentId).getOrNull()
-                ?.let { UploadAudit.check(shipmentId, it, telemetryEvents) }
-        }
-    }
+    val onServer = ui.onServer
+    val custody = ui.custody
+    val members = ui.members
+    val uploadIssues = ui.uploadIssues
+    val serverNotice = ui.notice
     val clockIssues = remember(telemetryEvents) { ClockSkewDetector.detect(telemetryEvents) }
     // With no signal the server can't say, so this phone answers: the one running the logger has custody,
     // and the person's own role stands in for their role on the shipment.
-    val monitorOnly by RepositoryProvider.temperatureSimulator.isMonitorOnly.collectAsState()
+    val monitorOnly by viewModel.monitorOnly.collectAsStateWithLifecycle()
     val isCustodian = onServer && (custody?.let { it.custodianId == me?.userId } ?: !monitorOnly)
     val myRole = if (members.isEmpty()) me?.profile?.role else members.firstOrNull { it.userId == me?.userId }?.role
     // A shipment on the server is only ever confirmed there, by someone signed in.
@@ -224,22 +171,17 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         (!onServer || (!isCustodian && (myRole == MemberRole.COURIER || myRole == MemberRole.RECEIVER)))
 
     // Historical Last Recorded Location
-    var lastRecordedLocation by remember { mutableStateOf<GpsPoint?>(null) }
-    LaunchedEffect(shipmentId, onServer) {
-        if (onServer) {
-            lastRecordedLocation = RepositoryProvider.remote.getLatestGpsPoint(shipmentId).getOrNull()
-        }
-    }
+    val lastRecordedLocation = ui.lastLocation
 
     // A second person confirms on their own phone, so nothing here stands in for them.
     val workerSigned = true
     val pharmacistSigned = true
 
-    var handoverResult by remember { mutableStateOf<HandoverOrchestratorResult?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isProcessing by remember { mutableStateOf(false) }
-    var vvmStage by rememberSaveable { mutableStateOf(VvmStage.NOT_RECORDED) }
-    var shakeTest by rememberSaveable { mutableStateOf(ShakeTestResult.NOT_DONE) }
+    val handoverResult = ui.result
+    val errorMessage = ui.error
+    val isProcessing = ui.processing
+    val vvmStage = ui.vvmStage
+    val shakeTest = ui.shakeTest
 
     Column(
         modifier = modifier
@@ -771,25 +713,8 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             clockIssues = clockIssues,
             uploadIssues = uploadIssues,
             busy = isProcessing,
-            onRelease = { member ->
-                isProcessing = true
-                errorMessage = null
-                coroutineScope.launch {
-                    // The handover is held against the readings so far, so the logger stops first.
-                    RepositoryProvider.temperatureSimulator.stopContinuousSimulation()
-                    RepositoryProvider.serverHandover.release(shipment.id, member.userId)
-                        .onSuccess { serverNotice = describeOutcome(it) }
-                        .onFailure { errorMessage = it.message }
-                    serverRefresh++
-                    isProcessing = false
-                }
-            },
-            onRefresh = {
-                coroutineScope.launch {
-                    RepositoryProvider.serverHandover.refresh(shipment.id).onFailure { errorMessage = it.message }
-                    serverRefresh++
-                }
-            }
+            onRelease = { member -> viewModel.release(member.userId) },
+            onRefresh = { viewModel.refresh() }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -878,9 +803,9 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
         if (canRecord) HandoverDecisionForm(
             evaluation = computedEvaluation,
             vvmStage = vvmStage,
-            onVvmStageChange = { vvmStage = it },
+            onVvmStageChange = viewModel::setVvmStage,
             shakeTest = shakeTest,
-            onShakeTestChange = { shakeTest = it },
+            onShakeTestChange = viewModel::setShakeTest,
             enabled = !isProcessing && !isPendingSync && handoverResult == null && storedHandover == null,
             waitingLabel = when {
                 isProcessing -> "Evaluating & Recording Handover..."
@@ -888,49 +813,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 handoverResult != null || storedHandover != null -> "Handover Recorded"
                 else -> null
             },
-            onRecord = { verdict, reason ->
-                isProcessing = true
-                errorMessage = null
-                serverNotice = null
-                coroutineScope.launch {
-                    try {
-                        if (onServer) {
-                            RepositoryProvider.serverHandover.receive(shipment.id, verdict, reason, vvmStage, shakeTest)
-                                .onSuccess { result ->
-                                    serverNotice = when (result) {
-                                        is HandoverResult.Confirmed -> describeOutcome(result.outcome)
-                                        is HandoverResult.QueuedOffline ->
-                                            "No connection. Your ${result.handover.verdict.name} is saved on this " +
-                                                "phone and will be sent. Custody hasn't moved."
-                                    }
-                                    serverRefresh++
-                                }
-                                .onFailure { errorMessage = it.message }
-                        } else {
-                            val result = RepositoryProvider.handoverOrchestrator.processHandover(
-                                shipmentId = shipment.id,
-                                workerSigned = workerSigned,
-                                pharmacistSigned = pharmacistSigned,
-                                declaredVerdict = verdict,
-                                reason = reason,
-                                vvmStage = vvmStage,
-                                shakeTest = shakeTest,
-                                historySynced = isSyncComplete
-                            )
-                            result
-                                .onSuccess { res ->
-                                    handoverResult = res
-                                    RepositoryProvider.temperatureSimulator.onHandedOver(res.updatedShipment)
-                                }
-                                .onFailure { errorMessage = it.message ?: "Handover processing failed" }
-                        }
-                    } catch (e: Exception) {
-                        errorMessage = e.message ?: "Unknown error"
-                    } finally {
-                        isProcessing = false
-                    }
-                }
-            },
+            onRecord = { verdict, reason -> viewModel.record(verdict, reason) },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -941,11 +824,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall
             )
             TextButton(
-                onClick = {
-                    coroutineScope.launch {
-                        RepositoryProvider.shipmentHistorySyncCoordinator.hydrateHistory(shipmentId)
-                    }
-                }
+                onClick = { viewModel.retryHistory() }
             ) {
                 Text("Try Again")
             }
@@ -1055,15 +934,7 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
                     if (result.updatedShipment.status == ShipmentStatus.QUARANTINED) {
                         Spacer(modifier = Modifier.height(10.dp))
                         OutlinedButton(
-                            onClick = {
-                                isProcessing = true
-                                coroutineScope.launch {
-                                    RepositoryProvider.handoverOrchestrator.requestReplacement(shipment.id)
-                                        .onSuccess { handoverResult = result.copy(updatedShipment = it) }
-                                        .onFailure { errorMessage = it.message ?: "Could not request a replacement" }
-                                    isProcessing = false
-                                }
-                            },
+                            onClick = { viewModel.requestReplacement() },
                             enabled = !isProcessing,
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -1074,11 +945,6 @@ fun HandoverScreen(modifier: Modifier = Modifier) {
             }
         }
     }
-}
-
-private fun describeOutcome(outcome: HandoverOutcome): String = when (outcome.state) {
-    HandoverState.TRANSFERRED -> "Custody has moved. The shipment is now ${outcome.status.name}."
-    HandoverState.WAITING -> "Confirmed. Waiting for the other person to confirm on their own phone."
 }
 
 /**

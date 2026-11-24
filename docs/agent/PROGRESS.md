@@ -1,7 +1,11 @@
 # Progress
 
-**Next action (24 Nov):** `docs/agent/CONTINUE_PROMPT.md` Step 1 (housekeeping), then Step 2 (finish 5.1). This run
-follows CONTINUE_PROMPT, which adds to FINISH_PROMPT and wins where they conflict.
+**Next action (24 Nov, 18:30):** paused for the owner. Claude Code stopped the emulator and a full proof run because
+the PC ran critically low on memory, and asked that they not be restarted without him (HANDOFF, top). When he says
+go: run the full proof (`./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease
+assembleDebug --continue`, no emulator at the same time), then the Handover and Alerts emulator checks, then 5.1c.
+Step 1 is done except 1.1 (dev project still read-only through MCP). Step 2: Transit, Handover and Alerts
+ViewModels written. This run follows CONTINUE_PROMPT, which adds to FINISH_PROMPT and wins where they conflict.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
@@ -117,6 +121,34 @@ core-domain 122 failed 0 | debug 455 failed 0 | release 398 failed 0 | skipped 0
 BUILD SUCCESSFUL in 5m 7s
 core-domain 122 failed 0 | debug 467 failed 0 | release 410 failed 0 | skipped 0
 ```
+
+- [x] `HandoverViewModel`: every server read, release, refresh, record (server confirmation or, in local mode, the
+  orchestrator, which works the verdict out again), request replacement and retry moved out of the screen; the VVM
+  and shake-test answers in `SavedStateHandle`; server reads only inside `runWhileVisible()`. The pure display
+  calculations (breach, integrity, the verdict shown) stay in the screen as functions of its state.
+  `HandoverViewModelTest`, 5 tests, 5 failed against a stub first. `HandoverScreenTest` (14 tests, the behaviour
+  net) passes with its assertions unchanged; it now builds the screen's ViewModel from what `RepositoryProvider`
+  hands out, and its waits idle Robolectric's main looper, which `viewModelScope` resumes on (the same change
+  `DispatchScreenTest` needed). Before that change 3 local-mode tests timed out: the record ran, but only after
+  the wait gave up
+- [x] `AlertsViewModel`: the shipment's alerts, the filter (in `SavedStateHandle`), acknowledge and escalate.
+  `AlertsViewModelTest`, 5 tests. **Not failed first:** the stub was overwritten before the run. Checked instead
+  with a mutant (the "active" filter letting everything through): 1 of 5 failed
+- [ ] **Full proof and emulator checks for Handover and Alerts: not run.** At about 18:20 Claude Code stopped the
+  emulator and the full proof run because the PC was critically low on memory (2.6 GB free of 15.6 GB; idle
+  Gradle daemons held about 4 GB, since stopped). Its instruction is not to restart them without the owner, so
+  only targeted foreground runs were made (below); `lintDebug`, `assembleRelease`, the release unit tests and the
+  device checks wait for the owner (HANDOFF, top)
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*HandoverViewModelTest*'   against the stub: 5 tests completed, 5 failed
+./gradlew :app:testDebugUnitTest --tests '*AppSmokeTest*' --tests '*HandoverScreenTest*' --tests '*HandoverViewModelTest*'
+    --tests '*AlertsViewModelTest*' --tests '*TransitViewModelTest*' --tests '*AlertNotificationsTest*' --no-daemon
+BUILD SUCCESSFUL in 1m 11s      56 tests, 0 failed (AppSmokeTest opens every tab through Hilt)
+```
+
+- [ ] Next: the full proof and the two device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
+  `RepositoryProvider` and `LegacyProviderModule` deleted, role-based navigation)
 
 ## FINISH run, Block S: setup (23 Nov 2026)
 

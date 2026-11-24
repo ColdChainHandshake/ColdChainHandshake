@@ -3,6 +3,21 @@
 Updated on 23 Nov 2026 (the `FINISH_PROMPT.md` run). Questions first, then your list, most urgent first. Claude
 carries on with everything these don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
+## Claude has paused: the PC ran low on memory (24 Nov, about 18:20)
+
+Claude Code stopped two of Claude's background jobs because the PC was critically low on memory: the emulator and
+a full test and build run. Its rule is that Claude doesn't restart them until you say so. At the time 2.6 GB of
+15.6 GB was free; Claude then stopped its own idle Gradle daemons (about 4 GB) and free memory went back to about
+7 GB. Nothing was lost: all work is committed, and the parts not yet fully proven are marked in `PROGRESS.md`.
+
+- **This PC has about 16 GB of RAM, not 24 GB** as `CONTINUE_PROMPT.md` says. So `EMULATORS = 2` isn't realistic
+  next to Docker, Gradle and an emulator each needing 2 to 4 GB. Claude will plan for one emulator at a time, and
+  for the Gate 3 run one emulator plus your phone (or one emulator with `pm clear` between roles, which needs your
+  "accept one-emulator gate-3").
+- **To let Claude go on:** close what you don't need, then tell Claude "memory OK, carry on". It will run the full
+  proof without the emulator, then the emulator alone, never both at once. If you'd rather it never be stopped
+  this way, start Claude Code with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` in its environment.
+
 ## Do this when you're home: it unblocks Gate 1 and Gate 3 (5 minutes)
 
 Checked on 24 Nov: the dev project `yjvoxozaoiarwbusyqke` is **restored** (thank you) and `.mcp.json` has no

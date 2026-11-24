@@ -35,12 +35,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,12 +50,9 @@ import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
 import com.coldchain.handshake.models.SyncStatus
-import com.coldchain.handshake.repository.RepositoryProvider
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.ui.theme.StatusRed
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -74,30 +69,16 @@ enum class AlertFilter {
  * Does NOT display alerts from unrelated shipments.
  */
 @Composable
-fun AlertsScreen(modifier: Modifier = Modifier) {
-    val coroutineScope = rememberCoroutineScope()
-    val activeShipment by RepositoryProvider.temperatureSimulator.activeShipment.collectAsState()
-
-    val currentShipment = activeShipment
+fun AlertsScreen(modifier: Modifier = Modifier, viewModel: AlertsViewModel = hiltViewModel()) {
+    val currentShipment by viewModel.shipment.collectAsStateWithLifecycle()
     val shipmentId = currentShipment?.id ?: ""
 
-    // Flow strictly scoped to shipmentId
-    val alertsList by (if (shipmentId.isNotBlank()) {
-        RepositoryProvider.alertRepository.getAllAlerts(shipmentId)
-    } else {
-        flowOf(emptyList())
-    }).collectAsState(initial = emptyList())
-
-    var selectedFilter by remember { mutableStateOf(AlertFilter.ALL) }
-    var statusFeedback by remember { mutableStateOf<String?>(null) }
-
-    val filteredAlerts = remember(alertsList, selectedFilter) {
-        when (selectedFilter) {
-            AlertFilter.ALL -> alertsList
-            AlertFilter.UNACKNOWLEDGED -> alertsList.filter { !it.acknowledged }
-            AlertFilter.ACKNOWLEDGED -> alertsList.filter { it.acknowledged }
-        }
-    }
+    // Strictly scoped to the shipment on screen
+    val alertsList by viewModel.all.collectAsStateWithLifecycle()
+    val filteredAlerts by viewModel.shown.collectAsStateWithLifecycle()
+    val ui by viewModel.state.collectAsStateWithLifecycle()
+    val selectedFilter = ui.filter
+    val statusFeedback = ui.feedback
 
     Column(
         modifier = modifier
@@ -182,7 +163,7 @@ fun AlertsScreen(modifier: Modifier = Modifier) {
             filters.forEach { (filter, label) ->
                 val isSelected = selectedFilter == filter
                 Button(
-                    onClick = { selectedFilter = filter },
+                    onClick = { viewModel.setFilter(filter) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -249,26 +230,8 @@ fun AlertsScreen(modifier: Modifier = Modifier) {
                 items(filteredAlerts, key = { it.id }) { alert ->
                     ShipmentAlertCard(
                         alert = alert,
-                        onAcknowledge = {
-                            coroutineScope.launch {
-                                try {
-                                    RepositoryProvider.safetyEngine.acknowledgeAlert(alert)
-                                    statusFeedback = "Acknowledged alert ${alert.id.take(8)}"
-                                } catch (e: Exception) {
-                                    statusFeedback = "Error: ${e.message}"
-                                }
-                            }
-                        },
-                        onEscalate = {
-                            coroutineScope.launch {
-                                try {
-                                    val escalated = RepositoryProvider.safetyEngine.escalateAlert(alert)
-                                    statusFeedback = "Escalated alert to ${escalated.escalationLevel}"
-                                } catch (e: Exception) {
-                                    statusFeedback = "Error: ${e.message}"
-                                }
-                            }
-                        }
+                        onAcknowledge = { viewModel.acknowledge(alert) },
+                        onEscalate = { viewModel.escalate(alert) }
                     )
                 }
             }
