@@ -45,6 +45,11 @@ Status words: `done`, `doing`, `blocked` (with the reason), or blank for not sta
   came out with RLS on, and nothing was left behind)
 - [x] Advisors after the fix: security WARN 13 (exactly the 13 RPCs on pgTAP's allow-list, the API by design) and
   INFO 6 (`legacy_*`, locked on purpose); performance INFO 17. No ERROR, no anon finding (`DECISIONS.md`)
+- [x] Every rule of `0002_deny_by_default.test.sql` run as a query on hosted, in one transaction that first created
+  a table, view, materialized view, function and sequence in public the way a migration does, then rolled back:
+  14 checks (anon and PUBLIC table, column and function access; authenticated writes; both allow-lists in both
+  directions; sequences; `create` on public; the realtime publication; role inheritance; `pg_default_acl`; the new
+  objects' access), 0 violations each; 0 probe objects left afterwards
 - [x] The real API, with the publishable key: `/auth/v1/settings` answers (email on, sign-up on); anon reading
   `product_profiles` → `42501 permission denied`; a wrong key → "Invalid API key"
 - [ ] `local.properties`: `blocked` by the owner's deny rule `Edit(./local.properties)`, which also stops a shell

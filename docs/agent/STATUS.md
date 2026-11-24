@@ -9,8 +9,8 @@ wrong about the world: the first real run found a server rule the fake server di
 ## Proven on real systems
 
 - **The hosted dev project (24 Nov):** migrations `0000` to `0003` applied. Its schema is the one the local tests
-  ran on: definitions, constraints, policies and the privilege matrix hash the same on both. The tests' own rules,
-  run as queries on hosted, hold. Supabase's advisors show no errors. Through the real API, a signed-out caller is
+  ran on: definitions, constraints, policies and the privilege matrix hash the same on both. Every deny-by-default
+  rule from the tests, run as a query on hosted (including for newly created objects), finds nothing. Supabase's advisors show no errors. Through the real API, a signed-out caller is
   refused (`permission denied`). Nothing has been signed in or handed over on it yet; that is Gate 3.
 
 The rest ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
