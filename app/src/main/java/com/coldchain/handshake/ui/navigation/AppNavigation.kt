@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.coldchain.handshake.debugtools.DebugTools
+import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.ui.screens.AccountLoadingScreen
 import com.coldchain.handshake.ui.screens.AccountUnreachableScreen
 import com.coldchain.handshake.ui.screens.AlertsScreen
@@ -41,12 +42,14 @@ import com.coldchain.handshake.ui.screens.TransitScreen
 fun AppRoot(viewModel: AppRootViewModel = hiltViewModel()) {
     val screen by viewModel.screen.collectAsStateWithLifecycle()
     val ownerProblem by viewModel.ownerProblem.collectAsStateWithLifecycle()
+    val accountState by viewModel.account.state.collectAsStateWithLifecycle()
 
     when (val current = screen) {
         is RootScreen.Main -> AppNavigation(
             statusLine = current.statusLine,
             actionLabel = current.actionLabel,
-            onAction = if (current.localOnly) viewModel::leaveLocalMode else viewModel::signOut
+            onAction = if (current.localOnly) viewModel::leaveLocalMode else viewModel::signOut,
+            tabs = Screen.tabsFor(if (current.localOnly) null else (accountState as? AccountState.Ready)?.profile?.role)
         )
         RootScreen.Loading -> AccountLoadingScreen()
         RootScreen.NeedsProfile -> ProfileSetupScreen(viewModel.account)
@@ -74,7 +77,7 @@ private fun StatusBar(line: String, actionLabel: String, onAction: () -> Unit) {
 }
 
 @Composable
-fun AppNavigation(statusLine: String, actionLabel: String, onAction: () -> Unit) {
+fun AppNavigation(statusLine: String, actionLabel: String, onAction: () -> Unit, tabs: List<Screen>) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -83,7 +86,7 @@ fun AppNavigation(statusLine: String, actionLabel: String, onAction: () -> Unit)
         topBar = { StatusBar(statusLine, actionLabel, onAction) },
         bottomBar = {
             NavigationBar {
-                Screen.bottomNavItems.forEach { screen ->
+                tabs.forEach { screen ->
                     val selected = currentRoute == screen.route
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.title) },
@@ -107,7 +110,7 @@ fun AppNavigation(statusLine: String, actionLabel: String, onAction: () -> Unit)
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Dispatch.route,
+            startDestination = tabs.first().route,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Dispatch.route) {

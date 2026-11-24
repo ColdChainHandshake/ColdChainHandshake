@@ -192,7 +192,25 @@ class AppSmokeTest {
         account = FakeAccountRepository(ready)
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            Screen.bottomNavItems.forEach { screen ->
+            // A courier opens on Transit and has no Dispatch tab: only a sender can create a shipment.
+            compose.onNode(hasText(Screen.Transit.title) and isSelectable()).assertIsSelected()
+            assertTrue(compose.onAllNodes(hasText(Screen.Dispatch.title) and isSelectable()).fetchSemanticsNodes().isEmpty())
+            Screen.tabsFor(MemberRole.COURIER).forEach { screen ->
+                val tab = hasText(screen.title) and isSelectable()
+                compose.onNode(tab).performClick()
+                compose.waitForIdle()
+                compose.onNode(tab).assertIsSelected()
+            }
+        }
+    }
+
+    @Test
+    fun aSenderOpensOnDispatchAndEveryTabOpens() {
+        account = FakeAccountRepository(ready.copy(profile = UserProfile("Sam", MemberRole.SENDER)))
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNode(hasText(Screen.Dispatch.title) and isSelectable()).assertIsSelected()
+            Screen.tabsFor(MemberRole.SENDER).forEach { screen ->
                 val tab = hasText(screen.title) and isSelectable()
                 compose.onNode(tab).performClick()
                 compose.waitForIdle()

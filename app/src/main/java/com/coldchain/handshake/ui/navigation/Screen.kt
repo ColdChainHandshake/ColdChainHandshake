@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.coldchain.handshake.debugtools.DebugTools
+import com.coldchain.handshake.repository.MemberRole
 
 /**
  * Top-level application destinations and navigation routes.
@@ -27,5 +28,14 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
             Handover,
             Chaos.takeIf { DebugTools.ENABLED }
         )
+
+        /**
+         * The tabs a person sees, by the role they chose; the first is where the app opens. `null` is debug local
+         * mode, where one phone plays every part.
+         */
+        fun tabsFor(role: MemberRole?): List<Screen> = when (role) {
+            null, MemberRole.SENDER -> bottomNavItems
+            MemberRole.COURIER, MemberRole.RECEIVER -> bottomNavItems - Dispatch
+        }
     }
 }

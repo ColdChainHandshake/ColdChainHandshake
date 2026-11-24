@@ -2,8 +2,9 @@
 
 **Next action (24 Nov, 22:20):** `gate-1` and `gate-3` are tagged; the phone pass and the Handover/Alerts kill
 checks are done, and Handover and Alerts now come back with their shipment after a kill (Step 2 below, proven on
-the S24). Next: the rest of 5.1c (Hilt builds everything, `HiltWorker`, `RepositoryProvider` and
-`LegacyProviderModule` deleted, role-based navigation). Step 5's
+the S24). **5.1 is done** (Hilt builds everything, `HiltWorker`, `RepositoryProvider` gone, role-based tabs; Step 2
+below). Next: CONTINUE Step 3 (5.2): the Handover screen downloads its own history, a foreground service for
+recording, WorkManager sync, and the 3-minute window fixed test-first (the attack test first). Step 5's
 server work (4.3) must stay compatible with the `05b342e` app.
 Memory rule (owner, 24 Nov): 16 GB RAM; never Gradle and the emulator at once; full proof in the foreground, then
 `./gradlew --stop`, then the emulator; one emulator only. Switches now `PHONE = present`, `EMULATORS = 1`.
@@ -337,8 +338,27 @@ core-domain 122 failed 0 | debug 484 failed 0 | release 427 failed 0 | skipped 0
   `RepositoryProvider` and `LegacyProviderModule` deleted (commit below). `ShipmentHistorySyncCoordinator.clear()`
   failed first (`clearingForgetsEveryShipmentsStateAndServerHead`, AssertionError), then passed. Test setup changes
   and the three retired tests are in DECISIONS; the assertion diff shows only provider mechanics removed
-- [ ] 5.1c step 6: role-based navigation, test-first. And the emulator check of the Hilt wiring (cold launch,
-  sign-in, local mode, kill on Handover, escalation booked, 0 FATAL/ANR)
+- [x] Emulator check of the Hilt wiring (HEAD `dccf20c` debug, cch_pixel_api36, Android 16): cold launch
+  `TotalTime: 10118` ms to sign-in (10.3 s before the change, first launch of an unoptimised debug build); logcat
+  `Worker result SUCCESS … class=com.coldchain.handshake.alerts.AlertEscalationWorker` (built by Hilt's factory, no
+  "Could not create Worker"); local mode `SHIP-51622E` records; killed on Handover, back from Recents on
+  `SHIP-51622E` with Stage 2 still checked; 0 FATAL, 0 ANR
+- [x] 5.1c step 6, role-based navigation: `Screen.tabsFor(role)`. A courier or receiver has no Dispatch tab and opens
+  on Transit (the server refuses them a shipment anyway); a sender opens on Dispatch and keeps Handover (replacement
+  requests live there); debug local mode keeps every tab. `ScreenTabsTest` failed first on the courier/receiver case
+  (the other two pass against the stub, which returned every tab). `AppSmokeTest`: the courier launch now checks its
+  own tabs and that Dispatch is absent; a sender launch opens every sender tab (new). Screens a courier can still
+  reach from inside (Transit's "Go to Dispatch Hub" button) are for the honesty pass in Step 4
+- [x] **5.1 done.** Corrected on the way: my new `rotatingTheActivity…` test asserted every startup job stays
+  active, which fails in release, where the empty chaos lab's watcher ends at once; it now asserts the owner check
+  stays active, which is the rule
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*ScreenTabsTest*'     against the stub: 3 tests completed, 1 failed
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+core-domain 122 failed 0 | debug 486 failed 0 | release 429 failed 1 (rotatingTheActivity…, line 110, above)
+after the fix: ./gradlew :app:testReleaseUnitTest   release 429 failed 0
+```
 
 ```text
 grep -rn RepositoryProvider app/ --include=*.kt          (no code references; comments only, if any)

@@ -107,6 +107,8 @@ class AlertEscalationColdStartTest {
 
         assertEquals(2, first.size)
         assertSame(first, startup.jobs)
-        assertTrue(first.all { it.isActive })
+        // The owner check runs as long as the process. The chaos watcher may already have ended: a release build has
+        // no chaos lab, so its scenario list is empty and complete.
+        assertTrue(first.first().isActive)
     }
 }
