@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.AccountState
+import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.screens.roleLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,6 +43,8 @@ sealed interface RootScreen {
 class AppRootViewModel @Inject constructor(
     val account: AccountRepository,
     private val session: SessionGate,
+    private val simulator: TemperatureSimulator,
+    private val restorer: ActiveShipmentRestorer,
     private val saved: SavedStateHandle
 ) : ViewModel() {
 
@@ -53,6 +57,25 @@ class AppRootViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.Eagerly, screenFor(account.state.value, localOnly.value, session.confirmedOwner.value, null))
 
     val ownerProblem: StateFlow<String?> = session.localOwnerProblem
+
+    init {
+        // Every screen shows the simulator's shipment, so it is saved and put back here, where every screen goes
+        // through, rather than on one tab. It comes back only once the main app opens, so a shipment never shows
+        // before the phone has checked who is signed in. What is saved only changes after that attempt, so a second
+        // kill during sign-in loses nothing.
+        viewModelScope.launch {
+            val savedId = saved.get<String>(KEY_ACTIVE_SHIPMENT)
+            if (savedId != null && simulator.activeShipment.value == null) {
+                screen.first { it is RootScreen.Main }
+                restorer.restore(savedId, watching = saved.get<Boolean>(KEY_ACTIVE_WATCHING) == true)
+            }
+            combine(simulator.activeShipment, simulator.isMonitorOnly) { shipment, watching -> shipment?.id to watching }
+                .collect { (id, watching) ->
+                    saved[KEY_ACTIVE_SHIPMENT] = id
+                    saved[KEY_ACTIVE_WATCHING] = watching
+                }
+        }
+    }
 
     fun useWithoutAccount() {
         saved[KEY_LOCAL_ONLY] = true
@@ -68,6 +91,8 @@ class AppRootViewModel @Inject constructor(
 
     private companion object {
         const val KEY_LOCAL_ONLY = "localOnly"
+        const val KEY_ACTIVE_SHIPMENT = "activeShipmentId"
+        const val KEY_ACTIVE_WATCHING = "activeShipmentWatching"
         const val LOCAL_ONLY_LINE = "Local only. Nothing here reaches the server."
 
         fun screenFor(state: AccountState, localOnly: Boolean, confirmedOwner: String?, signOutProblem: String?): RootScreen =

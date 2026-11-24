@@ -16,6 +16,7 @@ import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
+import com.coldchain.handshake.ui.navigation.ActiveShipmentRestorer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -72,7 +73,8 @@ class TransitViewModelTest {
     }
 
     private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = TransitViewModel(
-        account, shipments, workflow, simulator, history, server, telemetry, sync, "device-1", { alertChecks++ }, saved
+        account, shipments, workflow, simulator, history, server, telemetry, sync, "device-1", { alertChecks++ },
+        ActiveShipmentRestorer(simulator, shipments, server, account), saved
     )
 
     private fun signInAs(user: String, role: MemberRole) {

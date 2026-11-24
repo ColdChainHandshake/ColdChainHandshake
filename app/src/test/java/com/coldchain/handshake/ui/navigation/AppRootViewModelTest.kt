@@ -1,10 +1,16 @@
 package com.coldchain.handshake.ui.navigation
 
 import androidx.lifecycle.SavedStateHandle
+import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.FakeAccountRepository
+import com.coldchain.handshake.repository.FakeColdChainServer
 import com.coldchain.handshake.repository.MemberRole
+import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.UserProfile
+import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
+import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
+import com.coldchain.handshake.simulator.TemperatureSimulator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +20,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -27,14 +36,33 @@ class AppRootViewModelTest {
     private val account = FakeAccountRepository()
     private val session = FakeSession()
     private val ready = AccountState.Ready("user-1", "a@example.test", UserProfile("Ana", MemberRole.COURIER))
+    private val shipments = InMemoryShipmentRepository()
+    private val telemetry = InMemoryTelemetryRepository()
+    private val server = FakeColdChainServer(currentUser = "user-1")
+    private var simulator = newSimulator()
 
     @Before
     fun setUp() = Dispatchers.setMain(UnconfinedTestDispatcher())
 
     @After
-    fun tearDown() = Dispatchers.resetMain()
+    fun tearDown() {
+        simulator.stopContinuousSimulation()
+        Dispatchers.resetMain()
+    }
 
-    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = AppRootViewModel(account, session, saved)
+    private fun newSimulator() = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
+
+    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) =
+        AppRootViewModel(account, session, simulator, ActiveShipmentRestorer(simulator, shipments, server, account), saved)
+
+    /** The process dies: the simulator and the ViewModel are new, the saved state and the database remain. */
+    private fun afterProcessDeath(saved: SavedStateHandle): AppRootViewModel {
+        simulator = newSimulator()
+        return viewModel(SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) }))
+    }
+
+    private suspend fun localShipment(): Shipment =
+        Shipment("SHIP-1", "QR", "LOG-1", "A", "B", "W-1").also { shipments.saveShipment(it).getOrThrow() }
 
     @Test
     fun nobodySignedInSeesSignIn() = runTest {
@@ -94,6 +122,67 @@ class AppRootViewModelTest {
         val vm = viewModel()
         session.localOwnerProblem.value = "This phone holds another person's records."
         assertEquals("This phone holds another person's records.", vm.ownerProblem.value)
+    }
+
+    // Found on the S24 (24 Nov): killed while on Handover or Alerts, the app came back with "No Active Shipment",
+    // because only the Transit screen put the saved shipment back.
+    @Test
+    fun aShipmentOpenOnAnyScreenComesBackAfterTheProcessIsKilled() = runTest {
+        val shipment = localShipment()
+        val saved = SavedStateHandle()
+        viewModel(saved).useWithoutAccount()
+        simulator.attachShipment(shipment)
+
+        afterProcessDeath(saved)
+
+        assertEquals("SHIP-1", simulator.activeShipment.value?.id)
+        assertFalse(simulator.isMonitorOnly.value)
+        // Recording waits for the person, as on Transit.
+        assertFalse(simulator.isRunning.value)
+    }
+
+    @Test
+    fun aShipmentBeingWatchedComesBackOnlyWatched() = runTest {
+        val shipment = localShipment()
+        val saved = SavedStateHandle()
+        viewModel(saved).useWithoutAccount()
+        simulator.attachShipmentForMonitoring(shipment)
+
+        afterProcessDeath(saved)
+
+        assertEquals("SHIP-1", simulator.activeShipment.value?.id)
+        assertTrue(simulator.isMonitorOnly.value)
+    }
+
+    @Test
+    fun nothingComesBackUntilThePhoneHasCheckedWhoIsSignedIn() = runTest {
+        server.seedShipment("SHIP-1", custodian = "user-1")
+        val shipment = ShipmentWorkflow(server, shipments) { "device-1" }.open("SHIP-1").getOrThrow()
+        account.setState(ready)
+        session.confirmedOwner.value = "user-1"
+        val saved = SavedStateHandle()
+        viewModel(saved)
+        simulator.attachShipmentForMonitoring(shipment)
+
+        session.confirmedOwner.value = null
+        afterProcessDeath(saved)
+        assertNull(simulator.activeShipment.value)
+
+        session.confirmedOwner.value = "user-1"
+        assertEquals("SHIP-1", simulator.activeShipment.value?.id)
+        // For a shipment on the server, the server's custody decides, not how it was last shown.
+        assertFalse(simulator.isMonitorOnly.value)
+    }
+
+    @Test
+    fun aShipmentThisPhoneNoLongerHoldsDoesNotComeBack() = runTest {
+        val saved = SavedStateHandle()
+        viewModel(saved).useWithoutAccount()
+        simulator.attachShipment(Shipment("SHIP-GONE", "QR", "LOG-1", "A", "B", "W-1"))
+
+        afterProcessDeath(saved)
+
+        assertNull(simulator.activeShipment.value)
     }
 
     private class FakeSession : SessionGate {

@@ -17,6 +17,7 @@ import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.SyncService
 import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
+import com.coldchain.handshake.ui.navigation.ActiveShipmentRestorer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -84,6 +85,7 @@ class TransitViewModel @Inject constructor(
     private val sync: SyncService,
     @DeviceId private val deviceId: String,
     private val alertChecks: AlertChecks,
+    private val restorer: ActiveShipmentRestorer,
     private val saved: SavedStateHandle
 ) : ViewModel() {
 
@@ -115,7 +117,7 @@ class TransitViewModel @Inject constructor(
     init {
         val savedId = saved.get<String>(KEY_SHIPMENT_ID)
         if (simulator.activeShipment.value == null && savedId != null) {
-            viewModelScope.launch { restore(savedId) }
+            viewModelScope.launch { restorer.restore(savedId, watching = saved.get<Boolean>(KEY_WATCHING) == true) }
         }
         viewModelScope.launch {
             // This ViewModel outlives a tab switch, so another shipment starts without the last one's location and
@@ -213,17 +215,6 @@ class TransitViewModel @Inject constructor(
     fun recordOneReading(): Job = viewModelScope.launch { simulator.tickOnce(simulatedStepDurationSeconds = 60L) }
 
     fun toggleHeatSpike() = simulator.setHeatSpikeMode(!simulator.isHeatSpikeMode.value)
-
-    private suspend fun restore(shipmentId: String) {
-        val shipment = shipments.getShipment(shipmentId).firstOrNull() ?: return
-        val user = me
-        val mine = if (shipment.genesisHash != null && user != null) {
-            remote.getCustody(shipmentId).getOrNull()?.custodianId == user
-        } else {
-            saved.get<Boolean>(KEY_WATCHING) != true
-        }
-        if (mine) simulator.attachShipment(shipment) else simulator.attachShipmentForMonitoring(shipment)
-    }
 
     private suspend fun readCustody(shipment: Shipment, user: String) {
         if (shipment.genesisHash == null) return
