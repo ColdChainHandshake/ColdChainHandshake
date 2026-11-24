@@ -1,13 +1,82 @@
 # Progress
 
-**Next action (24 Nov, 18:30):** paused for the owner. Claude Code stopped the emulator and a full proof run because
-the PC ran critically low on memory, and asked that they not be restarted without him (HANDOFF, top). When he says
-go: run the full proof (`./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease
-assembleDebug --continue`, no emulator at the same time), then the Handover and Alerts emulator checks, then 5.1c.
-Step 1 is done except 1.1 (dev project still read-only through MCP). Step 2: Transit, Handover and Alerts
-ViewModels written. This run follows CONTINUE_PROMPT, which adds to FINISH_PROMPT and wins where they conflict.
+**Next action (24 Nov, evening):** Block 1 is done and `gate-1` tagged (below). Next: prepare the hosted Gate 3 run
+(CONTINUE_PROMPT section 5: worktree at `05b342e`, debug APK built with `CCH_APP_SUPABASE_URL`/`KEY` for the dev
+project, the S24 plus one emulator), then the phone pass of Block 2 and the Handover/Alerts process-kill checks.
+Memory rule (owner, 24 Nov): 16 GB RAM; never Gradle and the emulator at once; full proof in the foreground, then
+`./gradlew --stop`, then the emulator; one emulator only. Switches now `PHONE = present`, `EMULATORS = 1`.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
+
+## CONTINUE run, second session (24 Nov 2026, evening)
+
+### Status at session start
+
+- **Git:** `rebuild/trust-core`, HEAD `6fc0d77`, clean. Tags `gate-0`, `gate-2`
+- **Owner's message:** memory pause over (16 GB, one heavy job at a time); the S24 connected, unlocked, Stay awake
+  on (`PHONE = present`, `EMULATORS = 1`); Supabase MCP re-authorised with write access; custom SMTP (Gmail) set up
+  on the dev project, the Magic link and Confirm signup templates carry `{{ .Token }}`, OTP length 6; automatic
+  commit security reviews fail on SSL certificates in the plugin, so manual reviews stand in
+- **Supabase MCP:** `select current_user` → `postgres`, `transaction_read_only` → `off`; `apply_migration` offered.
+  `.mcp.json` URL has `project_ref=yjvoxozaoiarwbusyqke` (= `DEV_PROJECT`). Dev project empty: no tables, no
+  migrations
+- **Devices:** `adb devices -l` → `RZCY820AG0F device model:SM_S921E`. Free RAM 5.2 GB of 15.6 GB, no emulator
+
+### Block 1 — Gate 1 and the dev project: `done`
+
+- [x] Local check at HEAD first: `npx supabase db reset && npx supabase test db` → Files=4, Tests=238, PASS;
+  `db advisors --local --fail-on info` → No issues found. `git diff 05b342e HEAD -- supabase/migrations` is empty,
+  so the pinned Gate 3 build was rehearsed on exactly this schema
+- [x] Applied `0000_legacy_schema`, `0001_lockdown` (back to back, so the legacy tables' open grants existed for
+  seconds, on empty tables), `0002_trust_core` through MCP `apply_migration`, each the file's text
+- [x] Hosted = local, proven by one fingerprint query run on both (md5 over function definitions in `public` and
+  `private`, columns, constraints, indexes, policies, triggers, RLS flags, the anon/authenticated/PUBLIC privilege
+  matrix on tables and functions, `private` schema usage, seed rows). All equal except one object Supabase creates
+  with every hosted project, `public.rls_auto_enable()` (the `ensure_rls` event trigger's function); with it left
+  out, functions and function grants match too
+- [x] Advisors, first run: security WARN 1 (anon can execute SECURITY DEFINER `rls_auto_enable()`), WARN 14
+  (authenticated can execute SECURITY DEFINER: our 13 RPCs plus `rls_auto_enable`), INFO 6 (`legacy_*` tables, RLS
+  on and no policy); performance INFO 17 (unused indexes, empty database). No ERROR
+- [x] Fixed test-first: `rls_auto_enable()` broke our own rule that anon and PUBLIC execute nothing in public.
+  Red on hosted (the rule's query from `0002_deny_by_default.test.sql` returned `rls_auto_enable()` for anon,
+  PUBLIC and, beyond the allow-list, authenticated) and red locally (the same function created on the local stack
+  with the same grants). Fix: `0003_revoke_platform_function.sql` (`0c42310`), a guarded revoke, a no-op where the
+  function doesn't exist. After it the `ensure_rls` trigger still works (a probe table in a rolled-back transaction
+  came out with RLS on, and nothing was left behind)
+- [x] Advisors after the fix: security WARN 13 (exactly the 13 RPCs on pgTAP's allow-list, the API by design) and
+  INFO 6 (`legacy_*`, locked on purpose); performance INFO 17. No ERROR, no anon finding (`DECISIONS.md`)
+- [x] The real API, with the publishable key: `/auth/v1/settings` answers (email on, sign-up on); anon reading
+  `product_profiles` → `42501 permission denied`; a wrong key → "Invalid API key"
+- [ ] `local.properties`: `blocked` by the owner's deny rule `Edit(./local.properties)`, which also stops a shell
+  append; not worked around. Nothing waits on it: debug builds take `CCH_APP_SUPABASE_URL`/`KEY`. Owner step in
+  HANDOFF
+- [x] Full proof and a clean clone (below). `gate-1` tagged
+
+```text
+local stand-in for rls_auto_enable() + npx supabase test db     Failed 1/35 (0001 #10), Failed 2/15 (0002 #6-7)
+docker exec … psql < 0003_revoke_platform_function.sql
+npx supabase test db                                             Files=4, Tests=238 ... Result: PASS
+npx supabase db reset && npx supabase test db                    Applying migration 0003_…  Tests=238 ... PASS
+npx supabase db advisors --local --fail-on info                  No issues found
+MCP list_migrations: 20261124144756 0000_legacy_schema | 20261124144802 0001_lockdown |
+                     20261124144939 0002_trust_core   | 20261124145228 0003_revoke_platform_function
+fingerprint (local = hosted): columns 127 bb4bff5d… | constraints 63 d6d60f9a… | indexes 36 b5dfa4ac… |
+  policies 12 1f160754… | triggers 1 4f5b8215… | rls 18 8e0ca350… | table_grants 12 f39cbf5f… |
+  product_profiles 2 5edca2ec… | private_usage anon:false,authenticated:true,public:false |
+  functions 24 db9e0661… and function_grants 15 21d63d1b… (hosted without rls_auto_enable)
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+BUILD SUCCESSFUL in 5m 35s
+core-domain 122 failed 0 | debug 480 failed 0 | release 423 failed 0 | skipped 0
+clean clone of 0c42310 in D:\cch-tools\clone-gate1, no local.properties, env -i with JAVA_HOME and ANDROID_HOME:
+./gradlew assembleDebug testDebugUnitTest --no-daemon          BUILD SUCCESSFUL in 5m | debug 480 failed 0
+```
+
+Gate 1 criteria (MASTER 5.1): clean-clone build with `JAVA_HOME` (and the SDK) only, yes (above); default tests
+offline and green, yes (`OfflineTestGuardTest` in the 480); pgTAP proves anon locked out, yes (238/238, and on
+hosted the same rules' queries plus the REST refusal); advisors show no RLS errors, yes (no ERROR, no RLS finding
+beyond the deliberate `legacy_*` deny-all); schema exported, yes (`app/schemas`, `ColdChainDatabaseMigrationTest`).
+The Gate 1 reviewer ran on 30 Oct (`DECISIONS.md`, "Gate 1 review" lines); its findings were fixed then. What was
+missing since was only the dev project, checked here mechanically against the same tests.
 
 ## CONTINUE run (from 24 Nov 2026)
 

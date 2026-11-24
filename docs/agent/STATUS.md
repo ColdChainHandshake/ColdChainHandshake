@@ -8,10 +8,15 @@ wrong about the world: the first real run found a server rule the fake server di
 
 ## Proven on real systems
 
-All of these ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
+- **The hosted dev project (24 Nov):** migrations `0000` to `0003` applied. Its schema is the one the local tests
+  ran on: definitions, constraints, policies and the privilege matrix hash the same on both. The tests' own rules,
+  run as queries on hosted, hold. Supabase's advisors show no errors. Through the real API, a signed-out caller is
+  refused (`permission denied`). Nothing has been signed in or handed over on it yet; that is Gate 3.
+
+The rest ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
 hosted project.
 
-- **Database rules:** `npx supabase test db`, 233 of 233 checks pass. `db advisors --local`: no issues. They cover:
+- **Database rules:** `npx supabase test db`, 238 of 238 checks pass. `db advisors --local`: no issues. They cover:
   - strangers are locked out;
   - readings can't be edited or deleted;
   - a dropped, edited, re-ordered or back-dated reading is refused;
@@ -64,7 +69,7 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
 
 ## Not proven
 
-- Anything on a hosted Supabase project. No migration has reached one (the dev project is paused).
+- Any app use of a hosted Supabase project: the dev project has the schema (above) but no account or shipment yet.
 - On a device against the hosted project: email-code sign-in with real emails, and the handover with each person on
   their own phone at the same time (Gate 3). Also notifications and real timers on any device.
 - Recording and sync with the screen off, after the app is killed, or after a long time offline.
@@ -73,9 +78,9 @@ On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a P
 
 ## Gates
 
-`gate-0` and `gate-2` are tagged. `gate-1` waits for write access to the dev project: on 24 Nov it was restored,
-but the MCP connection was still read-only (`HANDOFF.md`, top). `gate-3` also needs the hosted email templates and
-the owner online for the sign-in codes.
+`gate-0`, `gate-1` (24 Nov, on the dev project's own advisors and a fresh clone's build) and `gate-2` are tagged.
+`gate-3` needs the two-device run on the dev project with the owner online for the sign-in codes; the email
+templates are done (owner, 24 Nov).
 
 ## The 16 findings
 

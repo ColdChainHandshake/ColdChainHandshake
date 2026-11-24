@@ -3,51 +3,41 @@
 Updated on 23 Nov 2026 (the `FINISH_PROMPT.md` run). Questions first, then your list, most urgent first. Claude
 carries on with everything these don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
-## Claude has paused: the PC ran low on memory (24 Nov, about 18:20)
+## Done on 24 Nov (evening): the dev project is set up and `gate-1` is tagged
 
-Claude Code stopped two of Claude's background jobs because the PC was critically low on memory: the emulator and
-a full test and build run. Its rule is that Claude doesn't restart them until you say so. At the time 2.6 GB of
-15.6 GB was free; Claude then stopped its own idle Gradle daemons (about 4 GB) and free memory went back to about
-7 GB. Nothing was lost: all work is committed, and the parts not yet fully proven are marked in `PROGRESS.md`.
+The migrations `0000` to `0003` are on the dev project `yjvoxozaoiarwbusyqke`, its schema is proven equal to the
+tested local one, and the advisors show no errors (`PROGRESS.md`, Block 1). One finding was fixed: a function
+Supabase adds to every hosted project could be run by anyone signed out (`0003`).
 
-- **This PC has about 16 GB of RAM, not 24 GB** as `CONTINUE_PROMPT.md` says. So `EMULATORS = 2` isn't realistic
-  next to Docker, Gradle and an emulator each needing 2 to 4 GB. Claude will plan for one emulator at a time, and
-  for the Gate 3 run one emulator plus your phone (or one emulator with `pm clear` between roles, which needs your
-  "accept one-emulator gate-3").
-- **To let Claude go on:** close what you don't need, then tell Claude "memory OK, carry on". It will run the full
-  proof without the emulator, then the emulator alone, never both at once. If you'd rather it never be stopped
-  this way, start Claude Code with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` in its environment.
+### Optional, 1 minute: the dev key in `local.properties`
 
-## Do this when you're home: it unblocks Gate 1 and Gate 3 (5 minutes)
+Claude couldn't write it: your deny rule `Edit(./local.properties)` in `.claude/settings.json` blocks shell
+appends too, and Claude doesn't work around your deny rules. Nothing waits on it, because Claude passes the dev
+URL and key to its builds through environment variables. If you want plain `./gradlew assembleDebug` to point at
+the dev project:
 
-Checked on 24 Nov: the dev project `yjvoxozaoiarwbusyqke` is **restored** (thank you) and `.mcp.json` has no
-`read_only=true`. But the MCP connection Claude got in this session is **still read-only**: SQL runs as
-`supabase_read_only_user` with `transaction_read_only = on`, and there is no `apply_migration` tool. The server
-probably keeps the access it was first given until it reconnects.
+1. Supabase dashboard, project `yjvoxozaoiarwbusyqke`, Project Settings, API Keys. Copy the **publishable** key
+   named `default` (it starts with `sb_publishable_`), not the secret one.
+2. Add these two lines at the end of `local.properties` (they override earlier lines with the same name):
 
-1. **Reconnect the Supabase MCP server with write access:** quit Claude Code and start it again. If it is still
-   read-only, run `/mcp`, choose `supabase`, and re-authenticate; on Supabase's consent page make sure the access is
-   not limited to read-only. **Check:** ask Claude to run `select current_user` through MCP. It should not say
-   `supabase_read_only_user`.
-2. Custom SMTP, then the email templates (you said you'll do this before the Gate 3 run): in **Magic link** and
-   **Confirm signup** add `<p>Your code: {{ .Token }}</p>` and Save (details in item 3 below). Claude won't change
-   the sign-in flow meanwhile. While you're there (security review S7, optional): Authentication, Providers, Email,
-   set the **Email OTP Expiration** to 600 seconds or less. A 6-digit code is one in a million, so it shouldn't stay
-   valid for the default hour.
-3. Say "dev project writable". Claude then applies the migrations, runs the advisors, writes the real publishable
-   key into `local.properties`, and prepares the two-device run. It asks you to be online for about 30 minutes before
-   starting, because it needs each sign-in code from your inbox.
+   ```properties
+   supabase.url=https://yjvoxozaoiarwbusyqke.supabase.co
+   supabase.anon.key=<the sb_publishable_ key>
+   ```
 
-Meanwhile `local.properties` has the dev URL and a placeholder key appended at the end, overriding the old demo
-lines, so no phone build talks to the demo project.
+3. **Check:** tell Claude; it builds and confirms the debug build carries the dev project's reference and no
+   placeholder, without reading the file.
+
+### Still open from before: OTP expiry (security review S7, optional)
+
+Authentication, Providers, Email: set the **Email OTP Expiration** to 600 seconds or less. A 6-digit code is one in
+a million, so it shouldn't stay valid for the default hour. Claude doesn't change project settings.
 
 ## Questions for you
 
-### Q1. Write access to the dev project: answered by "Do this now" above.
+### Q1. Write access to the dev project: done (24 Nov).
 
-### Q2. Tag `gate-1` on local evidence? Settled: no.
-
-`FINISH_PROMPT.md` section 5 says `gate-1` waits for the dev project's advisors to be clean, so Claude waits.
+### Q2. Tag `gate-1` on local evidence? Settled: tagged on 24 Nov on the dev project's own advisors.
 
 ### Q3. `local.properties`: settled.
 
@@ -142,8 +132,9 @@ Desktop. This stops the local database, which is fine; Claude restarts it.
    Gate 3 run needs 4 to 6. If the app shows "email rate limit exceeded", wait an hour, or set up your own SMTP
    (Authentication, Emails, SMTP Settings) and then raise the limit under Authentication, Rate Limits. The exact
    number is shown on that page.
-6. **Check:** in a new Claude session, ask Claude to list the dev project's migrations. It should list `0000` to `0002`
-   (after `db push`), or no timeout error (before).
+6. **Check:** ask Claude to list the dev project's migrations. Since 24 Nov it lists `0000_legacy_schema` to
+   `0003_revoke_platform_function`, each with a timestamp version (`20261124…`), because Claude applied them
+   through MCP. Don't run `supabase db push` against this project: it would try to apply them all again.
 
 ### 4. Point the app at the dev project (answers Q3)
 
