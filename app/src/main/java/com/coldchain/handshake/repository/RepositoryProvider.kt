@@ -18,23 +18,18 @@ import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.models.ChaosScenarioType
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.simulator.TemperatureSimulator
-import com.coldchain.handshake.ui.navigation.SessionGate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Unified Single Source of Truth Provider for ColdChainHandshake.
  * Bridges Person 1 (Room + Supabase), Person 2 (Dispatch/Transit/Simulator),
  * Person 3 (Safety Decision Layer), and Person 4 (Integrity & Handover Layer).
  */
-object RepositoryProvider : SessionGate {
+object RepositoryProvider {
 
     @Volatile
     private var database: ColdChainDatabase? = null
@@ -73,15 +68,12 @@ object RepositoryProvider : SessionGate {
     private var simulator: TemperatureSimulator? = null
     internal var syncCoordinator: ShipmentHistorySyncCoordinator? = null
 
-    private val _localOwnerProblem = MutableStateFlow<String?>(null)
+    @Volatile
+    private var localSession: LocalSession? = null
 
-    /** Why the last person to sign in was signed straight out again, if they were. */
-    override val localOwnerProblem: StateFlow<String?> = _localOwnerProblem.asStateFlow()
-
-    private val _confirmedOwner = MutableStateFlow<String?>(null)
-
-    /** The signed-in person this phone's records have been checked against. The app opens only for them. */
-    override val confirmedOwner: StateFlow<String?> = _confirmedOwner.asStateFlow()
+    /** Whose records this phone holds; built by [initialize]. */
+    val session: LocalSession
+        get() = localSession ?: throw IllegalStateException("RepositoryProvider not initialized. Call initialize(context) first.")
 
     /** This install's name to the server. Tests set it; [initialize] reads it from the phone. */
     @Volatile
@@ -232,32 +224,17 @@ object RepositoryProvider : SessionGate {
                 coroutineScope = scope
             )
 
-            // Someone signing in after another person's session ended without a sign-out, for example
-            // when it expired, mustn't see that person's records. If any of those still have to reach the
-            // server, they're evidence: the new session is refused until their owner sends them.
-            scope.launch {
-                val owner = appContext.getSharedPreferences(OWNER_PREFS, Context.MODE_PRIVATE)
-                account.state.collect { state ->
-                    if (state !is AccountState.Ready) {
-                        _confirmedOwner.value = null
-                        return@collect
-                    }
-                    val previous = owner.getString(KEY_OWNER, null)
-                    if (previous != null && previous != state.userId) {
-                        if (countUnsent(db) > 0) {
-                            _confirmedOwner.value = null
-                            _localOwnerProblem.value = "This phone holds another person's records that haven't " +
-                                "reached the server. They need to sign in here and send them first."
-                            account.signOut()
-                            return@collect
-                        }
-                        forgetLocalData()
-                    }
-                    _localOwnerProblem.value = null
-                    owner.edit().putString(KEY_OWNER, state.userId).apply()
-                    _confirmedOwner.value = state.userId
+            val gate = LocalSession(
+                db = db,
+                account = account,
+                ownerPrefs = appContext.getSharedPreferences(LocalSession.OWNER_PREFS, Context.MODE_PRIVATE),
+                forgetInMemory = {
+                    simulator?.reset()
+                    syncCoordinator = null
                 }
-            }
+            )
+            localSession = gate
+            gate.watch(scope)
 
             if (simulator == null) {
                 simulator = TemperatureSimulator(
@@ -306,36 +283,6 @@ object RepositoryProvider : SessionGate {
         telemetry: TelemetryRepository,
         handovers: HandoverRepository
     ) = HandoverOrchestrator(shipments, telemetry, handovers, RoomTransactionRunner(db))
-
-    /**
-     * Ends the session and clears what this phone holds, so the next person to sign in can't see it.
-     * Refused while anything recorded here still has to reach the server, because clearing it would
-     * lose evidence.
-     */
-    override suspend fun signOut(): Result<Unit> {
-        val unsent = database?.let { db -> withContext(Dispatchers.IO) { countUnsent(db) } } ?: 0
-        if (unsent > 0) {
-            return Result.failure(
-                IllegalStateException("$unsent records haven't reached the server yet. Connect, let them send, then sign out.")
-            )
-        }
-
-        simulator?.reset()
-        return accountRepository.signOut().onSuccess { forgetLocalData() }
-    }
-
-    private suspend fun countUnsent(db: ColdChainDatabase): Int {
-        val onServer = db.shipmentDao().getAllShipmentsDirect().filter { it.genesisHash != null }.map { it.id }.toSet()
-        return db.temperatureEventDao().getPendingEvents().count { it.shipmentId in onServer } +
-            db.alertDao().getPendingAlerts().count { it.shipmentId in onServer } +
-            db.handoverDao().getPendingHandovers().count { it.shipmentId in onServer }
-    }
-
-    private suspend fun forgetLocalData() {
-        simulator?.reset()
-        syncCoordinator = null
-        database?.let { db -> withContext(Dispatchers.IO) { db.clearAllTables() } }
-    }
 
     fun getShipmentRepository(context: Context): ShipmentRepository {
         return shipmentRepo ?: synchronized(this) {
@@ -420,8 +367,7 @@ object RepositoryProvider : SessionGate {
             syncScope = null
             initialized = false
             database = null
-            _confirmedOwner.value = null
-            _localOwnerProblem.value = null
+            localSession = null
             accountRepo = null
             remoteService = null
             deviceIdValue = null
@@ -441,7 +387,4 @@ object RepositoryProvider : SessionGate {
     fun resetForTesting() {
         reset()
     }
-
-    private const val OWNER_PREFS = "coldchain_local_owner"
-    private const val KEY_OWNER = "user_id"
 }

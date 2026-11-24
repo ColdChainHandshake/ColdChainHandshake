@@ -37,7 +37,7 @@ object LegacyProviderModule {
     fun accountRepository(): AccountRepository = RepositoryProvider.accountRepository
 
     @Provides
-    fun sessionGate(): SessionGate = RepositoryProvider
+    fun sessionGate(): SessionGate = RepositoryProvider.session
 
     @Provides
     fun shipmentRepository(): ShipmentRepository = RepositoryProvider.shipmentRepository

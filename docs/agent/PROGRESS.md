@@ -317,6 +317,21 @@ BUILD SUCCESSFUL in 1m 11s      56 tests, 0 failed (AppSmokeTest opens every tab
 BUILD SUCCESSFUL in 4m 19s
 core-domain 122 failed 0 | debug 484 failed 0 | release 427 failed 0 | skipped 0
 ```
+- [ ] **5.1c plan (24 Nov, 22:45).** Inventory of `RepositoryProvider` in tests (members used):
+  - Through Hilt: `AppSmokeTest` (6, `ActivityScenario`: `initialize`, `accountRepo`, `safetyEngine`, `reset`);
+    `AlertEscalationColdStartTest` (4: `initialize`, `getAlertRepository`, `alertRepository`, `syncScope`, `reset`;
+    its rule: one set per process, worker and activity share it)
+  - Built by the test: `HandoverScreenTest` (14, `createComposeRule`; simulator, orchestrator, server handover,
+    history, account, remote, device ID); `LocalOwnerTest` (3, the session gate); `AlertNotificationsTest` (14,
+    `initialize`/`reset`); `SyncServiceTest` (17, `syncScope`/`reset` cleanup); `RoomRepositoriesTest` (11,
+    `handoverOrchestratorFor`); debug `ChaosScreen` uses `chaosEngineService`
+  - Steps, each with a full proof, `--stop` and a commit: (1) the session gate as its own class, `LocalOwnerTest` on
+    it; (2) per-process jobs (owner check, chaos watcher, sync scope) behind one start-once object; (3) `AppModule`
+    with `@Singleton` providers, the Hilt-path tests converted in the same commit, `LegacyProviderModule` gone,
+    chaos provided from debug and release; (4) `HiltWorker`, `Configuration.Provider`, only WorkManager's entry
+    removed from `InitializationProvider` (Supabase Auth needs androidx.startup); (5) delete `RepositoryProvider`,
+    proof `grep -rn RepositoryProvider app/` empty; (6) role-based navigation, test-first. Converted tests keep their
+    assertions (diff the `assert` lines), recorded in DECISIONS. Emulator check after (4) and (5)
 - [ ] How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
   `./gradlew --stop`, and only then start the emulator. Never end a turn with a heavy job running in the background
 - [ ] Next: the full proof and the device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
