@@ -3,22 +3,26 @@
 Updated on 23 Nov 2026 (the `FINISH_PROMPT.md` run). Questions first, then your list, most urgent first. Claude
 carries on with everything these don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
-## Do this now: it unblocks Gate 1 and Gate 3 (5 minutes)
+## Do this when you're home: it unblocks Gate 1 and Gate 3 (5 minutes)
 
-On 23 Nov the dev project `yjvoxozaoiarwbusyqke` was **paused** ("Project is paused. Restore it and try again") and
-the MCP server was still **read-only** (no `apply_migration` tool).
+Checked on 24 Nov: the dev project `yjvoxozaoiarwbusyqke` is **restored** (thank you) and `.mcp.json` has no
+`read_only=true`. But the MCP connection Claude got in this session is **still read-only**: SQL runs as
+`supabase_read_only_user` with `transaction_read_only = on`, and there is no `apply_migration` tool. The server
+probably keeps the access it was first given until it reconnects.
 
-1. Open https://supabase.com/dashboard/project/yjvoxozaoiarwbusyqke and click **Restore**.
-2. In `.mcp.json`, delete `&read_only=true` from the URL. Claude won't edit that file, because it is your access
-   decision.
-3. Authentication, Sign In / Providers, Email: enabled. Authentication, Emails (Templates): in **Magic link** and
-   **Confirm signup** add `<p>Your code: {{ .Token }}</p>` and Save (details in item 3 below).
-4. Restart Claude Code, and say "dev project restored".
+1. **Reconnect the Supabase MCP server with write access:** quit Claude Code and start it again. If it is still
+   read-only, run `/mcp`, choose `supabase`, and re-authenticate; on Supabase's consent page make sure the access is
+   not limited to read-only. **Check:** ask Claude to run `select current_user` through MCP. It should not say
+   `supabase_read_only_user`.
+2. Custom SMTP, then the email templates (you said you'll do this before the Gate 3 run): in **Magic link** and
+   **Confirm signup** add `<p>Your code: {{ .Token }}</p>` and Save (details in item 3 below). Claude won't change
+   the sign-in flow meanwhile.
+3. Say "dev project writable". Claude then applies the migrations, runs the advisors, writes the real publishable
+   key into `local.properties`, and prepares the two-device run. It asks you to be online for about 30 minutes before
+   starting, because it needs each sign-in code from your inbox.
 
-Then Claude applies the migrations, runs the advisors, writes the real publishable key into `local.properties`, and
-runs the two-device handover (it will ask you for each email code as it arrives). Meanwhile `local.properties` has
-the dev URL and a placeholder key appended at the end, overriding the old demo lines, so no phone build talks to the
-demo project.
+Meanwhile `local.properties` has the dev URL and a placeholder key appended at the end, overriding the old demo
+lines, so no phone build talks to the demo project.
 
 ## Questions for you
 

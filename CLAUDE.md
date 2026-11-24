@@ -45,9 +45,11 @@ the SQL signatures, so add a function to the migration before calling it.
 Tests that use debug-only code live in `src/testDebug`. After changing a Room entity, add a version, a migration and
 a recorded hash in `ColdChainDatabaseMigrationTest`.
 
-Database tests need Docker:
+Database tests need Docker. The Supabase CLI is pinned in `package.json` (3.3.0): run `npm ci` once, and always call
+it as `npx supabase`, which uses that copy. A bare `supabase` may be an older one on PATH.
 
 ```bash
+npm ci                     # once, installs the pinned CLI into node_modules
 npx supabase db start      # Postgres only; the full `supabase start` is much larger and C: is short of space
 npx supabase db reset      # reapply supabase/migrations
 npx supabase test db

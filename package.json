@@ -1,0 +1,8 @@
+{
+  "name": "cold-chain-handshake-tools",
+  "private": true,
+  "description": "Pins the Supabase CLI used for the local database tests. Run `npm ci` once, then `npx supabase ...`.",
+  "devDependencies": {
+    "supabase": "3.3.0"
+  }
+}

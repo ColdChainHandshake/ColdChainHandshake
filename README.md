@@ -119,6 +119,7 @@ can also run without an account, on one phone only, and say so on screen.
 Database tests run against a local Postgres container:
 
 ```bash
+npm ci                 # installs the Supabase CLI version pinned in package.json
 npx supabase db start
 npx supabase test db
 ```

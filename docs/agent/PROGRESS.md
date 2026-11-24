@@ -1,12 +1,37 @@
 # Progress
 
-**Next action (23 Nov, 21:40):** waiting on the owner for two things: the dev project restored with write access
-(unblocks Blocks 1 and 3), and the phone free (finishes Block 2's phone pass and allows a PASS rehearsal with phone
-plus emulator on the local stack). Done meanwhile: Block S, Block 2 on the emulator, Block 4 items 4 and 2 (domain),
-a Gate 3 rehearsal on the local stack, `docs/THREAT_MODEL.md`, `docs/FIELD_TEST.md`. The Gate 3 run is built from
-`05b342e` in a worktree if Phase 5 has changed the screens by then. The run follows `docs/agent/FINISH_PROMPT.md`.
+**Next action (24 Nov):** `docs/agent/CONTINUE_PROMPT.md` Step 1 (housekeeping), then Step 2 (finish 5.1). This run
+follows CONTINUE_PROMPT, which adds to FINISH_PROMPT and wins where they conflict.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
+
+## CONTINUE run (from 24 Nov 2026)
+
+### Status at session start (24 Nov)
+
+- **Git:** `rebuild/trust-core`, HEAD `4a1116f`, clean except the new `docs/agent/CONTINUE_PROMPT.md`. Tags `gate-0`
+  and `gate-2`, as the prompt says. The last 15 commits match its account (5.1b for AppRoot and Dispatch on top).
+- **Dev project:** restored. `list_tables` answers (public schema empty), `list_migrations` answers (none),
+  `get_project_url` is the dev URL. Still read-only in this session: `select current_user` gives
+  `supabase_read_only_user`, `transaction_read_only = on`, and no `apply_migration` tool, though `.mcp.json` no
+  longer says `read_only=true`. Block 1 `blocked`; owner asked at the top of HANDOFF to reconnect the MCP server
+- **Email templates:** the owner says they can't be edited until he sets up custom SMTP, before the Gate 3 run.
+  The sign-in flow stays as it is
+- **Docker:** was stopped; started Docker Desktop, and the local stack's containers came back healthy
+- **Disk:** C: 66 GB free, D: 272 GB free
+- **Switches:** `PHONE = absent`, `EMULATORS = 2`, `FIRMWARE_OWNER = me`, `PROTOCOL_Q4 = owner`
+
+### Step 1 — Housekeeping
+
+- [ ] 1.1 Dev project: `blocked`, read-only MCP connection (above)
+- [x] 1.2 Supabase CLI pinned at 3.3.0 in `package.json`, CI on the same version, `CLAUDE.md` and README say
+  `npm ci` then `npx supabase`
+
+```text
+npm install && npx supabase --version            3.3.0   (a scoop 'supabase' on PATH is 2.122.0, hence 'npx')
+npx supabase db reset && npx supabase test db    Files=4, Tests=233 ... Result: PASS
+npx supabase db advisors --local --fail-on info  No issues found
+```
 
 ## FINISH run, Block S: setup (23 Nov 2026)
 

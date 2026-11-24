@@ -6,6 +6,9 @@ build/
 .idea/
 **/.idea/
 
+# Node tooling (the pinned Supabase CLI)
+node_modules/
+
 # Local machine configuration
 local.properties
 
