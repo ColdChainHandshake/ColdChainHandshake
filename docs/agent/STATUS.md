@@ -20,6 +20,16 @@ wrong about the world: the first real run found a server rule the fake server di
   shows two confirmations from two device IDs, custody moved to the receiver, status ACCEPTED. The readings are
   simulated on the courier's phone; no logger was involved.
 
+- **Recording in the background on the S24, against the dev project (26 Nov):** the courier's phone (Galaxy S24,
+  Android 17) ran the recording as a foreground service of type `connectedDevice` after the Nearby devices prompt.
+  - With the screen off and the phone in deep Doze (`mDeviceIdleMode=true`), readings reached the server 1 to 5 s
+    after they were made, and the courier's handover confirmation renewed itself on each new head. This needed a fix
+    found on the phone: the Supabase library dropped the sign-in from memory whenever the app left the screen, so
+    before the fix nothing was sent while the screen was off.
+  - Before that fix, 28 readings recorded once a minute through 28 minutes of screen-off and deep Doze stayed on the
+    phone and reached the server in order, contiguous, once the app came back to the screen.
+  - Airplane mode for 30 minutes: in progress (PROGRESS).
+
 The rest ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
 hosted project.
 
@@ -72,18 +82,17 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
 - **Checking the logger at handover:** in tests, a history that was edited, cut short, replayed, signed with the
   wrong or the test key, or doesn't match the readings fails the handover; one with holes or faults is UNKNOWN.
   Not on a screen yet.
-- **Firmware:** interfaces and 39 tests build with MSYS2 g++; 38 fail until the code is written. From 26 Nov Claude
-  writes it (`FIRMWARE_OWNER = claude`).
+- **Firmware library:** written by Claude on 26 Nov (`FIRMWARE_OWNER = claude`) against the existing tests; all 39
+  host tests pass with MSYS2 g++, including the Bluetooth bytes, so the C++, the Python generator and the app's Kotlin
+  agree on `logger_vectors.json` byte for byte. Signing uses mbedTLS 3.6.8. It has never run on a logger board.
 
 ## Not proven
 
 - Notifications and real timers on any device.
-- Recording and sync with the screen off, after the app is killed, or after a long time offline. The Gate 3 run
-  showed the gap: the pinned build stops recording as soon as the courier's app leaves the screen. Phase 5.2 is
-  next.
+- Recording after the app's process is killed outright, and an alert raised while offline reaching the server
+  afterwards (planned on the S24 with the second shipment). Screen-off and Doze are proven (above).
 - A real logger. None will be used (`HARDWARE = none`); the virtual logger exists in code but the app doesn't use
   it yet.
-- The GitHub Actions workflow has never run on GitHub (the branch is pushed from 26 Nov).
 
 ## Gates
 
@@ -106,11 +115,11 @@ firmware, closing as "met without hardware") are next.
 | 6 | Data gaps counted as safe | Unit | `RegressionTest.finding6_dataGapsAreUnknownNotSafe` |
 | 7 | A new alert every tick, no escalation | Unit | `RegressionTest.finding7_oneExcursionCreatesOneAlert`; `AlertNotificationsTest.theWorkerEscalatesWhatIsDueNotifiesAndBooksTheNextCheck` |
 | 8 | A FAIL handover couldn't be recorded; some statuses never set | Unit | `HandoverDecisionTest.aDeclaredFailureNeedsAReason`; `ShipmentLifecycleTest.everyPairOfStatusesIsEitherLegalOrRejected` |
-| 9 | Recording, sync and GPS stop when the screen changes | Open, 5.2 next. Only alert checks run in the background (WorkManager). Seen for real in Gate 3 (`SHIP-D9E438`) | none |
+| 9 | Recording, sync and GPS stop when the screen changes | Recording and sync: fixed, and proven on the S24 with the screen off and in deep Doze against the dev project (26 Nov). GPS still only while the Transit screen is open (open, `DECISIONS.md`) | `RecordingLoopTest`, `RecordingServiceTest`, `SyncWorkerTest`, `SupabaseClientProviderTest.theSessionStaysWhenTheAppGoesToTheBackground`; `SHIP-49A74F` on the dev project |
 | 10 | An app update could wipe the database | Unit (real SQLite under Robolectric) | `ColdChainDatabaseMigrationTest.aVersion2ChainKeepsItsReadingsThroughTheMigration` |
 | 11 | The receiver re-downloads everything every 3 s | Partly: downloads only new readings, still polls every 3 s. Phase 5 | none for the polling |
 | 12 | The QR code was trusted text | Unit | `ShipmentWorkflowTest.aScannedCodeIsNeverTurnedIntoAShipment` |
 | 13 | The handover trusted the caller's temperature result | Unit; the argument no longer exists | `HandoverOrchestratorTest.test16_temperatureFailedQuarantinesShipment` |
 | 14 | Only one handover per shipment | Partly: the server supports several legs (Docker); the phone still refuses a second one. 5.3 | `0003_trust_core`; `HandoverDecisionTest.aSecondHandoverForTheSameShipmentIsRefusedNotSilentlyLost` |
 | 15 | No ViewModels, global state, demo code in production | Closed in code: a ViewModel per screen, Hilt builds everything, `RepositoryProvider` deleted, role-based tabs (24 Nov); demo code is debug-only. Process death checked on the S24 | `ReleaseHasNoDebugToolsTest`; `AppRootViewModelTest`, `DispatchViewModelTest`, `TransitViewModelTest`, `HandoverViewModelTest`, `AlertsViewModelTest`, `ScreenTabsTest` |
-| 16 | Build pinned to one PC, a test hit a live server, old target SDK, no CI | Unit, and a clean clone builds (Gate 1); CI has not run on GitHub yet | `OfflineTestGuardTest`; the clean-clone build (`PROGRESS.md`, Gate 1) |
+| 16 | Build pinned to one PC, a test hit a live server, old target SDK, no CI | Closed. A clean clone builds (Gate 1), and CI runs on GitHub: unit tests, lint, release build, database tests and the firmware tests (first green run 26 Nov) | `OfflineTestGuardTest`; the clean-clone build (`PROGRESS.md`, Gate 1); https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/45842949385 |
