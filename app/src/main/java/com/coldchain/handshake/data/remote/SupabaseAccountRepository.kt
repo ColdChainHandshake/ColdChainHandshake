@@ -47,6 +47,10 @@ class SupabaseAccountRepository(
 
     init {
         scope.launch {
+            // The client's lifecycle callbacks are off (SupabaseClientProvider), so nothing else loads the stored
+            // session. Loading it before reading the status keeps the state Loading until then, never a brief
+            // SignedOut, which a recording restarting after process death would take as a sign-out.
+            runCatching { client.auth.loadFromStorage(autoRefresh = true) }
             client.auth.sessionStatus.collectLatest { status ->
                 when (status) {
                     is SessionStatus.Authenticated -> arrive()

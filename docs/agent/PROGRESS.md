@@ -97,6 +97,23 @@ app/build/generated/source/buildConfig/debug/.../BuildConfig.java (regenerated 2
     by hand at 21:36:22); the owner agreed to leave the phone alone. Restarted with `dumpsys battery unplug` at
     21:39:10. Readings 7 to 17 arrived 1 to 7 s after they were made, except reading 7 (70 s, sent as the screen
     woke)
+  - **Found, the real-device run's main finding:** from 21:39:10 (screen off) nothing reached the server, while the
+    phone kept recording: `io_stats` showed the app writing 4 KB once a minute, the wake lock `cch:recording` was held
+    and renewed every round (acquire count 162 → 222), the process was at procState FGS and not frozen, and the
+    alert worker ran. The S24 went into deep Doze by itself (`mDeviceIdleMode=true`, state IDLE) about 2 minutes
+    after the screen went off on simulated battery. The network was **not** the cause: `dumpsys netpolicy` for the
+    app's UID gave `blocked=BATTERY_SAVER|DOZE|APP_BACKGROUND allowed=FOREGROUND… effective=NONE`, and the Doze
+    firewall allowed it. The cause is supabase-kt's default: its TROUBLESHOOTING ("[Android] Retrieving data in the
+    background does not work", 3.8.0, read through Context7) says the Auth plugin clears the session from memory when
+    the app goes to the background; the 3.8.0 bytecode (`SetupPlatformKt`, `onStop`) calls
+    `stopAutoRefreshForCurrentSession()` and sets the session status. The app then counted as signed out, and sync
+    silently did nothing. Earlier on, reading 7 was sent only when the screen woke. Fixed test-first:
+    `SupabaseClientProviderTest.theSessionStaysWhenTheAppGoesToTheBackground` (failed first),
+    `enableLifecycleCallbacks = false`, and `SupabaseAccountRepository` loads the stored session once per process
+    before reading the status (so no brief "signed out" that a restarted recording would act on). The 3-second
+    banner fix is in the same build (`fetchingAgainKeepsAHistoryAlreadyCompleteReady` failed first:
+    `expected:<HISTORY_READY> but was:<HISTORY_SYNCING>`)
+  - The emulator was stopped at 21:47:25 for Gradle (memory rule); the S24 kept recording locally
 
 ```text
 ./gradlew :app:testDebugUnitTest --tests '*HandoverWindowTest*'    stub renewRelease: 6 tests completed, 4 failed

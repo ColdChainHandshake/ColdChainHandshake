@@ -7,6 +7,7 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.realtime.realtime
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
@@ -41,5 +42,15 @@ class SupabaseClientProviderTest {
         assertNotNull(client.auth)
         assertNotNull(client.postgrest)
         assertNotNull(client.realtime)
+    }
+
+    // supabase-kt's default drops the session from memory whenever the app leaves the foreground (its TROUBLESHOOTING,
+    // "Retrieving data in the background does not work"). On the S24 on 26 Nov that stopped every upload while the
+    // screen was off, with the recording service still running. The account loads the session itself instead.
+    @Test
+    fun theSessionStaysWhenTheAppGoesToTheBackground() {
+        val client = SupabaseClientProvider.getClient()
+
+        assertFalse(client.auth.config.enableLifecycleCallbacks)
     }
 }

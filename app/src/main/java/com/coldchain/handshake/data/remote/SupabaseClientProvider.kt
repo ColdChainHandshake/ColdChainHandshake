@@ -70,7 +70,12 @@ object SupabaseClientProvider {
                 explicitNulls = false
             })
             install(Postgrest)
-            install(Auth)
+            install(Auth) {
+                // The default drops the session from memory whenever the app leaves the foreground, which stopped every
+                // upload while the courier's screen was off (S24, 26 Nov). SupabaseAccountRepository loads the stored
+                // session once per process instead and keeps it refreshed.
+                enableLifecycleCallbacks = false
+            }
             install(Realtime)
         }
     }

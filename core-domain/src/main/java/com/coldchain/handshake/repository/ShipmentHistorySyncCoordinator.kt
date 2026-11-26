@@ -68,7 +68,9 @@ class ShipmentHistorySyncCoordinator(
         val state = stateFor(shipmentId)
 
         return syncMutexes.computeIfAbsent(shipmentId) { Mutex() }.withLock {
-            state.value = HistorySyncState.HISTORY_SYNCING
+            // A history already complete stays complete while it is fetched again: the Handover screen fetches every
+            // few seconds, and showing it as still coming each time moved the screen under the person's finger.
+            if (state.value != HistorySyncState.HISTORY_READY) state.value = HistorySyncState.HISTORY_SYNCING
 
             val head = remote.getChainHead(shipmentId).getOrElse {
                 state.value = HistorySyncState.SYNC_ERROR
