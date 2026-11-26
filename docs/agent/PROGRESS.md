@@ -53,6 +53,47 @@ app/build/generated/source/buildConfig/debug/.../BuildConfig.java (regenerated 2
   only archives are the two Gradle wrapper jars (manifests and properties only). `local-snapshot-20261030` (which
   holds `.mcp.json`) is not an ancestor of the branch. **Found:** the owner's real sign-in addresses in
   `CONTINUE_PROMPT.md` (`816cf52`). Asked; the owner chose to push to the public origin anyway
+- [x] First push of `rebuild/trust-core` to `origin` (explicit refspec, no tags), after checking every action tag in
+  `ci.yml` exists (`checkout@v7`, `setup-java@v6`, `setup-android@v4`, `gradle/actions@v6`, `upload-artifact@v7`,
+  `supabase/setup-cli@v3`). **The workflow's first run on GitHub passed**, both jobs:
+  https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/45842949385 (`e90726a`; android 7m14s:
+  unit tests, lint, release build, Room schemas current; database 1m1s: pgTAP, advisors)
+
+### CONTINUE Step 3 (5.2): background work and the handover window: `doing`
+
+- [x] **The 3-minute window, fixed test-first** (`f6f4775`). The courier keeps recording after confirming;
+  `ServerHandover.renewRelease` confirms the same release again on each new head (the server, unchanged, moves custody
+  only when both confirmations are on the current head); the receiver's verdict still runs to their own
+  confirmation. `HandoverWindowTest` (two phones, two databases, one fake server), 6 tests: against a stub
+  `renewRelease` 4 of 6 failed (the 10-minute inspection got UNKNOWN; readings landing mid-confirmation never
+  arrived). **The attack test** (`aCourierWhoConfirmsEarlyAndStopsRecordingCannotGetAPass`) passed against the stub
+  as expected, so it was checked with a mutant: the verdict window ending at the last reading makes it fail ("a PASS
+  can't be recorded over a gap"). A second mutant (custody-moved check removed) fails
+  `theCourierStopsRenewingOnceCustodyHasMoved`. `FakeColdChainServer` was checked first: it moves custody only with
+  both confirmations on the current head, like the SQL
+- [x] The Handover screen fetches the history every 3 s while shown (`whileShownItKeepsDownloadingTheReadingsTheCourierSends`
+  failed first, timing out at 11 readings), and tells a receiver whose confirmation new readings overtook to confirm
+  again (`aReceiverWhoseConfirmationNewReadingsOvertookIsAskedToConfirmAgain`, failed first)
+- [x] **Recording in the background** (`9599fbf`): `RecordingService` (foreground, `connectedDevice`, partial wake
+  lock while foreground), `RecordingLoop` (send, renew, custody; restore after a restart), `CourierRecorder` and
+  `RecordingStore` (resume after process death only for the shipment that was recording), `SyncWorker` (WorkManager,
+  network constraint, backoff). Take Custody asks for Nearby devices. `RecordingLoopTest` 13 (8 of 12 failed against
+  a stub loop; the 13th, status on resume, failed first), `RecordingServiceTest` 6 (Hilt, Robolectric),
+  `SyncWorkerTest` 4. Decisions and test changes in `DECISIONS.md` (26 Nov)
+- [ ] Open from MASTER 5.5 item 2: GPS in the service and queued in Room (`DECISIONS.md`)
+- [ ] Device proofs: screen off 10 min, `am kill`, Doze, airplane mode 30 min, readings on the server in order
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*HandoverWindowTest*'    stub renewRelease: 6 tests completed, 4 failed
+  mutant (window ends at the last reading):      1 failed  aCourierWhoConfirmsEarlyAndStopsRecordingCannotGetAPass
+  mutant (no custody-moved check):               1 failed  theCourierStopsRenewingOnceCustodyHasMoved
+./gradlew :app:testDebugUnitTest --tests '*HandoverViewModelTest*' before: 9 tests completed, 3 failed
+./gradlew :app:testDebugUnitTest --tests '*RecordingLoopTest*'     stub loop: 12 tests completed, 8 failed
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+  first run: debug 517, 2 failed (a simulator tick racing RecordingLoopTest's db.close leaked into DispatchScreenTest;
+             HandoverScreenTest's orchestrator had no transaction and read INSPECTED between writes). Both fixed
+  after:     exit 0 in 140 s | core-domain 122 failed 0 | debug 517 failed 0 | release 460 failed 0 | lint 0 errors
+```
 
 ## CONTINUE run, second session (24 Nov 2026, evening)
 
