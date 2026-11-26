@@ -45,7 +45,18 @@ public:
     std::optional<Hash> hash_at(std::int64_t seq) const;
 
 private:
-    // TODO(owner): choose the storage. See firmware/WALKTHROUGH.md, step 2.
+    // Records in a ring, and two hashes rather than one per record: the hash just before the oldest kept record,
+    // from which any kept record's hash is recomputed, and the newest hash, which every append needs. 8,192
+    // records take 176 KB; a hash each would add 256 KB, more than many boards have free (WALKTHROUGH.md, step 2).
+    const Record& at(std::int64_t seq) const;
+
+    std::string logger_id_;
+    std::vector<Record> ring_;
+    std::size_t start_ = 0;  ///< index of the oldest kept record
+    std::size_t count_ = 0;
+    std::int64_t newest_seq_ = 0;
+    Hash before_oldest_{};
+    Hash newest_hash_{};
 };
 
 }  // namespace cch

@@ -1,7 +1,6 @@
-# The logger's host library and its tests. The firmware logic is the owner's to write: every function in src/
-# is a TODO(owner) stub, so the tests build and fail until it is written. See WALKTHROUGH.md.
+# The logger's host library and its tests. WALKTHROUGH.md explains the four steps the library is built in.
 cmake_minimum_required(VERSION 3.25)
-project(cch_logger LANGUAGES CXX)
+project(cch_logger LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +15,22 @@ if(CCH_SANITIZE)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+# ECDSA P-256 with RFC 6979 nonces (step 3) comes from mbedTLS, the long-term-support 3.6 line, as a board build
+# would use. Pinned by the SHA-256 in its release notes and GitHub's asset digest (docs/agent/DECISIONS.md).
+include(FetchContent)
+FetchContent_Declare(mbedtls
+    URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.8/mbedtls-3.6.8.tar.bz2
+    URL_HASH SHA256=bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
+set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(mbedtls)
+
 add_library(cch_logger
     src/record.cpp
     src/hashing.cpp
@@ -24,10 +39,9 @@ add_library(cch_logger
     src/history.cpp
 )
 target_include_directories(cch_logger PUBLIC include)
+target_link_libraries(cch_logger PRIVATE mbedcrypto)
 target_compile_options(cch_logger PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wshadow>
-    # The stubs don't use their parameters yet. Remove this line once no TODO(owner) is left in src/.
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wno-unused-parameter>
 )
 
 if(CCH_FUZZ)
@@ -41,7 +55,6 @@ if(CCH_FUZZ)
 endif()
 
 if(CCH_BUILD_TESTS)
-    include(FetchContent)
     # Versions and hashes checked against GitHub's published SHA-256 digests on 6 Nov 2026 (docs/agent/DECISIONS.md).
     FetchContent_Declare(googletest
         URL https://github.com/google/googletest/releases/download/v1.18.0/googletest-1.18.0.tar.gz

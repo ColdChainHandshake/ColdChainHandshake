@@ -1,32 +1,33 @@
 # Firmware walkthrough
 
-The logger's code is yours to write (`FIRMWARE_OWNER = me`). Claude wrote only the frame around it: the CMake
-project, the header interfaces in `include/cch/`, a harness that loads the shared test vectors, the failing tests,
-and this file. Every function in `src/` is a `TODO(owner)` stub that throws, so each test fails with a message naming
-its step until you write that function.
+The logger's host library, in four steps. Claude wrote the frame first (the CMake project, the header interfaces in
+`include/cch/`, a harness that loads the shared test vectors, the tests, and this file) with every function a stub
+that failed its tests. On 26 Nov 2026 the owner set `FIRMWARE_OWNER = claude`, and Claude wrote the bodies in
+`src/` against those tests, unchanged: all 39 pass with MSYS2 g++. This file now explains what each step does and why
+it is built that way, for whoever ports it to a board.
 
 The rules come from `docs/protocol/LOGGER_PROTOCOL.md`. Where the protocol and a test disagree, the protocol is right
-and the vectors in `docs/protocol/logger_vectors.json` decide what it means. The tests were written from the protocol
-and the vectors and have never run against a working implementation, so a test can be wrong. If you think one is,
-say so in `docs/agent/HANDOFF.md` and Claude will check it against the Kotlin and Python versions.
+and the vectors in `docs/protocol/logger_vectors.json` decide what it means. The same vectors are what the app's
+Kotlin tests and the Python generator check, so the three agree on every byte the logger sends. No physical logger
+has run this code (`HARDWARE = none`).
 
 The protocol was signed off on 26 Nov 2026, including its minimum MTU of 148.
 
 ## Build and run on Windows
 
-You need CMake 3.25 or later, Ninja and a C++20 compiler. This PC has CMake 4.4, Ninja 1.13 and MSYS2's g++ 13.2
-(`C:\msys64\ucrt64\bin`). From Git Bash:
+You need CMake 3.25 or later, Ninja, and C and C++20 compilers. This PC has CMake 4.4, Ninja 1.13 and MSYS2's gcc
+and g++ 13.2 (`C:\msys64\ucrt64\bin`, which must be on PATH). From Git Bash:
 
 ```bash
 cd /d/ColdChainHandshake/firmware
-cmake --preset host-tests -DCMAKE_CXX_COMPILER=g++     # once; downloads GoogleTest and nlohmann/json
+export PATH="/c/msys64/ucrt64/bin:$PATH"
+cmake --preset host-tests -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc   # once; downloads mbedTLS, GoogleTest, nlohmann/json
 cmake --build --preset host-tests
-ctest --preset host-tests                              # all 38 tests
+ctest --preset host-tests                              # all 39 tests
 ./build/host-tests/cch_logger_tests.exe --gtest_filter='Step1*'   # one step at a time
 ```
 
-Today 37 of the 38 fail. The one that passes, `Step3DeviceKey.TheBuiltInTestKeyIsTheVectorKey`, only checks that the
-header holds the right key.
+CI runs the same tests on Linux with g++, then with AddressSanitizer and UBSan under clang, and fuzzes both decoders.
 
 ## Sanitizers and fuzzing (clang on Linux or WSL only)
 
@@ -40,8 +41,7 @@ cmake --preset fuzz && cmake --build --preset fuzz
 ./build/fuzz/fuzz_history_request -max_total_time=60
 ```
 
-Run them once all four steps are green. The fuzz targets call your code, so before then they stop at the first
-`TODO(owner)`.
+CI runs both presets on every push (`.github/workflows/ci.yml`, job `firmware`).
 
 ## The test key
 
@@ -80,9 +80,10 @@ test (7).
 - `hash_at` must know the hash of every kept record and of the one just before the oldest, because a batch that starts
   at the oldest record signs that hash as its start.
 
-The design choice is yours. Storing a hash per record is simplest, but 8,192 records take 176 KB, and a hash for each
-adds 256 KB, which is more than many boards have free. Keeping only the hash before the oldest record and recomputing
-forward when signing costs about 8,000 SHA-256 calls of 55 bytes at most per batch. On the board the records and the
+Storing a hash per record is simplest, but 8,192 records take 176 KB, and a hash for each adds 256 KB, which is more
+than many boards have free. So this library keeps two hashes: the one just before the oldest record, from which any
+kept record's hash is recomputed forward (about 8,000 SHA-256 calls of 55 bytes at most per batch), and the newest,
+which every append needs. On the board the records and the
 sequence number must also survive a power cut; the host tests don't cover that, so write it down when you get there.
 
 ## Step 3: signing
@@ -98,8 +99,11 @@ File: `src/signing.cpp`, plus the private members of `DeviceSigner`. Turns green
   when X equals `kTestKeyX`.
 - `DeviceSigner::create` refuses an invalid key and the test key (through `check_device_key` on its public key).
 
-To use mbedTLS on the host, add it to `CMakeLists.txt` with `FetchContent`, pinned to a release with its SHA-256, as
-GoogleTest is. Choose a current long-term-support release and record the version in `docs/agent/DECISIONS.md`.
+The host build fetches mbedTLS 3.6.8, the long-term-support line, with `FetchContent`, pinned by the SHA-256 its
+release notes publish (`docs/agent/DECISIONS.md`). mbedTLS 3.x blinds each scalar multiplication with random values;
+they change how a signature is computed, never the signature, so the vectors still come out exactly. SHA-256 is this
+library's own (step 1), so hashing needs nothing else. The signer wipes its key from memory when it goes; on a board the
+key belongs in the chip's protected storage.
 
 ## Step 4: history export
 

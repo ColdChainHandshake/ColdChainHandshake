@@ -42,6 +42,31 @@ jobs:
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
 
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ninja and clang
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang
+
+      # The logger's host library against docs/protocol/logger_vectors.json, the vectors the app's tests use too.
+      - name: Host tests (g++)
+        working-directory: firmware
+        run: cmake --preset host-tests && cmake --build --preset host-tests && ctest --preset host-tests
+
+      - name: Host tests with AddressSanitizer and UBSan (clang)
+        working-directory: firmware
+        run: cmake --preset asan-ubsan && cmake --build --preset asan-ubsan && ctest --preset asan-ubsan
+
+      - name: Fuzz both decoders for 30 seconds each (clang, libFuzzer)
+        working-directory: firmware
+        run: |
+          cmake --preset fuzz && cmake --build --preset fuzz
+          ./build/fuzz/fuzz_record_decode -max_total_time=30
+          ./build/fuzz/fuzz_history_request -max_total_time=30
+
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 20

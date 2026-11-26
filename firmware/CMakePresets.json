@@ -15,7 +15,7 @@
       "inherits": "host-tests",
       "binaryDir": "${sourceDir}/build/asan-ubsan",
       "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
-      "cacheVariables": { "CMAKE_CXX_COMPILER": "clang++", "CCH_SANITIZE": "ON" }
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "CCH_SANITIZE": "ON" }
     },
     {
       "name": "fuzz",
@@ -23,7 +23,7 @@
       "inherits": "host-tests",
       "binaryDir": "${sourceDir}/build/fuzz",
       "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
-      "cacheVariables": { "CMAKE_CXX_COMPILER": "clang++", "CCH_FUZZ": "ON", "CCH_BUILD_TESTS": "OFF" }
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "CCH_FUZZ": "ON", "CCH_BUILD_TESTS": "OFF" }
     }
   ],
   "buildPresets": [

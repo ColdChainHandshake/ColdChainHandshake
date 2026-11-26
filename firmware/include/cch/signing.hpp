@@ -54,9 +54,16 @@ public:
     PublicKey public_key() const override;
     Signature sign(ByteView payload) override;
 
+    DeviceSigner(const DeviceSigner&) = default;
+    DeviceSigner& operator=(const DeviceSigner&) = default;
+    ~DeviceSigner() override;  ///< wipes the key from memory
+
 private:
-    DeviceSigner() = default;
-    // TODO(owner): hold the key. On the board, keep it out of flash dumps (see WALKTHROUGH.md, step 3).
+    DeviceSigner(const PrivateKey& key, const PublicKey& public_key);
+    // On the board the key lives in the chip's protected storage and never in a flash dump; here it is held in
+    // memory and wiped when the signer goes.
+    PrivateKey key_{};
+    PublicKey public_key_{};
 };
 
 }  // namespace cch
