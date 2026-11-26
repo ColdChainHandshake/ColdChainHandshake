@@ -10,8 +10,9 @@ import com.coldchain.handshake.repository.FakeColdChainServer
 import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.repository.ShipmentWorkflow
-import com.coldchain.handshake.repository.SyncService
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
@@ -56,12 +57,9 @@ class TransitViewModelTest {
     private var simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
     private val history = ShipmentHistorySyncCoordinator(telemetry, server)
     private var alertChecks = 0
-    private val sync = object : SyncService {
-        var calls = 0
-        override suspend fun syncPendingData(): Result<Unit> { calls++; return Result.success(Unit) }
-        override fun isOnline() = true
-        override fun getSyncStatus(): Flow<SyncStatus> = flowOf(SyncStatus.SYNCED)
-    }
+    /** Which shipment is recording, kept on the phone; and how often the background recording was started. */
+    private val recordingStore = RecordingStore.inMemory()
+    private var backgroundStarts = 0
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -72,10 +70,13 @@ class TransitViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = TransitViewModel(
-        account, shipments, workflow, simulator, history, server, telemetry, sync, "device-1", { alertChecks++ },
-        ActiveShipmentRestorer(simulator, shipments, server, account), saved
-    )
+    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()): TransitViewModel {
+        val recorder = CourierRecorder(simulator, recordingStore) { backgroundStarts++ }
+        return TransitViewModel(
+            account, shipments, workflow, simulator, history, server, telemetry, recorder, "device-1", { alertChecks++ },
+            ActiveShipmentRestorer(simulator, shipments, server, account, recorder), saved
+        )
+    }
 
     private fun signInAs(user: String, role: MemberRole) {
         server.currentUser = user
@@ -105,6 +106,8 @@ class TransitViewModelTest {
         assertNull(vm.state.value.notice)
         assertEquals(1, alertChecks)
         assertEquals("courier", server.custody["SHIP-1"]?.custodianId)
+        assertEquals("recording goes on in the background", 1, backgroundStarts)
+        assertEquals("SHIP-1", recordingStore.shipmentId)
     }
 
     @Test
@@ -120,6 +123,8 @@ class TransitViewModelTest {
         assertEquals("No signal", vm.state.value.notice)
         assertFalse(simulator.isRunning.value)
         assertEquals(0, alertChecks)
+        assertEquals(0, backgroundStarts)
+        assertNull(recordingStore.shipmentId)
     }
 
     @Test
@@ -233,22 +238,6 @@ class TransitViewModelTest {
         advanceTimeBy(30_000)
 
         assertNull(vm.state.value.handedOverShipmentId)
-        assertEquals(0, sync.calls)
-    }
-
-    @Test
-    fun whileRecordingVisibleReadingsAreSentRegularly() = runTest {
-        dispatched("SHIP-1")
-        signInAs("courier", MemberRole.COURIER)
-        val vm = viewModel()
-        vm.onCodeScanned("SHIP-1").join()
-        vm.takeCustody().join()
-        val visible = backgroundScope.launch { vm.runWhileVisible() }
-
-        advanceTimeBy(10_100)
-
-        assertEquals(4, sync.calls)
-        visible.cancel()
     }
 
     @Test
@@ -265,8 +254,10 @@ class TransitViewModelTest {
         assertTrue(vm.state.value.gpsUploadStatus!!.startsWith("Synced"))
     }
 
+    // Before 26 Nov recording always waited for the person after process death. Now it resumes when the process died
+    // while recording (the recording store says so), and still waits when the person had paused it.
     @Test
-    fun afterProcessDeathTheShipmentComesBackButRecordingWaitsForThePerson() = runTest {
+    fun afterProcessDeathWhileRecordingTheShipmentComesBackAndRecordingResumes() = runTest {
         dispatched("SHIP-1")
         signInAs("courier", MemberRole.COURIER)
         val saved = SavedStateHandle()
@@ -275,15 +266,36 @@ class TransitViewModelTest {
         first.takeCustody().join()
         simulator.stopContinuousSimulation()
 
-        // The process dies: the simulator and the ViewModel are new, the saved state and the database remain.
+        // The process dies: the simulator and the ViewModel are new; the saved state, the database and the recording
+        // store remain.
         simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
         val restored = viewModel(SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) }))
 
         assertEquals("SHIP-1", restored.state.value.shipment?.id)
         assertEquals("SHIP-1", simulator.activeShipment.value?.id)
-        assertFalse(simulator.isRunning.value)
+        assertTrue(simulator.isRunning.value)
+        assertEquals("recording goes on in the background again", 2, backgroundStarts)
         assertTrue(restored.state.value.isCustodian)
         assertFalse(restored.state.value.watching)
+        assertFalse(simulator.isMonitorOnly.value)
+    }
+
+    @Test
+    fun afterProcessDeathWithRecordingPausedTheShipmentComesBackButRecordingWaitsForThePerson() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val saved = SavedStateHandle()
+        val first = viewModel(saved)
+        first.onCodeScanned("SHIP-1").join()
+        first.takeCustody().join()
+        first.pauseOrResumeRecording()
+
+        simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
+        val restored = viewModel(SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) }))
+
+        assertEquals("SHIP-1", simulator.activeShipment.value?.id)
+        assertFalse(simulator.isRunning.value)
+        assertTrue(restored.state.value.isCustodian)
         // The custodian can resume recording; someone watching couldn't.
         assertFalse(simulator.isMonitorOnly.value)
     }

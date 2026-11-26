@@ -9,9 +9,15 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Reading a Bluetooth logger (LOGGER_PROTOCOL.md). Nothing asks for these until a logger is used. -->
+    <!-- Reading a Bluetooth logger (LOGGER_PROTOCOL.md). Taking custody asks for Nearby devices, which the recording
+         service's connectedDevice type needs on Android 14 and later. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Recording goes on with the screen off: a foreground service that keeps the CPU awake while it records. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Scanning is optional: a device without a camera can still enter a shipment ID. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -37,6 +43,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".recording.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- ColdChainApp configures WorkManager with Hilt's worker factory, so WorkManager's own initializer is
              removed. Only that entry: App Startup still sets up Supabase Auth's session storage. -->

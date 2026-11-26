@@ -26,6 +26,8 @@ import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepositoryImpl
 import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.screens.DispatchScreen
 import com.coldchain.handshake.ui.screens.DispatchViewModel
@@ -63,6 +65,7 @@ class DispatchScreenTest {
         workflow = ShipmentWorkflow(server, shipments) { "device-1" },
         simulator = simulator,
         history = ShipmentHistorySyncCoordinator(telemetry, server),
+        recorder = CourierRecorder(simulator, RecordingStore.inMemory()) {},
         saved = SavedStateHandle()
     )
 

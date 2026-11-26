@@ -10,6 +10,7 @@ import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.ShipmentDraft
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepository
+import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -70,6 +71,7 @@ class DispatchViewModel @Inject constructor(
     private val workflow: ShipmentWorkflow,
     private val simulator: TemperatureSimulator,
     private val history: ShipmentHistorySyncCoordinator,
+    private val recorder: CourierRecorder,
     private val saved: SavedStateHandle
 ) : ViewModel() {
 
@@ -169,9 +171,8 @@ class DispatchViewModel @Inject constructor(
         if (shipment.genesisHash != null) return@launch
         val inTransit = shipment.copy(status = ShipmentStatus.IN_TRANSIT, journeyStartedAt = System.currentTimeMillis())
         if (!saveOrRevert(inTransit, shipment)) return@launch
-        simulator.attachShipment(inTransit)
         history.markReady(inTransit.id)
-        simulator.startContinuousSimulation(intervalMs = 1500L, simulatedStepSeconds = 60L)
+        recorder.start(inTransit)
         _events.send(DispatchEvent.OpenTransit)
     }
 

@@ -14,7 +14,7 @@ import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepository
 import com.coldchain.handshake.repository.ShipmentWorkflow
-import com.coldchain.handshake.repository.SyncService
+import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.navigation.ActiveShipmentRestorer
@@ -65,12 +65,14 @@ data class TransitUiState(
 
 /**
  * The Transit screen: take custody and record, or open a shipment by its code and watch it. Only the server says
- * who holds custody. Its polling runs only inside [runWhileVisible], which the screen runs while it is shown, as it
- * did when the polling lived in the screen's own effects (5.2 moves recording and sync into the background).
+ * who holds custody. Recording, and sending what is recorded, run in the background through [CourierRecorder] and
+ * the recording service, so they go on with the screen off. What this screen polls (custody while recording, the
+ * courier's position and readings while watching) runs only inside [runWhileVisible], which the screen runs while
+ * it is shown.
  *
  * The shipment on screen and the mode are kept in [SavedStateHandle]. After the process was killed the shipment comes
- * back attached to the simulator, as the custodian's or a watcher's as the server says, but recording doesn't
- * restart on its own.
+ * back attached to the simulator, as the custodian's or a watcher's as the server says, and recording resumes if it
+ * was this shipment that was recording.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -82,7 +84,7 @@ class TransitViewModel @Inject constructor(
     private val history: ShipmentHistorySyncCoordinator,
     private val remote: ColdChainRemote,
     private val telemetry: TelemetryRepository,
-    private val sync: SyncService,
+    private val recorder: CourierRecorder,
     @DeviceId private val deviceId: String,
     private val alertChecks: AlertChecks,
     private val restorer: ActiveShipmentRestorer,
@@ -144,11 +146,6 @@ class TransitViewModel @Inject constructor(
     /** Runs the screen's polling until the caller is cancelled. */
     suspend fun runWhileVisible(): Unit = coroutineScope {
         launch {
-            combine(simulator.isRunning, simulator.activeShipment) { running, shipment -> running && shipment != null }
-                .distinctUntilChanged()
-                .collect { recording -> if (recording) sendWhileRecording() }
-        }
-        launch {
             _state.map { Triple(it.shipment?.id, it.shipment?.genesisHash != null, it.watching) }
                 .distinctUntilChanged()
                 .collect { (id, onServer, watching) ->
@@ -170,9 +167,8 @@ class TransitViewModel @Inject constructor(
             .onSuccess { taken ->
                 _state.update { it.copy(notice = null, isCustodian = true) }
                 setWatching(false)
-                simulator.attachShipment(taken)
                 history.markReady(taken.id)
-                simulator.startContinuousSimulation(intervalMs = RECORDING_INTERVAL_MS, simulatedStepSeconds = 60L)
+                recorder.start(taken)
                 alertChecks.checkNow()
             }
             .onFailure { e -> _state.update { it.copy(notice = e.message) } }
@@ -208,8 +204,8 @@ class TransitViewModel @Inject constructor(
 
     /** Debug tools: the simulator's own controls. */
     fun pauseOrResumeRecording() {
-        if (simulator.isRunning.value) simulator.stopContinuousSimulation()
-        else simulator.startContinuousSimulation(intervalMs = RECORDING_INTERVAL_MS, simulatedStepSeconds = 60L)
+        if (simulator.isRunning.value) recorder.pause()
+        else _state.value.shipment?.let { recorder.start(it) }
     }
 
     fun recordOneReading(): Job = viewModelScope.launch { simulator.tickOnce(simulatedStepDurationSeconds = 60L) }
@@ -222,13 +218,6 @@ class TransitViewModel @Inject constructor(
         val mine = custody.custodianId == user
         _state.update { it.copy(isCustodian = mine) }
         if (!mine) setWatching(true)
-    }
-
-    private suspend fun sendWhileRecording() {
-        while (true) {
-            delay(SYNC_INTERVAL_MS)
-            sync.syncPendingData()
-        }
     }
 
     /** While recording: custody moving to someone else ends recording on this phone. */
@@ -266,10 +255,8 @@ class TransitViewModel @Inject constructor(
     }
 
     companion object {
-        const val SYNC_INTERVAL_MS = 2_500L
         const val CUSTODY_POLL_MS = 3_500L
         const val WATCH_POLL_MS = 3_000L
-        const val RECORDING_INTERVAL_MS = 1_500L
         private const val STOP_SHARING_MS = 5_000L
         private const val KEY_SHIPMENT_ID = "shipmentId"
         private const val KEY_WATCHING = "watching"

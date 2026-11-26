@@ -42,7 +42,8 @@ class ServerHandover(
     private val uploadPending: suspend (String) -> Result<Unit>,
     private val deviceId: () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val pendingReleases: PendingReleases = PendingReleases.inMemory()
+    private val pendingReleases: PendingReleases = PendingReleases.inMemory(),
+    private val onQueuedOffline: () -> Unit = {}
 ) {
 
     /**
@@ -168,6 +169,7 @@ class ServerHandover(
                 historySynced = false,
                 timestamp = now
             ).map { HandoverResult.QueuedOffline(it.handover) }
+                .onSuccess { onQueuedOffline() }
         }
 
         if (head == null) return queueOffline()

@@ -10,6 +10,8 @@ import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -52,8 +54,14 @@ class AppRootViewModelTest {
 
     private fun newSimulator() = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
 
-    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) =
-        AppRootViewModel(account, session, simulator, ActiveShipmentRestorer(simulator, shipments, server, account), saved)
+    /** Which shipment was recording; kept on the phone, so it outlives the process like the saved state. */
+    private val recordingStore = RecordingStore.inMemory()
+
+    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = AppRootViewModel(
+        account, session, simulator,
+        ActiveShipmentRestorer(simulator, shipments, server, account, CourierRecorder(simulator, recordingStore) {}),
+        saved
+    )
 
     /** The process dies: the simulator and the ViewModel are new, the saved state and the database remain. */
     private fun afterProcessDeath(saved: SavedStateHandle): AppRootViewModel {

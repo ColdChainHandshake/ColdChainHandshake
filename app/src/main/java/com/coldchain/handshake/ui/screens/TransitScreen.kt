@@ -3,7 +3,9 @@ package com.coldchain.handshake.ui.screens
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.os.Build
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,6 +73,7 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
+import com.coldchain.handshake.recording.RecordingService
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.components.TemperatureCard
 import com.coldchain.handshake.ui.theme.PrimaryCold
@@ -269,6 +272,17 @@ fun TransitScreen(
         }
     }
 
+    // Recording runs in a foreground service whose type, on Android 14 and later, needs Nearby devices. Asked for when
+    // custody is taken; refused, recording still runs, but only while the app is open.
+    val nearbyDevicesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { viewModel.takeCustody() }
+    val takeCustody: () -> Unit = {
+        val needsNearby = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        if (needsNearby) nearbyDevicesLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) else viewModel.takeCustody()
+    }
+
     // Custody moved away while this phone was recording: its location reports stop too.
     LaunchedEffect(ui.handedOverShipmentId) {
         if (ui.handedOverShipmentId != null) stopGpsTracking()
@@ -317,11 +331,20 @@ fun TransitScreen(
         val waiting = currentShipment
         if (signedIn && waiting != null && waiting.genesisHash != null && waiting.status == ShipmentStatus.DISPATCHED) {
             Button(
-                onClick = { viewModel.takeCustody() },
+                onClick = takeCustody,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Take Custody")
             }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        if (isRunning && !RecordingService.canRunInForeground(context)) {
+            Text(
+                "Recording continues only while this app is open. Allow Nearby devices for this app in Settings " +
+                    "to keep it recording with the screen off.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
             Spacer(modifier = Modifier.height(8.dp))
         }
         custodyNotice?.let {

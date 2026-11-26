@@ -17,6 +17,13 @@ import com.coldchain.handshake.data.security.KeystoreDeviceSigner
 import com.coldchain.handshake.debugtools.DebugTools
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.handover.ServerHandover
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingLoop
+import com.coldchain.handshake.recording.RecordingService
+import com.coldchain.handshake.recording.RecordingStore
+import com.coldchain.handshake.recording.SharedPreferencesRecordingStore
+import com.coldchain.handshake.recording.SyncRequests
+import com.coldchain.handshake.recording.SyncScheduler
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.AlertRepository
 import com.coldchain.handshake.repository.AlertRepositoryImpl
@@ -166,7 +173,8 @@ object AppModule {
         account: AccountRepository,
         simulator: TemperatureSimulator,
         history: ShipmentHistorySyncCoordinator,
-        pendingReleases: SharedPreferencesPendingReleases
+        pendingReleases: SharedPreferencesPendingReleases,
+        recording: RecordingStore
     ): LocalSession = LocalSession(
         db = db,
         account = account,
@@ -175,6 +183,7 @@ object AppModule {
             simulator.reset()
             history.clear()
             pendingReleases.clear()
+            recording.shipmentId = null
         }
     )
 
@@ -194,6 +203,7 @@ object AppModule {
         history: ShipmentHistorySyncCoordinator,
         sync: SyncServiceImpl,
         pendingReleases: SharedPreferencesPendingReleases,
+        syncRequests: SyncRequests,
         @DeviceId deviceId: String
     ) = ServerHandover(
         remote = remote,
@@ -203,8 +213,35 @@ object AppModule {
         history = history,
         uploadPending = { shipmentId -> sync.uploadReadings(shipmentId) },
         deviceId = { deviceId },
-        pendingReleases = pendingReleases
+        pendingReleases = pendingReleases,
+        onQueuedOffline = { syncRequests.request() }
     )
+
+    @Provides
+    fun syncRequests(@ApplicationContext context: Context): SyncRequests = SyncRequests { SyncScheduler.request(context) }
+
+    @Provides @Singleton
+    fun recordingStore(@ApplicationContext context: Context): RecordingStore = SharedPreferencesRecordingStore(context)
+
+    @Provides @Singleton
+    fun courierRecorder(
+        @ApplicationContext context: Context,
+        simulator: TemperatureSimulator,
+        store: RecordingStore
+    ): CourierRecorder = CourierRecorder(simulator, store) { RecordingService.keepRunning(context) }
+
+    @Provides @Singleton
+    fun recordingLoop(
+        simulator: TemperatureSimulator,
+        recorder: CourierRecorder,
+        sync: SyncService,
+        handover: ServerHandover,
+        remote: ColdChainRemote,
+        account: AccountRepository,
+        shipments: ShipmentRepository,
+        store: RecordingStore,
+        syncRequests: SyncRequests
+    ): RecordingLoop = RecordingLoop(simulator, recorder, sync, handover, remote, account, shipments, store, syncRequests)
 
     @Provides
     fun alertChecks(@ApplicationContext context: Context): AlertChecks =

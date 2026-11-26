@@ -12,6 +12,8 @@ import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -61,8 +63,9 @@ class DispatchViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) =
-        DispatchViewModel(account, shipments, workflow, simulator, history, saved)
+    private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = DispatchViewModel(
+        account, shipments, workflow, simulator, history, CourierRecorder(simulator, RecordingStore.inMemory()) {}, saved
+    )
 
     private fun signIn() = account.setState(AccountState.Ready("sender", null, UserProfile("Sam", MemberRole.SENDER)))
 

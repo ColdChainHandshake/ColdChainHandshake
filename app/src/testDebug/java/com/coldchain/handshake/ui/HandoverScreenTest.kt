@@ -39,7 +39,7 @@ import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.FakeNetworkMonitor
 import com.coldchain.handshake.repository.ReadingUploader
 import com.coldchain.handshake.debugtools.DebugTools
-import com.coldchain.handshake.handover.HandoverOrchestrator
+import com.coldchain.handshake.di.AppModule
 import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
@@ -113,7 +113,9 @@ class HandoverScreenTest {
         chaosEngineService = DebugTools.createChaosService(),
         safetyEngine = safetyEngine
     )
-    private val orchestrator = HandoverOrchestrator(shipments, telemetry, handovers)
+    // In one transaction, as the app's module builds it: without it the handover row shows before the shipment's
+    // final status, and a check between the two read INSPECTED (seen once in a full run on 26 Nov).
+    private val orchestrator = AppModule.handoverOrchestratorFor(db, shipments, telemetry, handovers)
     private val history = ShipmentHistorySyncCoordinator(telemetry, server)
     private val serverHandover = ServerHandover(
         remote = server,
