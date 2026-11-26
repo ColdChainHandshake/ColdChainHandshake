@@ -1,11 +1,20 @@
 # Progress
 
-**Next action (26 Nov, 20:30):** doc hygiene done, the owner's new switches recorded (`DECISIONS.md`, 26 Nov).
-Next: push `rebuild/trust-core` to origin and get CI green, then CONTINUE Step 3 (5.2): the Handover screen
-downloads its own history, a foreground service for recording, WorkManager sync, and the 3-minute window fixed
-test-first (the attack test first). Then Step 4 (5.3 to 5.6, Gate 5), Step 5 (4.1, 4.3 and the firmware,
-Gate 4 "met without hardware"), Step 6 (Phase 6, Gate 6). 4.3's server change must stay compatible with the
-`05b342e` app.
+**Next action (26 Nov, 22:35, stopped at a usage limit):** 5.2 code done and proven on the S24 (screen off, deep
+Doze, 13 min of airplane mode: readings 59 to 72 recorded offline reached the server in order 4 s after reconnecting,
+22:32). Firmware done (39/39). 5.4 done. Still to do, in order:
+1. `git stash list`: "honesty pass, untested" holds screen-text edits (Phone A/B, Supabase Polling, Simulated Time,
+   Worker ID hidden for server shipments, Go to Dispatch only for senders, handed-over dialog). Apply, run the full
+   proof, commit.
+2. Finish the S24 run: the receiver (emulator, still signed in, watching `SHIP-49A74F`) records PASS; expect
+   TRANSFERRED/ACCEPTED (the reinstall gap was 2 min 6 s). Then `SHIP-1D87CC`: `am kill` (pid unchanged), a real
+   kill (`run-as … kill -9`), an alert raised offline reaching the server. Needs the owner to unlock the S24.
+   A full 30-minute airplane run is still owed for Gate 5 (this one was 13 minutes).
+3. 5.3 multi-leg: several couriers in "Courier's Email", recording starts when custody comes to a courier
+   (Transit watch and Handover), a 3-phone domain test, then a multi-leg `LiveSupabaseIntegrationTest` case on the
+   local stack. 5.5 audits, 5.6 release (keystore in `D:\cch-keys`), Gate 5 with its reviewer (also review the
+   window fix and the recording service: the automatic security reviews failed).
+4. Then 4.3 and 4.1 (`05b342e`-compatible), Gate 4 "met without hardware", Phase 6, Gate 6.
 Memory rule (owner, 24 Nov, still in force): 16 GB RAM; never Gradle and the emulator at once; full proof in the
 foreground, then `./gradlew --stop`, then the emulator; one emulator only. `PHONE = present`.
 End of every session: push the branch, make a verified bundle on D:.
