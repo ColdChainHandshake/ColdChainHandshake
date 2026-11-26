@@ -88,8 +88,10 @@ HASH VERIFICATION
 
 This is a prototype and is not fit for real vaccine or medicine stock.
 
-The temperature readings are simulated, and the rebuild described in `docs/agent/MASTER_PROMPT.md` is in progress on
-the `rebuild/trust-core` branch. Until it finishes, parts of this page describe the demo rather than guarantees: the
+The temperature readings are simulated. No physical temperature logger has been used at any point: the logger
+protocol, the virtual logger and the firmware library are tested on a PC only. What is proven, and on what, is in
+`docs/agent/STATUS.md`. The rebuild described in `docs/agent/MASTER_PROMPT.md` is in progress on the
+`rebuild/trust-core` branch. Until it finishes, parts of this page describe the demo rather than guarantees: the
 hash chain and the handover confirmations do not yet stop a determined courier from changing the record.
 
 ---

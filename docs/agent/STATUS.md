@@ -1,6 +1,7 @@
 # Status: what is proven, and on what
 
-Updated 24 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock.
+Updated 26 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock. No physical
+temperature logger has been used at any point (`HARDWARE = none`): every reading so far is simulated on a phone.
 
 "Real system" means a hosted Supabase project, an emulator or phone, or a real database running in Docker.
 "Fakes" means tests, fake servers and test vectors that Claude wrote. A fake can agree with the code and still be
@@ -10,14 +11,14 @@ wrong about the world: the first real run found a server rule the fake server di
 
 - **The hosted dev project (24 Nov):** migrations `0000` to `0003` applied. Its schema is the one the local tests
   ran on: definitions, constraints, policies and the privilege matrix hash the same on both. Every deny-by-default
-  rule from the tests, run as a query on hosted (including for newly created objects), finds nothing. Supabase's advisors show no errors. Through the real API, a signed-out caller is
-  refused (`permission denied`).
+  rule from the tests, run as a query on hosted (including for newly created objects), finds nothing. Supabase's
+  advisors show no errors. Through the real API, a signed-out caller is refused (`permission denied`).
 - **Gate 3, a whole handover on the hosted dev project with two real devices at once (24 Nov):** the app built from
-  `05b342e`. Email-code sign-in with real emails for all three people. The sender (emulator) created and dispatched
-  `SHIP-3E4005`. The courier (the Galaxy S24) took custody and uploaded 6 signed readings over 5 minutes, then
-  confirmed. The receiver (emulator) recorded PASS on the same history. The server shows two confirmations from two
-  device IDs, custody moved to the receiver, status ACCEPTED. The readings are simulated on the courier's phone; no
-  logger was involved.
+  `05b342e`. Email-code sign-in with real emails from the hosted project for all three people. The sender
+  (emulator) created and dispatched `SHIP-3E4005`. The courier (the Galaxy S24) took custody and uploaded 6 signed
+  readings over 5 minutes, then confirmed. The receiver (emulator) recorded PASS on the same history. The server
+  shows two confirmations from two device IDs, custody moved to the receiver, status ACCEPTED. The readings are
+  simulated on the courier's phone; no logger was involved.
 
 The rest ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
 hosted project.
@@ -34,78 +35,82 @@ hosted project.
   - Each shortcut is refused: a stale chain head, an edited reading, an upload by someone without custody, one phone
     confirming for someone else, the sender confirming, and the old custodian uploading afterwards.
   - Someone not signed in, and a stranger, see nothing.
-  - It signs up with passwords, so email-code sign-in itself is still untested.
+  - It signs up with passwords; email-code sign-in is proven through the app's screens instead (Gate 3, above).
 
-On a phone and an emulator (23 Nov), a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 emulator (Android 16):
+On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 emulator (Android 16).
 
-- **The phone's signing key:** `KeystoreDeviceSignerTest`, 3 of 3 on each. The key is made in the Android Keystore,
-  stays the same between uses, and its signatures verify with the public key the server is given.
-- **Screens on the emulator:** sign-in; the typed email survives rotation, going to the background and the process
-  being killed; debug local mode creates, dispatches and starts a shipment and records one reading a minute, through
-  rotation. Screenshots in `docs/agent/evidence/`. This found the sign-in title drawn under the status bar (fixed).
-- **On the phone so far:** the app starts in 1.1 s with no stall. The rest of the phone pass is still to do.
-- **A whole handover through the app's own screens, against the local Docker stack** (not the hosted project), with
-  one emulator playing each person in turn after clearing its storage: email-code sign-in for all three people
-  (codes read from the local mail catcher), create and dispatch, take custody, 3 signed readings, both
-  confirmations from two device IDs, custody moved, status ACCEPTED. A second run showed a receiver past the
-  3-minute window gets UNKNOWN, as it should.
+- **The phone's signing key (23 Nov):** `KeystoreDeviceSignerTest`, 3 of 3 on each. The key is made in the Android
+  Keystore, stays the same between uses, and its signatures verify with the public key the server is given.
+- **Screens on the S24 (23 and 24 Nov):** the app starts in 1.1 to 1.2 s with no stall. Sign-in shows clear of the
+  status bar; a typed email survives rotation, going to the background, and the process being killed with the
+  return from Recents. Debug local mode creates, dispatches and records. Killed while on Handover or Alerts, the app
+  comes back on the same shipment with the inspection answers still selected (fixed on 24 Nov; before, it came back
+  empty). No crash or ANR in the logs. Read from the layout dump; no phone screenshots kept, because the phone
+  showed personal data.
+- **Screens on the emulator (23 and 24 Nov):** the same sign-in checks; local mode records through rotation and a
+  kill; the alert worker is built by Hilt's factory and runs. Screenshots in `docs/agent/evidence/`.
+- **A whole handover through the app's own screens against the local Docker stack (23 Nov),** one emulator playing
+  each person in turn after clearing its storage: email-code sign-in (codes from the local mail catcher), create
+  and dispatch, take custody, signed readings, both confirmations from two device IDs, custody moved, ACCEPTED. A
+  second run showed a receiver past the 3-minute window gets UNKNOWN, as it should.
 
 ## Proven only against our own fakes and vectors
 
 - **Full unit and screen tests:** counts in `PROGRESS.md`.
 - **Offline behaviour, retries and timing:** against a fake server that copies the real one's refusal rules.
-- **Email-code sign-in:** against a fake sign-in server, and on the emulator against the local stack's real
-  auth server (above). Not yet with real emails from the hosted project.
 - **Safety rules:** heat, freeze, gaps, one alert per excursion, escalation timing. These are pure logic tests; the
   timers ran in WorkManager's test harness, not in real time.
-- **Screens:** driven by Robolectric, which runs Android on the PC's JVM. No screen has been seen on a phone.
+- **Screen behaviour in depth:** every state of the Dispatch, Transit, Handover and Alerts screens is driven by
+  Robolectric on the PC's JVM; the devices above checked launch, rotation, process death and the handover flow.
 - **Hash chain:** Python, Postgres and Kotlin agree on 18 shared test cases.
-- **Logger protocol:** Kotlin agrees with a separate Python version on the vectors. Both were written by Claude; one
-  signature is checked against an outside source (RFC 6979).
+- **Logger protocol** (signed off by the owner on 26 Nov): Kotlin agrees with a separate Python version on the
+  vectors. Both were written by Claude; one signature is checked against an outside source (RFC 6979).
 - **Logger test key refused:** in unit tests for both builds, and neither built APK contains its private key.
 - **Reading a logger over Bluetooth:** the protocol side runs against a fake Bluetooth server and the Python
-  vectors, including lost and silent notifications. The Android Bluetooth code compiles but has never talked to a
-  logger, because there isn't one (`HARDWARE = none`). Since the 24 Nov security review, a hostile device's
-  forged header (which used to run the phone out of memory), extra records and stray Bluetooth callbacks are
-  refused in tests.
+  vectors, including lost and silent notifications, a forged header claiming a huge range, extra records and stray
+  callbacks. The Android Bluetooth code compiles but has never talked to a logger, because there isn't one.
 - **Checking the logger at handover:** in tests, a history that was edited, cut short, replayed, signed with the
   wrong or the test key, or doesn't match the readings fails the handover; one with holes or faults is UNKNOWN.
   Not on a screen yet.
-- **Firmware:** interfaces and 38 tests build with g++; the code is the owner's to write, so 37 fail by design.
+- **Firmware:** interfaces and 39 tests build with MSYS2 g++; 38 fail until the code is written. From 26 Nov Claude
+  writes it (`FIRMWARE_OWNER = claude`).
 
 ## Not proven
 
 - Notifications and real timers on any device.
 - Recording and sync with the screen off, after the app is killed, or after a long time offline. The Gate 3 run
-  showed the gap: the pinned build stops recording as soon as the courier's app leaves the screen.
-- A real logger. The virtual logger exists in code, but the app doesn't use it yet.
-- The GitHub Actions workflow has never run on GitHub.
+  showed the gap: the pinned build stops recording as soon as the courier's app leaves the screen. Phase 5.2 is
+  next.
+- A real logger. None will be used (`HARDWARE = none`); the virtual logger exists in code but the app doesn't use
+  it yet.
+- The GitHub Actions workflow has never run on GitHub (the branch is pushed from 26 Nov).
 
 ## Gates
 
 `gate-0`, `gate-1` (24 Nov, on the dev project's own advisors and a fresh clone's build), `gate-2` and `gate-3`
-(24 Nov, the two-device handover on the dev project) are tagged.
+(24 Nov, the two-device handover on the dev project) are tagged. Gate 5 (Phase 5) and Gate 4 (Phase 4 with the
+firmware, closing as "met without hardware") are next.
 
 ## The 16 findings
 
 "Unit" means fixed and tested against fakes or in pure logic tests. "Docker" means proven on the local Docker stack.
-"Open" means not fixed yet.
+"Hosted" means proven on the dev project. "Open" means not fixed yet.
 
 | # | Finding, in short | State | Test that shows it |
 |---|---|---|---|
-| 1 | Anyone with the APK could read and write the cloud data | Docker. **The old demo project is still open** until the owner locks it | `0001_lockdown`, `0002_deny_by_default`; `LiveSupabaseIntegrationTest.someoneNotSignedInSeesNothing`, `aStrangerSeesNoneOfAnotherShipment` |
+| 1 | Anyone with the APK could read and write the cloud data | Closed. Docker and hosted for the new schema. The old demo project is deleted: the owner found it is no longer in his Supabase account and its URL no longer resolves (26 Nov). Claude never contacted it, by rule | `0001_lockdown`, `0002_deny_by_default`; `LiveSupabaseIntegrationTest.someoneNotSignedInSeesNothing`, `aStrangerSeesNoneOfAnotherShipment`; the hosted deny-by-default queries (Gate 1) |
 | 2 | Deleting or rewriting the hash chain went unnoticed | Docker and unit | `0003_trust_core` (stale head CC001, gap or re-order CC003, edit CC004); the live test's stale-head and edit checks; `RegressionTest.finding2_*` |
 | 3 | Freezing was never a breach | Unit | `RegressionTest.finding3_freezingFailsAFreezeSensitiveProduct` |
-| 4 | Two checkboxes on one phone stood in for two signatures | Server half Docker, including through the app's client; app screens unit. No run on two phones yet | `0003_trust_core` "one device cannot confirm for both people"; the live test's borrowed-phone check; `ServerHandoverTest.custodyMovesOnlyOnceBothPeopleHaveConfirmed` |
-| 5 | No sensor, simulated readings | Open. Virtual logger written, not in the app (`HARDWARE = none`) | `LoggerVectorsTest` covers the protocol only |
+| 4 | Two checkboxes on one phone stood in for two signatures | Closed. Docker, and hosted with two real devices (Gate 3: two device IDs, custody moved, ACCEPTED) | `0003_trust_core` "one device cannot confirm for both people"; the live test's borrowed-phone check; `ServerHandoverTest.custodyMovesOnlyOnceBothPeopleHaveConfirmed`; `SHIP-3E4005` on the dev project |
+| 5 | No sensor, simulated readings | Open. Virtual logger written, not in the app; no hardware (`HARDWARE = none`) | `LoggerVectorsTest` covers the protocol only |
 | 6 | Data gaps counted as safe | Unit | `RegressionTest.finding6_dataGapsAreUnknownNotSafe` |
 | 7 | A new alert every tick, no escalation | Unit | `RegressionTest.finding7_oneExcursionCreatesOneAlert`; `AlertNotificationsTest.theWorkerEscalatesWhatIsDueNotifiesAndBooksTheNextCheck` |
 | 8 | A FAIL handover couldn't be recorded; some statuses never set | Unit | `HandoverDecisionTest.aDeclaredFailureNeedsAReason`; `ShipmentLifecycleTest.everyPairOfStatusesIsEitherLegalOrRejected` |
-| 9 | Recording, sync and GPS stop when the screen changes | Open, Phase 5. Only alert checks run in the background (WorkManager) | none |
+| 9 | Recording, sync and GPS stop when the screen changes | Open, 5.2 next. Only alert checks run in the background (WorkManager). Seen for real in Gate 3 (`SHIP-D9E438`) | none |
 | 10 | An app update could wipe the database | Unit (real SQLite under Robolectric) | `ColdChainDatabaseMigrationTest.aVersion2ChainKeepsItsReadingsThroughTheMigration` |
 | 11 | The receiver re-downloads everything every 3 s | Partly: downloads only new readings, still polls every 3 s. Phase 5 | none for the polling |
 | 12 | The QR code was trusted text | Unit | `ShipmentWorkflowTest.aScannedCodeIsNeverTurnedIntoAShipment` |
 | 13 | The handover trusted the caller's temperature result | Unit; the argument no longer exists | `HandoverOrchestratorTest.test16_temperatureFailedQuarantinesShipment` |
-| 14 | Only one handover per shipment | Partly: the server supports several legs (Docker); the phone still refuses a second one. Phase 5 | `0003_trust_core`; `HandoverDecisionTest.aSecondHandoverForTheSameShipmentIsRefusedNotSilentlyLost` |
-| 15 | No ViewModels, global state, demo code in production | Partly: demo code is debug-only; ViewModels are Phase 5 | `ReleaseHasNoDebugToolsTest` |
-| 16 | Build pinned to one PC, a test hit a live server, old target SDK, no CI | Unit, except CI never ran on GitHub | `OfflineTestGuardTest`; a clone built with `JAVA_HOME` only (`PROGRESS.md`, Phase 1) |
+| 14 | Only one handover per shipment | Partly: the server supports several legs (Docker); the phone still refuses a second one. 5.3 | `0003_trust_core`; `HandoverDecisionTest.aSecondHandoverForTheSameShipmentIsRefusedNotSilentlyLost` |
+| 15 | No ViewModels, global state, demo code in production | Closed in code: a ViewModel per screen, Hilt builds everything, `RepositoryProvider` deleted, role-based tabs (24 Nov); demo code is debug-only. Process death checked on the S24 | `ReleaseHasNoDebugToolsTest`; `AppRootViewModelTest`, `DispatchViewModelTest`, `TransitViewModelTest`, `HandoverViewModelTest`, `AlertsViewModelTest`, `ScreenTabsTest` |
+| 16 | Build pinned to one PC, a test hit a live server, old target SDK, no CI | Unit, and a clean clone builds (Gate 1); CI has not run on GitHub yet | `OfflineTestGuardTest`; the clean-clone build (`PROGRESS.md`, Gate 1) |

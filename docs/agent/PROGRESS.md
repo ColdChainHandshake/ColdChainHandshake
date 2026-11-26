@@ -1,15 +1,58 @@
 # Progress
 
-**Next action (24 Nov, 22:20):** `gate-1` and `gate-3` are tagged; the phone pass and the Handover/Alerts kill
-checks are done, and Handover and Alerts now come back with their shipment after a kill (Step 2 below, proven on
-the S24). **5.1 is done** (Hilt builds everything, `HiltWorker`, `RepositoryProvider` gone, role-based tabs; Step 2
-below). Next: CONTINUE Step 3 (5.2): the Handover screen downloads its own history, a foreground service for
-recording, WorkManager sync, and the 3-minute window fixed test-first (the attack test first). Step 5's
-server work (4.3) must stay compatible with the `05b342e` app.
-Memory rule (owner, 24 Nov): 16 GB RAM; never Gradle and the emulator at once; full proof in the foreground, then
-`./gradlew --stop`, then the emulator; one emulator only. Switches now `PHONE = present`, `EMULATORS = 1`.
+**Next action (26 Nov, 20:30):** doc hygiene done, the owner's new switches recorded (`DECISIONS.md`, 26 Nov).
+Next: push `rebuild/trust-core` to origin and get CI green, then CONTINUE Step 3 (5.2): the Handover screen
+downloads its own history, a foreground service for recording, WorkManager sync, and the 3-minute window fixed
+test-first (the attack test first). Then Step 4 (5.3 to 5.6, Gate 5), Step 5 (4.1, 4.3 and the firmware,
+Gate 4 "met without hardware"), Step 6 (Phase 6, Gate 6). 4.3's server change must stay compatible with the
+`05b342e` app.
+Memory rule (owner, 24 Nov, still in force): 16 GB RAM; never Gradle and the emulator at once; full proof in the
+foreground, then `./gradlew --stop`, then the emulator; one emulator only. `PHONE = present`.
+End of every session: push the branch, make a verified bundle on D:.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
+
+## Session of 26 Nov 2026
+
+### Status at session start
+
+- **Git:** `rebuild/trust-core`, HEAD `8cbdf71`, clean. Tags `gate-0` to `gate-3`. `origin` is
+  `github.com/ColdChainHandshake/ColdChainHandshake` (public); `gh` is signed in with push and admin rights; the
+  branch has never been pushed (95 commits ahead of `origin/main`)
+- **Owner's message:** new switches `FIRMWARE_OWNER = claude`, `PROTOCOL_Q4 = drafts`, `HARDWARE = none` (Gate 4
+  "met without hardware"), `PUSH_POLICY = push-branch`, and a release keystore allowed under `D:\cch-keys`
+  (`DECISIONS.md`). The demo project is deleted. `local.properties` now holds only `sdk.dir` and the dev project's
+  URL and publishable key. Supabase MCP has write access to the dev project. The S24 is plugged in
+- **Devices:** `adb devices -l` → `RZCY820AG0F device model:SM_S921E`. RAM 5.9 GB free of 15.6 GB. No emulator
+- **Docker:** not running (started only for SQL work, never beside Gradle or the emulator)
+- **Disk:** C: 64 GB free, D: 272 GB free
+- **Toolchain for the firmware:** MSYS2 `g++` (`/c/msys64/ucrt64/bin`), CMake and CTest on PATH
+
+### Doc hygiene and the owner's switches: `done`
+
+- [x] STATUS, PROGRESS and HANDOFF brought in line with gates 0 to 3 and 5.1: phone screens and real email-code
+  sign-in proven, finding 4 on two devices, finding 15's ViewModels done, Phase 3 items ticked with Gate 3's
+  evidence, old "Next" lines marked superseded. STATUS finding 1: the demo project is deleted (the owner's check)
+- [x] `PROTOCOL_Q4 = drafts`: `LOGGER_PROTOCOL.md` signed off, the minimum MTU rule (148, the phone asks for 517,
+  the challenge needs 107) written in as a rule; "draft" removed from it, `firmware/WALKTHROUGH.md` and
+  `firmware/include/cch/history.hpp`; HANDOFF Q4 closed
+- [x] `local.properties` check, without reading the file: no `CCH_*` variables set, then `assembleDebug`
+
+```text
+env | grep -o '^CCH_[A-Z_]*'          (none)
+./gradlew :app:assembleDebug           ok, app-debug.apk 20:15
+app/build/generated/source/buildConfig/debug/.../BuildConfig.java (regenerated 20:14):
+  yjvoxozaoiarwbusyqke 1 | ljqwaqesiszczixbclwg 0 | placeholder 0 | 127.0.0.1 0 | sb_publishable_ 1 | sb_secret_ 0 | eyJ 0
+```
+
+- [x] History scan before the first push (every commit reachable from the branch, values never printed): no
+  `sb_secret_`, no JWT (`eyJ….eyJ….`), no PEM private key, no GitHub, AWS or Supabase access token, no
+  `sb_publishable_` key. `service_role` appears only as the role's name (SQL grants, docs, the build's refusal
+  check). The one private key is the logger test key in `logger_vectors.json`, derived from the published seed in
+  `gen_logger_vectors.py`; the other 64-hex constants are P-256's `p`, `n`, `G` and the RFC 6979 example key. The
+  only archives are the two Gradle wrapper jars (manifests and properties only). `local-snapshot-20261030` (which
+  holds `.mcp.json`) is not an ancestor of the branch. **Found:** the owner's real sign-in addresses in
+  `CONTINUE_PROMPT.md` (`816cf52`). Asked; the owner chose to push to the public origin anyway
 
 ## CONTINUE run, second session (24 Nov 2026, evening)
 
@@ -55,9 +98,8 @@ Status words: `done`, `doing`, `blocked` (with the reason), or blank for not sta
   objects' access), 0 violations each; 0 probe objects left afterwards
 - [x] The real API, with the publishable key: `/auth/v1/settings` answers (email on, sign-up on); anon reading
   `product_profiles` → `42501 permission denied`; a wrong key → "Invalid API key"
-- [ ] `local.properties`: `blocked` by the owner's deny rule `Edit(./local.properties)`, which also stops a shell
-  append; not worked around. Nothing waits on it: debug builds take `CCH_APP_SUPABASE_URL`/`KEY`. Owner step in
-  HANDOFF
+- [x] `local.properties`: `blocked` then by the owner's deny rule `Edit(./local.properties)`, not worked around.
+  The owner set it himself on 26 Nov; checked by a build that day (Session of 26 Nov)
 - [x] Full proof and a clean clone (below). `gate-1` tagged
 
 ```text
@@ -157,7 +199,8 @@ MCP get_advisors security: 0 ERROR | WARN 13 RPCs + 1 auth_leaked_password_prote
 
 ### Step 1 — Housekeeping
 
-- [ ] 1.1 Dev project: `blocked`, read-only MCP connection (above)
+- [x] 1.1 Dev project: `blocked` that morning (read-only MCP connection); done the same evening (second session,
+  Block 1)
 - [x] 1.2 Supabase CLI pinned at 3.3.0 in `package.json`, CI on the same version, `CLAUDE.md` and README say
   `npm ci` then `npx supabase`
 
@@ -264,7 +307,8 @@ core-domain 122 failed 0 | debug 467 failed 0 | release 410 failed 0 | skipped 0
 - [x] `AlertsViewModel`: the shipment's alerts, the filter (in `SavedStateHandle`), acknowledge and escalate.
   `AlertsViewModelTest`, 5 tests. **Not failed first:** the stub was overwritten before the run. Checked instead
   with a mutant (the "active" filter letting everything through): 1 of 5 failed
-- [ ] **Full proof and emulator checks for Handover and Alerts: not run.** At about 18:20 Claude Code stopped the
+- [x] **Full proof and emulator checks for Handover and Alerts: not run** at first (done later the same evening:
+  the S24 device checks and the full proof below). At about 18:20 Claude Code stopped the
   emulator and the full proof run because the PC was critically low on memory (2.6 GB free of 15.6 GB; idle
   Gradle daemons held about 4 GB, since stopped). Its instruction is not to restart them without the owner, so
   only targeted foreground runs were made (below); `lintDebug`, `assembleRelease`, the release unit tests and the
@@ -318,7 +362,7 @@ BUILD SUCCESSFUL in 1m 11s      56 tests, 0 failed (AppSmokeTest opens every tab
 BUILD SUCCESSFUL in 4m 19s
 core-domain 122 failed 0 | debug 484 failed 0 | release 427 failed 0 | skipped 0
 ```
-- [ ] **5.1c plan (24 Nov, 22:45).** Inventory of `RepositoryProvider` in tests (members used):
+- [x] **5.1c plan (24 Nov, 22:45; carried out below).** Inventory of `RepositoryProvider` in tests (members used):
   - Through Hilt: `AppSmokeTest` (6, `ActivityScenario`: `initialize`, `accountRepo`, `safetyEngine`, `reset`);
     `AlertEscalationColdStartTest` (4: `initialize`, `getAlertRepository`, `alertRepository`, `syncScope`, `reset`;
     its rule: one set per process, worker and activity share it)
@@ -369,10 +413,10 @@ BUILD SUCCESSFUL in 3m 50s
 core-domain 122 failed 0 | debug 482 failed 0 | release 425 failed 0   (484 + 1 new - 3 retired = 482)
 ```
 
-- [ ] How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
+- How to resume without another stop: run the full proof in the **foreground** (3 to 5 minutes), then
   `./gradlew --stop`, and only then start the emulator. Never end a turn with a heavy job running in the background
-- [ ] Next: the full proof and the device checks above, then 5.1c (Hilt builds everything, `HiltWorker`,
-  `RepositoryProvider` and `LegacyProviderModule` deleted, role-based navigation)
+  (still the rule)
+- Superseded: "Next: the full proof and the device checks above, then 5.1c". Both were done on 24 Nov (above)
 
 ## FINISH run, Block S: setup (23 Nov 2026)
 
@@ -384,7 +428,7 @@ core-domain 122 failed 0 | debug 482 failed 0 | release 425 failed 0   (484 + 1 
   installed platform-tools 37.0.1 is kept
 - [x] S3 Phone: `adb devices -l` lists `RZCY820AG0F device model:SM_S921E`. `getprop`: SM-S921E (Galaxy S24),
   Android 17, API 37
-- [ ] S4 Dev project: `blocked`. `get_project_url` answers; `list_tables` says "Database is possibly not accessible";
+- [x] S4 Dev project: done 24 Nov (CONTINUE run, second session, Block 1). On 23 Nov it was `blocked`. `get_project_url` answers; `list_tables` says "Database is possibly not accessible";
   `get_publishable_keys` says "Project is paused. Restore it and try again". `.mcp.json` still has `read_only=true`
   and there is no `apply_migration` tool. Owner asked, top of `HANDOFF.md`
 - [x] S5 Disk: C: 73 GB free (78% used), D: 283 GB free
@@ -400,7 +444,8 @@ put the AVD in `D:\Android\avd`; `emulator -accel-check`: "WHPX(10.0.26200) is i
 - [x] B2.1 `KeystoreDeviceSignerTest`, its first run on real hardware:
   `ANDROID_SERIAL=RZCY820AG0F ./gradlew connectedDebugAndroidTest`: "Running tests on devices: SM-S921E - 17",
   `tests="3" failures="0" errors="0"`. On the emulator: "cch_pixel_api36(AVD) - 16", `tests="3" failures="0"`
-- [ ] B2.2 Smoke pass on the emulator: `done`. On the phone: `blocked`, the phone is locked (`isKeyguardShowing=true`);
+- [x] B2.2 Smoke pass on the emulator: `done`. On the phone: done 24 Nov (see the end of this block); on 23 Nov it
+  was `blocked`, the phone is locked (`isKeyguardShowing=true`);
   owner asked to unlock it. Screenshots in `docs/agent/evidence/emu-*.png`:
   - first launch after install: one ANR, "No response to onStartJob". The ANR trace shows the main thread in
     Compose's first layout pass (4.3 s of CPU on a fresh, unoptimised debug install with a software GPU), while
@@ -503,12 +548,14 @@ items 1 and 3 after `gate-3`.
   `HandoverOrchestrator` take the outcome and can only lower the verdict (`LoggerCheckVerdictTest`, two orchestrator
   tests). Two mutants applied by hand (a hole treated as a late tail; overwritten readings compared anyway): each
   failed its test, then reverted. The screen wiring waits for item 1
-- [ ] 4.1 Logger readings in the app. Waits for `gate-3`. Carry forward: `LoggerHandoverCheck` returns NOT_CHECKED
+- [ ] 4.1 Logger readings in the app. `gate-3` is tagged, so this runs after Gate 5 (CONTINUE Step 5). Carry forward: `LoggerHandoverCheck` returns NOT_CHECKED
   whenever no link is passed. The screen wiring must pass UNKNOWN instead when the shipment has a real (hardware)
   logger enrolled that this phone can't reach, and needs a test for it; only a virtual logger on another phone may
   stay NOT_CHECKED
-- [ ] 4.3 Server: logger key and start sequence on the shipment. Waits for `gate-3`
-- [ ] Gate 4: app side not done yet; then "waiting for the owner's firmware"
+- [ ] 4.3 Server: logger key and start sequence on the shipment. After Gate 5 (CONTINUE Step 5), backward
+  compatible with the `05b342e` app
+- [ ] Gate 4: from 26 Nov `FIRMWARE_OWNER = claude` and `HARDWARE = none`: closes as "met without hardware" once
+  the firmware host tests pass and items 4.1 and 4.3 are done (superseding "waiting for the owner's firmware")
 
 ```text
 ./gradlew :core-domain:test --tests '*.ble.*'     against stubs: 19 tests completed, 18 failed
@@ -586,7 +633,8 @@ live test classes in results: []
 - [x] 1.2 Make the live test opt-in, keep default tests offline (runs first). Done in `ca9c39c`
 - [x] 1.1 Remove `org.gradle.java.home`, replace the interim commands in `CLAUDE.md`. Done in `060e8e8`
 - [x] 1.3 `supabase init`, `0001_lockdown`, pgTAP. Done in `67aa2aa`
-- [ ] 1.3b Apply to dev project. Status: `blocked`, read-only MCP and database unreachable, `HANDOFF.md` Q1
+- [x] 1.3b Apply to dev project. Done 24 Nov through MCP (`0c42310` adds `0003`); see "CONTINUE run, second
+  session", Block 1. The `blocked` note it carried until then is superseded
 - [x] 1.4 Lockdown guidance in `HANDOFF.md`. Done in `720856f`
 - [x] 1.5 Room schema export, no destructive fallback, migration test. Done in `31de93a`
 - [x] 1.6 Move demo corruption and chaos paths to the debug source set. Done in `1bbe4cc`
@@ -615,7 +663,8 @@ Clone git clone, no local.properties, JAVA_HOME and ANDROID_HOME only
      tests 170 failures 0 errors 0 | live ran: False
 ```
 
-**Gate 1:** met locally, not tagged. The fresh reviewer failed two criteria (the CI advisors step could never fail, and doc inaccuracies), and also found that anon could execute new functions and that materialized views escaped the tests. All are fixed, see `DECISIONS.md`. `gate-1` waits for the dev-project migration and advisors check, `HANDOFF.md` Q1.
+**Gate 1:** (superseded: `gate-1` tagged 24 Nov on the dev project's advisors and a clean clone; CONTINUE run,
+second session, Block 1.) Then: met locally, not tagged. The fresh reviewer failed two criteria (the CI advisors step could never fail, and doc inaccuracies), and also found that anon could execute new functions and that materialized views escaped the tests. All are fixed, see `DECISIONS.md`. `gate-1` waits for the dev-project migration and advisors check, `HANDOFF.md` Q1.
 
 ## Phase 2: Safety logic
 
@@ -701,12 +750,20 @@ Debug tests 271 failures 0 errors 0 | Release tests 243 failures 0 errors 0
 ```
 
 - [x] 3.0b Extract `:core-domain`. Done in `7f89d30`, moved here from Phase 2
-- [ ] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out. Done in `01c8e38` and tested against a fake auth server. Not run against a real one yet, and the Keystore signer's instrumented test needs a device
-- [ ] 3.2 Data-model migrations, RLS, RPCs. Server done in `adf006d`, `33aeb1c` and `60ed408`, and the app now uses them. Waiting only on the dev project (`HANDOFF.md` Q1)
-- [ ] 3.3 `confirm_handover`. Server and app done. The checkboxes are gone and each person confirms on their own phone, so finding 4 is closed in code. A real two-account run is still to do
+- [x] 3.1 Supabase Auth, profiles, roles, sign-in, session persistence, sign-out. Done in `01c8e38`. Email-code
+  sign-in on a device against the local stack's real auth server (23 Nov rehearsal), then with real emails from
+  the hosted dev project for all three people (24 Nov, Gate 3)
+- [x] 3.2 Data-model migrations, RLS, RPCs. Done in `adf006d`, `33aeb1c` and `60ed408`; on the dev project since
+  24 Nov (Block 1), proven equal to local by fingerprint
+- [x] 3.3 `confirm_handover`. Done; proven on the dev project with two real devices (S24 and the emulator), two
+  device IDs, custody moved, ACCEPTED (`SHIP-3E4005`, Gate 3)
 - [x] 3.4 Chain v2 with shared vectors and SQL. Domain, Room and SQL done in `91fbf99`; the app uploads only through `append_readings` and compares its history with the server's head
-- [ ] 3.5 Clock-skew detection and Keystore interim signing. Server, domain and app done: uploads are signed with the Keystore key and the handover screen shows clock and signature checks. The signer itself has only an instrumented test, not yet run
-- [ ] 3.6 pgTAP attack tests and client-side JVM tests. Attack tests done; client tests done for the chain
+- [x] 3.5 Clock-skew detection and Keystore interim signing. Done; `KeystoreDeviceSignerTest` 3/3 on the S24 and on
+  the emulator (23 Nov, FINISH Block 2), and the Gate 3 readings were signed with the S24's Keystore key
+- [x] 3.6 pgTAP attack tests and client-side JVM tests. pgTAP 238/238, `LiveSupabaseIntegrationTest` 3/3 on the
+  local stack; `gate-3` (24 Nov)
+
+The `[ ]` states these items had until 24 Nov are superseded by Gate 3 (CONTINUE run, second session, Block 3).
 
 Proof so far:
 
@@ -751,17 +808,25 @@ Test-key guard (resume prompt rule 7), app side, in `fed4912`: `LoggerHistoryVer
 test key and its mirror in any encoding. `TestLoggerKeyRefusedTest` runs in debug and release. Neither built APK
 contains the private key (searched as hex and Base64 after unzipping, 6 Nov 23:16).
 
-**Gate 3:** not started. A real two-account run needs the dev project (`HANDOFF.md` Q1) and an emulator or phones.
+**Gate 3:** (superseded: `gate-3` tagged 24 Nov, `SHIP-3E4005` on the dev project with the S24 and the emulator;
+CONTINUE run, second session, Block 3.) Then: not started.
 
 ## Phase 4: Logger as witness
 
-- [ ] 4.1 `docs/protocol/LOGGER_PROTOCOL.md`. Written in `863ccd5`, a draft until the owner signs it off (`HANDOFF.md` Q4)
+This list uses MASTER 5.4's numbers. The live list is "FINISH run, Block 4" below, which numbers by FINISH's
+items (its 4.1 is the virtual logger in the app, its 4.3 the server half), and CONTINUE and the owner's 26 Nov
+message use those numbers.
+
+- [x] 4.1 `docs/protocol/LOGGER_PROTOCOL.md`. Written in `863ccd5`; signed off by the owner on 26 Nov
+  (`PROTOCOL_Q4 = drafts`), with the minimum MTU rule written in
 - [ ] 4.2 Virtual logger. Kotlin protocol, virtual logger, verifier and ingestor in `cfb2e85`, checked against the
-  Python vectors. Not connected to the app: that waits for `gate-2` and `gate-3`
-- [ ] 4.3 BLE ingestion behind `TelemetryRepository`. Waits for the owner's go-ahead
-- [ ] 4.4 Receiver reads and verifies the logger at handover. Waits for `gate-3`
-- [ ] 4.5 Firmware interfaces, failing tests, `WALKTHROUGH.md` (`FIRMWARE_OWNER = me`). Claude's part done in
-  `487db13`; the function bodies are the owner's. PlatformIO skeleton skipped while `HARDWARE = none`
+  Python vectors. Connecting it to the app is FINISH Block 4 item 1 (below)
+- [x] 4.3 BLE ingestion behind `TelemetryRepository`: the BLE adapter is done against a fake GATT layer (FINISH
+  Block 4 item 4); never run on hardware (`HARDWARE = none`)
+- [ ] 4.4 Receiver reads and verifies the logger at handover. Domain half done (FINISH Block 4 item 2); the screen
+  wiring is FINISH item 1's
+- [ ] 4.5 Firmware. Interfaces, failing tests and `WALKTHROUGH.md` done in `487db13`. From 26 Nov
+  `FIRMWARE_OWNER = claude`: Claude writes the bodies. PlatformIO skeleton skipped while `HARDWARE = none`
 
 Proof for 4.5, 6 Nov:
 
@@ -778,7 +843,9 @@ The sanitizer and fuzz presets were not built: MinGW has no ASan and libFuzzer n
 
 ## Phase 5: App architecture, background work and completeness
 
-- [ ] 5.1 ViewModels, Hilt, role-based navigation
+The live list for Phase 5 is "FINISH run, Block 5" below and CONTINUE Step 2 above.
+
+- [x] 5.1 ViewModels, Hilt, role-based navigation. Done 24 Nov (CONTINUE run, Step 2; `8cbdf71`)
 - [ ] 5.2 Foreground service, WorkManager sync, queued GPS, incremental download
 - [ ] 5.3 Multi-leg custody in the UI
 - [ ] 5.4 Opaque QR codes
@@ -831,7 +898,7 @@ core-domain 118 failed 0 | debug 428 failed 0 | release 371 failed 0 | skipped 0
 emulator: cold start after pm clear, LaunchState COLD, TotalTime 5566 ms, no FATAL or ANR, the sign-in screen shows
 ```
 
-- [ ] 5.1b One ViewModel per screen, starting with `AppRoot` (which screen to show), then Dispatch (removes the
+- [x] 5.1b One ViewModel per screen (finished 24 Nov, CONTINUE run, Step 2), starting with `AppRoot` (which screen to show), then Dispatch (removes the
   order-dependent `DispatchScreenTest`), Transit, Handover, Alerts. Each one's dependencies come through Hilt
   - [x] `AppRootViewModel`: which top-level screen shows, the owner check, local mode (kept in `SavedStateHandle`,
     so it survives process death) and sign-out. `AppRootViewModelTest`, 6 tests, 5 failed against a stub first.
@@ -847,8 +914,8 @@ emulator: cold start after pm clear, LaunchState COLD, TotalTime 5566 ms, no FAT
     core-domain 118, debug 443, release 386, failed 0; lint and release APK built. Emulator, local stack: sender
     created `SHIP-C8AC36`, which stayed on screen through landscape and back, and dispatched it (server:
     DISPATCHED), no FATAL or ANR
-  - [ ] Next: Transit, Handover, Alerts ViewModels, then 5.1c
-- [ ] 5.1c Hilt builds everything; `RepositoryProvider` deleted
+  - [x] Transit, Handover, Alerts ViewModels: done 24 Nov (CONTINUE run, Step 2)
+- [x] 5.1c Hilt builds everything; `RepositoryProvider` deleted. Done 24 Nov (`dccf20c`, `8cbdf71`)
 - [ ] 5.2 Foreground service for recording; WorkManager sync; the Handover screen downloads its own history
 - [ ] 5.3 Multi-leg custody in the UI
 - [ ] 5.4 Opaque QR codes
