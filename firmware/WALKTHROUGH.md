@@ -10,7 +10,7 @@ and the vectors in `docs/protocol/logger_vectors.json` decide what it means. The
 and the vectors and have never run against a working implementation, so a test can be wrong. If you think one is,
 say so in `docs/agent/HANDOFF.md` and Claude will check it against the Kotlin and Python versions.
 
-The protocol is still a draft. `HANDOFF.md` Q4 lists the choices you may want to change before you start.
+The protocol was signed off on 26 Nov 2026, including its minimum MTU of 148.
 
 ## Build and run on Windows
 
@@ -109,7 +109,7 @@ File: `src/history.cpp`. Turns green: every `Step4*` test (10).
 - `sign_batch` refuses a range the log doesn't fully hold.
 - `history_notifications` sends pages of `u8(1) u16(count)` and as many whole records as fit in `att_mtu - 3`
   bytes, then one batch header of 145 bytes covering exactly the records sent. Below an MTU of 148 the header can't
-  fit, so it sends nothing. That minimum is Claude's draft and isn't in the protocol yet (`HANDOFF.md` Q4).
+  fit, so it sends nothing (the protocol's minimum MTU rule).
 - `challenge_response`, `status_value` and `device_information` are short layouts from the protocol's Bluetooth
   table. A new logger answers a challenge with sequence 0 and the genesis hash.
 

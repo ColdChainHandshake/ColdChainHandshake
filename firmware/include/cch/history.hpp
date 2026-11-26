@@ -18,8 +18,8 @@ inline constexpr std::uint8_t kProtocolVersion = 1;
 inline constexpr std::uint8_t kPageRecords = 1;      ///< `u8(1) u16(count)` then count records
 inline constexpr std::uint8_t kPageBatchHeader = 2;  ///< `u8(2) i64 i64 raw(32) raw(32) raw(64)`, 145 bytes
 
-/// Draft, not in LOGGER_PROTOCOL.md yet (HANDOFF.md Q4): the batch header is 145 bytes and a notification carries
-/// at most ATT MTU - 3, so below an MTU of 148 the logger sends nothing and the phone must ask for a larger MTU.
+/// LOGGER_PROTOCOL.md, minimum MTU: the batch header is 145 bytes and a notification carries at most
+/// ATT MTU - 3, so below an MTU of 148 the logger sends nothing and the phone must ask for a larger MTU.
 inline constexpr std::size_t kMinAttMtu = 148;
 
 struct HistoryRequest {

@@ -7,6 +7,9 @@ vectors decide what it means.
 
 This is a prototype. Nothing here has run on logger hardware yet (`HARDWARE = none`).
 
+Signed off by the owner on 26 Nov 2026 as it stands, including the minimum MTU rule below (`DECISIONS.md`). A
+change from here on means changing the Kotlin, the Python generator and vectors, and the firmware tests together.
+
 ## What the logger proves and what it doesn't
 
 A logger signs its own readings with a key that never leaves it. A phone can relay those readings but
@@ -128,9 +131,10 @@ from step 1 with its request and doesn't ask when there is nothing new. If the p
 when a notification is lost, the phone treats the read as failed and asks again; it never stores the part that
 arrived as if it were the whole answer.
 
-Draft, waiting on the owner's sign-off (`HANDOFF.md` Q4, item 11): the 145-byte header must fit one notification,
-so a logger sends no history below an ATT MTU of 148, and the 104-byte challenge response needs at least 107. The
-phone asks for 517 (Android's largest) before either, and gives up with "MTU too small" if it gets less than 148.
+Minimum MTU. A notification carries at most the ATT MTU minus 3 bytes, and the 145-byte batch header is never
+split, so a logger sends no history below an ATT MTU of 148. The 104-byte challenge response likewise needs at
+least 107. The phone asks for 517 (Android's largest) before reading history or sending a challenge, and gives up
+with "MTU too small" if it gets less than 148. Bluetooth's default MTU of 23 can't carry even one record.
 
 The phone asks again from where it got to after a dropped connection, so an outage only delays the
 back-fill. A logger should keep at least five days of minutely records. The ring buffer of the reference
