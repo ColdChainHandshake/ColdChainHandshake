@@ -1,6 +1,7 @@
 package com.coldchain.handshake.di
 
 import com.coldchain.handshake.models.ChaosScenarioType
+import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.repository.ChaosEngineService
 import com.coldchain.handshake.repository.LocalSession
 import com.coldchain.handshake.safety.SafetyEngine
@@ -13,7 +14,8 @@ import javax.inject.Singleton
 
 /**
  * The app's background jobs, started once per process: the check that this phone's records belong to the person
- * signing in, and the debug chaos lab's logger-disconnect scenario. `MainActivity` calls [start] on every creation,
+ * signing in, the debug chaos lab's logger-disconnect scenario, and picking up a recording remembered from before
+ * the process ended. `MainActivity` calls [start] on every creation,
  * rotation included; only the first call starts anything, so a second set never runs beside the first.
  */
 @Singleton
@@ -22,6 +24,7 @@ class AppStartup @Inject constructor(
     private val chaos: ChaosEngineService,
     private val simulator: TemperatureSimulator,
     private val safetyEngine: SafetyEngine,
+    private val recorder: CourierRecorder,
     @AppScope private val scope: CoroutineScope
 ) {
     /** What [start] launched; empty until then. */
@@ -32,6 +35,7 @@ class AppStartup @Inject constructor(
     fun start() {
         if (jobs.isNotEmpty()) return
         jobs = listOf(session.watch(scope), watchLoggerDisconnect())
+        recorder.resumeInBackgroundIfRemembered()
     }
 
     private fun watchLoggerDisconnect(): Job = scope.launch {

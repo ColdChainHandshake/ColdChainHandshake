@@ -52,6 +52,15 @@ class CourierRecorder(
         return true
     }
 
+    /**
+     * When the app opens with a shipment remembered as recording but nothing recording (a reinstall, or a restart
+     * with no saved screen state), hands it to the background recording, whose restore checks it is still on the
+     * move and still this phone's. Called from the open app, so the service may start in the foreground.
+     */
+    fun resumeInBackgroundIfRemembered() {
+        if (store.shipmentId != null && !simulator.isRunning.value) background.keepRunning()
+    }
+
     companion object {
         /** How often the simulator looks at the clock. It records at most one reading a minute. */
         const val TICK_MS = 1_500L

@@ -255,6 +255,34 @@ class RecordingLoopTest {
         assertFalse(simulator.isRunning.value)
     }
 
+    // Found on the S24 on 26 Nov: after a reinstall the app opened with no saved screen state, so nothing read the
+    // remembered shipment and recording stayed stopped. Opening the app hands it to the background recording, whose
+    // restore checks the shipment is still on the move and still this phone's.
+    @Test
+    fun openingTheAppWithARememberedShipmentStartsTheBackgroundRecording() {
+        store.shipmentId = "SHIP-1"
+
+        recorder.resumeInBackgroundIfRemembered()
+
+        assertEquals(1, backgroundStarts)
+    }
+
+    @Test
+    fun openingTheAppStartsNothingWhenNothingIsRemembered() {
+        recorder.resumeInBackgroundIfRemembered()
+
+        assertEquals(0, backgroundStarts)
+    }
+
+    @Test
+    fun openingTheAppStartsNothingMoreWhileRecordingAlreadyRuns() {
+        recorder.start(opened())
+
+        recorder.resumeInBackgroundIfRemembered()
+
+        assertEquals("only the start itself", 1, backgroundStarts)
+    }
+
     @Test
     fun openingTheAppAgainResumesNothingForAShipmentNoLongerOnTheMove() {
         val accepted = opened().copy(status = ShipmentStatus.ACCEPTED)
