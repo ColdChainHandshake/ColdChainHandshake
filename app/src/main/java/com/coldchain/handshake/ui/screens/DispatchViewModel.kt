@@ -116,8 +116,8 @@ class DispatchViewModel @Inject constructor(
             return@launch
         }
 
-        // Local mode only: this phone's own shipment, which no server knows.
-        val qrCode = boundQrCode ?: "CCH:SHIP:$shipmentId:${form.origin}:${form.destination}:${form.loggerId}"
+        // Local mode only: this phone's own shipment, which no server knows. Its code is its ID and nothing else (5.4).
+        val qrCode = boundQrCode ?: shipmentId
         val newShipment = Shipment(
             id = shipmentId,
             qrCode = qrCode,
@@ -176,13 +176,12 @@ class DispatchViewModel @Inject constructor(
         _events.send(DispatchEvent.OpenTransit)
     }
 
+    /** A code is opaque (5.4): it names a shipment by ID, or a logger; nothing is read out of its text. */
     suspend fun onCodeScanned(code: String): ScanOutcome {
-        val targetId = if (code.startsWith("CCH:SHIP:")) code.split(":").getOrNull(2) ?: code else code
-
         // A code names a shipment this phone holds, or else one the server lets this person open.
-        var matched = shipments.getAllShipments().first().firstOrNull { it.qrCode == code || it.id == code || it.id == targetId }
+        var matched = shipments.getAllShipments().first().firstOrNull { it.qrCode == code || it.id == code }
         if (matched == null && signedIn) {
-            matched = workflow.open(targetId).onFailure { banner(it.message) }.getOrNull()
+            matched = workflow.open(code).onFailure { banner(it.message) }.getOrNull()
         }
 
         val current = _state.value.shipment
@@ -212,12 +211,6 @@ class DispatchViewModel @Inject constructor(
                     code.startsWith("LOG-") -> {
                         banner("Paired Logger $code via QR scan")
                         ScanOutcome.FillForm(loggerId = code)
-                    }
-                    code.startsWith("CCH:SHIP:") -> {
-                        banner("Bound scanned manifest QR to new consignment")
-                        val parts = code.split(":")
-                        if (parts.size >= 6) ScanOutcome.FillForm(loggerId = parts[5], origin = parts[3], destination = parts[4])
-                        else ScanOutcome.FillForm()
                     }
                     else -> {
                         banner("Bound scanned QR identifier to new consignment")

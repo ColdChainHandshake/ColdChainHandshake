@@ -139,6 +139,19 @@ class TransitViewModelTest {
         assertNotNull(vm.state.value.notice)
     }
 
+    // 5.4: a code is opaque, so the old "CCH:SHIP:<id>:…" text is not read for the ID inside it.
+    @Test
+    fun anOldStyleCodeIsNotReadForTheShipmentIdInsideIt() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+
+        vm.onCodeScanned("CCH:SHIP:SHIP-1:Hub:Clinic:LOG-1").join()
+
+        assertNull(simulator.activeShipment.value)
+        assertNotNull(vm.state.value.notice)
+    }
+
     @Test
     fun aKnownCodeOpensTheShipmentToWatch() = runTest {
         server.seedShipment("SHIP-1", custodian = "courier")

@@ -114,6 +114,18 @@ app/build/generated/source/buildConfig/debug/.../BuildConfig.java (regenerated 2
     banner fix is in the same build (`fetchingAgainKeepsAHistoryAlreadyCompleteReady` failed first:
     `expected:<HISTORY_READY> but was:<HISTORY_SYNCING>`)
   - The emulator was stopped at 21:47:25 for Gradle (memory rule); the S24 kept recording locally
+  - **Readings recorded through screen-off and deep Doze reached the server in order:** seq 21 to 48, made once a
+    minute from 21:39:48 to 22:07:06 (28 minutes, screen off, deep Doze from about 21:41), all received at 22:07:33,
+    contiguous, the moment the old build came to the foreground
+  - Fixed build installed at 22:07:49 (`229cefc`, debug APK dex: dev ref 2, demo 0, placeholder 0), owner unlocked the
+    phone first. **Found:** recording did not resume by itself after the reinstall (no saved screen state, so the
+    restorer didn't run); resumed by hand (Transit, the shipment's ID, Resume) at 22:09:12; reinstall gap 22:07:06 to
+    22:09:12, 2 min 6 s, under the 3-minute limit. Fixed test-first afterwards (`resumeInBackgroundIfRemembered`)
+  - **The fix proven on the S24:** screen off from 22:09:41 (simulated unplug, no wakes), deep Doze (`mDeviceIdleMode=
+    true`, IDLE) by 22:16. Readings 50 to 58 reached the server 1 to 5 s after they were made, and the courier's
+    confirmation renewed itself after each one (22:12:20, 22:13:18, 22:14:23, 22:15:21, …), all in Doze
+  - **Airplane mode** on at 22:19:23 (`cmd connectivity airplane-mode enable`; `Active default network: none`). Last
+    reading on the server before it: seq 58, made 22:18:21
 
 ```text
 ./gradlew :app:testDebugUnitTest --tests '*HandoverWindowTest*'    stub renewRelease: 6 tests completed, 4 failed

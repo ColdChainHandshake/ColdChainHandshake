@@ -486,7 +486,7 @@ fun DispatchScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Authoritative QR Identifier:",
+                            text = "Code on the label:",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold

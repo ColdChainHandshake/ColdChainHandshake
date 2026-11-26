@@ -176,10 +176,9 @@ class TransitViewModel @Inject constructor(
 
     /** A code only names a shipment this phone holds or the server lets this person open; nothing is built from it. */
     fun onCodeScanned(code: String): Job = viewModelScope.launch {
-        val targetId = if (code.startsWith("CCH:SHIP:")) code.split(":").getOrNull(2) ?: code else code
-        var resolved = shipments.getShipment(targetId).firstOrNull()
+        var resolved = shipments.getShipment(code).firstOrNull()
         if (resolved == null && me != null) {
-            resolved = workflow.open(targetId).onFailure { e -> _state.update { it.copy(notice = e.message) } }.getOrNull()
+            resolved = workflow.open(code).onFailure { e -> _state.update { it.copy(notice = e.message) } }.getOrNull()
         }
         if (resolved == null) return@launch
         _state.update { it.copy(notice = null) }

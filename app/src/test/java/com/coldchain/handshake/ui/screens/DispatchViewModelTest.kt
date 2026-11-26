@@ -157,6 +157,28 @@ class DispatchViewModelTest {
         assertTrue(shipments.getAllShipments().first().isEmpty())
     }
 
+    // 5.4: a code is opaque. The old "CCH:SHIP:<id>:<origin>:<destination>:<logger>" text used to fill the form, which
+    // let a printed label decide what a new shipment said.
+    @Test
+    fun aScannedManifestTextFillsNothingIn() = runTest {
+        val vm = viewModel()
+
+        val outcome = vm.onCodeScanned("CCH:SHIP:SHIP-X:Depot:Clinic:LOG-5")
+
+        assertEquals(ScanOutcome.FillForm(), outcome)
+        assertNull(vm.state.value.shipment)
+    }
+
+    @Test
+    fun aLocalShipmentsCodeIsItsIdAlone() = runTest {
+        val vm = viewModel()
+
+        vm.create(form, courierEmail = "", receiverEmail = "").join()
+
+        val shipment = vm.state.value.shipment!!
+        assertEquals(shipment.id, shipment.qrCode)
+    }
+
     @Test
     fun aScannedShipmentIdOpensItForMonitoringAndNeverBuildsOne() = runTest {
         signIn()
