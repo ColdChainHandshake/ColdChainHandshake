@@ -4,7 +4,10 @@ import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -43,6 +46,33 @@ class ShipmentHistorySyncCoordinatorTest {
 
         assertEquals(HistorySyncState.IDLE, coordinator.getSyncState("SHIP-1").first())
         assertNull(coordinator.getServerHead("SHIP-1").value)
+    }
+
+    // The Handover screen fetches again every 3 s while shown. Before 26 Nov each fetch set the state back to syncing,
+    // so the screen showed "waiting for the history" for a moment every 3 s and its Confirm button jumped under the
+    // courier's finger on the S24. A history already complete stays complete while it is fetched again.
+    @Test
+    fun fetchingAgainKeepsAHistoryAlreadyCompleteReady() = runBlocking {
+        serverHas(chain)
+        coordinator.hydrateHistory("SHIP-1").getOrThrow()
+        server.neverFinishes = true
+
+        val again = launch(Dispatchers.Default) { coordinator.hydrateHistory("SHIP-1") }
+        delay(200)
+
+        assertEquals(HistorySyncState.HISTORY_READY, coordinator.getSyncState("SHIP-1").first())
+        again.cancel()
+    }
+
+    @Test
+    fun theFirstFetchShowsTheHistoryAsStillComing() = runBlocking {
+        server.neverFinishes = true
+
+        val first = launch(Dispatchers.Default) { coordinator.hydrateHistory("SHIP-1") }
+        delay(200)
+
+        assertEquals(HistorySyncState.HISTORY_SYNCING, coordinator.getSyncState("SHIP-1").first())
+        first.cancel()
     }
 
     @Test

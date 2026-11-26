@@ -81,7 +81,22 @@ app/build/generated/source/buildConfig/debug/.../BuildConfig.java (regenerated 2
   a stub loop; the 13th, status on resume, failed first), `RecordingServiceTest` 6 (Hilt, Robolectric),
   `SyncWorkerTest` 4. Decisions and test changes in `DECISIONS.md` (26 Nov)
 - [ ] Open from MASTER 5.5 item 2: GPS in the service and queued in Room (`DECISIONS.md`)
-- [ ] Device proofs: screen off 10 min, `am kill`, Doze, airplane mode 30 min, readings on the server in order
+- [ ] **Device proofs on the hosted dev project** (`doing`, 26 Nov from 21:10; the debug APK of `9599fbf`, dex: dev ref
+  2, demo ref 0, placeholder 0). Courier: the owner's S24 (the app had been uninstalled; fresh install, courier code
+  from the owner). Sender, then receiver: the emulator (`pm clear` between; codes from the owner). Two shipments
+  created and dispatched by the sender: `SHIP-49A74F` (the long run) and `SHIP-1D87CC` (kill and alert tests)
+  - Take Custody on the S24 asked for Nearby devices (allowed by tapping, not `pm grant`). `dumpsys activity services`:
+    `RecordingService isForeground=true foregroundId=2 types=0x00000010` (`connectedDevice`). Custody 21:19:45
+  - **Renewal against the real SQL:** the courier released at 21:23:43 on head `4265e38e` (n=5); after the next
+    reading the phone confirmed again by itself at 21:24:44 on `87c3d90e` (n=6), the current head
+  - **Found (fix written test-first after the run):** the Handover screen's Confirm button jumped by 96 px every 3 s,
+    because each 3-second history fetch set the state back to "syncing" and showed a "waiting for the history"
+    banner; two taps missed. `ShipmentHistorySyncCoordinatorTest.fetchingAgainKeepsAHistoryAlreadyCompleteReady`
+    written; not run yet (no Gradle beside the emulator)
+  - Screen-off phase: interrupted twice (the screen woke at 21:26:47 and 21:32:21, and the lock screen was unlocked
+    by hand at 21:36:22); the owner agreed to leave the phone alone. Restarted with `dumpsys battery unplug` at
+    21:39:10. Readings 7 to 17 arrived 1 to 7 s after they were made, except reading 7 (70 s, sent as the screen
+    woke)
 
 ```text
 ./gradlew :app:testDebugUnitTest --tests '*HandoverWindowTest*'    stub renewRelease: 6 tests completed, 4 failed
