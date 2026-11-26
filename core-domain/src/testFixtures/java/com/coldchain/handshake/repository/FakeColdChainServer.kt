@@ -44,6 +44,12 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     /** When set, the next confirmation fails this way before reaching the server. */
     var failNextConfirm: Throwable? = null
 
+    /**
+     * When set, runs once as the next confirmation arrives, before the server looks at it: what another phone did
+     * between this phone fetching the history and its confirmation landing.
+     */
+    var beforeNextConfirm: (suspend () -> Unit)? = null
+
     /** When set, the next append is stored but its reply is lost, as a dropped connection would. */
     var loseNextAppendReply = false
 
@@ -209,7 +215,17 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         return result
     }
 
-    override suspend fun confirmHandover(confirmation: HandoverConfirmation) = call {
+    override suspend fun confirmHandover(confirmation: HandoverConfirmation): Result<HandoverOutcome> {
+        beforeNextConfirm?.let {
+            beforeNextConfirm = null
+            val caller = currentUser
+            it()
+            currentUser = caller
+        }
+        return confirm(confirmation)
+    }
+
+    private fun confirm(confirmation: HandoverConfirmation) = call {
         failNextConfirm?.let {
             failNextConfirm = null
             throw it

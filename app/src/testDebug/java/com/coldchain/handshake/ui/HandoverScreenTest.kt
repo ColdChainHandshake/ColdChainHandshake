@@ -399,7 +399,7 @@ class HandoverScreenTest {
 
         await("Confirm Handover").performClick()
 
-        await("Confirmed. Waiting for the other person to confirm on their own phone.")
+        await(HandoverViewModel.RELEASED_NOTICE)
         val confirmation = server.confirmations.single()
         assertEquals("courier", confirmation.userId)
         assertEquals("receiver", confirmation.details.toUserId)

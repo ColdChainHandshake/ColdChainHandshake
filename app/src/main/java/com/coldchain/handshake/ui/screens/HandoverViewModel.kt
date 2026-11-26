@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -61,6 +63,7 @@ import javax.inject.Inject
  * @property error Why the last action failed.
  * @property notice What the server said happened.
  * @property processing An action is running.
+ * @property confirmedHead The head this person's confirmation is waiting on, while the other person hasn't confirmed.
  */
 data class HandoverUiState(
     val shipment: Shipment? = null,
@@ -74,7 +77,8 @@ data class HandoverUiState(
     val notice: String? = null,
     val processing: Boolean = false,
     val vvmStage: VvmStage = VvmStage.NOT_RECORDED,
-    val shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE
+    val shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
+    val confirmedHead: String? = null
 ) {
     /** A shipment on the server is only ever confirmed there, by someone signed in. */
     val onServer: Boolean get() = me != null && shipment?.genesisHash != null
@@ -151,13 +155,32 @@ class HandoverViewModel @Inject constructor(
 
     /** Fetches what the screen shows from the server, until the caller is cancelled. */
     suspend fun runWhileVisible(): Unit = coroutineScope {
-        // The history, once for each shipment. One kept on this phone alone has nothing on the server to fetch.
+        // The history, again every few seconds: the courier keeps recording until custody moves, so the verdict on
+        // screen must keep up with what reaches the server. One kept on this phone alone has nothing to fetch.
         launch {
             simulator.activeShipment.map { s -> s?.let { it.id to (it.genesisHash != null) } }
                 .distinctUntilChanged()
-                .collect { opened ->
-                    val (id, onServer) = opened ?: return@collect
-                    if (onServer) history.hydrateHistory(id) else history.markReady(id)
+                .collectLatest { opened ->
+                    val (id, onServer) = opened ?: return@collectLatest
+                    if (!onServer) {
+                        history.markReady(id)
+                        return@collectLatest
+                    }
+                    while (true) {
+                        history.hydrateHistory(id)
+                        delay(HISTORY_POLL_MS)
+                    }
+                }
+        }
+        // A confirmation is held against the head it was made on. New readings arriving before the other person
+        // confirms leave it behind, and only this person can confirm again.
+        launch {
+            combine(serverHead, _state) { head, s -> head?.headHash to s.confirmedHead }
+                .distinctUntilChanged()
+                .collect { (head, confirmed) ->
+                    if (head != null && confirmed != null && head != confirmed) {
+                        _state.update { it.copy(confirmedHead = null, notice = OVERTAKEN_NOTICE) }
+                    }
                 }
         }
         // Who holds it and who is on it, again whenever the readings or a confirmation change.
@@ -208,11 +231,17 @@ class HandoverViewModel @Inject constructor(
         )
     }
 
-    /** The custodian names who takes over. The handover is held against the readings so far, so the logger stops first. */
+    /**
+     * The custodian names who takes over. Recording carries on: the receiver's verdict covers readings up to their own
+     * confirmation, so the logger runs until custody moves, and this phone confirms again on each new head
+     * (`ServerHandover.renewRelease`).
+     */
     fun release(toUserId: String): Job = action(clearNotice = false) { shipment ->
-        simulator.stopContinuousSimulation()
         serverHandover.release(shipment.id, toUserId)
-            .onSuccess { outcome -> _state.update { it.copy(notice = describeOutcome(outcome)) } }
+            .onSuccess { outcome ->
+                val notice = if (outcome.state == HandoverState.WAITING) RELEASED_NOTICE else describeOutcome(outcome)
+                _state.update { it.copy(notice = notice) }
+            }
             .onFailure { e -> _state.update { it.copy(error = e.message) } }
         serverRefresh.update { it + 1 }
     }
@@ -242,7 +271,11 @@ class HandoverViewModel @Inject constructor(
                             "No connection. Your ${result.handover.verdict.name} is saved on this " +
                                 "phone and will be sent. Custody hasn't moved."
                     }
-                    _state.update { it.copy(notice = notice) }
+                    // The coordinator's head is the one the confirmation was just made on; the screen's copy can lag.
+                    val waitingOn = (result as? HandoverResult.Confirmed)
+                        ?.takeIf { it.outcome.state == HandoverState.WAITING }
+                        ?.let { history.getServerHead(shipment.id).value?.headHash }
+                    _state.update { it.copy(notice = notice, confirmedHead = waitingOn) }
                     serverRefresh.update { it + 1 }
                 }
                 .onFailure { e -> _state.update { it.copy(error = e.message) } }
@@ -294,6 +327,11 @@ class HandoverViewModel @Inject constructor(
     }
 
     companion object {
+        const val HISTORY_POLL_MS = 3_000L
+        const val RELEASED_NOTICE = "Confirmed. This phone keeps recording until custody moves. Waiting for the " +
+            "other person to confirm on their own phone."
+        const val OVERTAKEN_NOTICE = "New readings arrived after you confirmed, so your confirmation no longer " +
+            "matches the history. Check them and confirm again."
         private const val STOP_SHARING_MS = 5_000L
         private const val KEY_VVM = "vvmStage"
         private const val KEY_SHAKE = "shakeTest"

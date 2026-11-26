@@ -7,6 +7,7 @@ import com.coldchain.handshake.alerts.AndroidAlertNotifier
 import com.coldchain.handshake.data.local.ColdChainDatabase
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.local.RoomTransactionRunner
+import com.coldchain.handshake.data.local.SharedPreferencesPendingReleases
 import com.coldchain.handshake.data.local.SharedPreferencesProfileCache
 import com.coldchain.handshake.data.network.AndroidNetworkMonitor
 import com.coldchain.handshake.data.remote.SupabaseAccountRepository
@@ -155,12 +156,17 @@ object AppModule {
     fun syncServiceInterface(impl: SyncServiceImpl): SyncService = impl
 
     @Provides @Singleton
+    fun pendingReleases(@ApplicationContext context: Context): SharedPreferencesPendingReleases =
+        SharedPreferencesPendingReleases(context)
+
+    @Provides @Singleton
     fun localSession(
         @ApplicationContext context: Context,
         db: ColdChainDatabase,
         account: AccountRepository,
         simulator: TemperatureSimulator,
-        history: ShipmentHistorySyncCoordinator
+        history: ShipmentHistorySyncCoordinator,
+        pendingReleases: SharedPreferencesPendingReleases
     ): LocalSession = LocalSession(
         db = db,
         account = account,
@@ -168,6 +174,7 @@ object AppModule {
         forgetInMemory = {
             simulator.reset()
             history.clear()
+            pendingReleases.clear()
         }
     )
 
@@ -186,6 +193,7 @@ object AppModule {
         handovers: HandoverRepository,
         history: ShipmentHistorySyncCoordinator,
         sync: SyncServiceImpl,
+        pendingReleases: SharedPreferencesPendingReleases,
         @DeviceId deviceId: String
     ) = ServerHandover(
         remote = remote,
@@ -194,7 +202,8 @@ object AppModule {
         handovers = handovers,
         history = history,
         uploadPending = { shipmentId -> sync.uploadReadings(shipmentId) },
-        deviceId = { deviceId }
+        deviceId = { deviceId },
+        pendingReleases = pendingReleases
     )
 
     @Provides

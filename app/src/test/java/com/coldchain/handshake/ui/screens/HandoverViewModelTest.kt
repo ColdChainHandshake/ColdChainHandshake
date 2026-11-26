@@ -177,19 +177,63 @@ class HandoverViewModelTest {
         Unit
     }
 
+    // The receiver's verdict covers readings up to their own confirmation, so the courier keeps recording until
+    // custody moves (HandoverWindowTest). Before 26 Nov this test asserted that releasing stopped recording.
     @Test
-    fun releasingStopsRecordingAndSaysWhatHappened() = runBlocking {
+    fun releasingKeepsRecordingUntilCustodyMovesAndSaysWhatHappened() = runBlocking {
         openOnServer("courier", MemberRole.COURIER)
         simulator.startContinuousSimulation(intervalMs = 60_000L)
         val vm = viewModel()
 
         vm.release("receiver").join()
 
-        assertFalse(simulator.isRunning.value)
+        assertTrue(simulator.isRunning.value)
         val after = vm.state.value
         assertNull(after.error)
-        assertTrue(after.notice != null)
+        assertTrue(after.notice.orEmpty(), after.notice.orEmpty().contains("recording", ignoreCase = true))
         assertFalse(after.processing)
+    }
+
+    @Test
+    fun whileShownItKeepsDownloadingTheReadingsTheCourierSends() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        visible.launch { vm.runWhileVisible() }
+        withTimeout(5_000) { telemetry.getTemperatures("SHIP-1").first { it.size == 10 } }
+
+        courierSendsTheNextReading()
+
+        withTimeout(10_000) { telemetry.getTemperatures("SHIP-1").first { it.size == 11 } }
+        Unit
+    }
+
+    @Test
+    fun aReceiverWhoseConfirmationNewReadingsOvertookIsAskedToConfirmAgain() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        visible.launch { vm.runWhileVisible() }
+        withTimeout(5_000) { telemetry.getTemperatures("SHIP-1").first { it.size == 10 } }
+        vm.record(HandoverVerdict.PASS, null).join()
+        assertTrue(vm.state.value.notice.orEmpty(), vm.state.value.notice.orEmpty().startsWith("Confirmed"))
+
+        // The courier hasn't confirmed yet and records another reading, so the receiver's confirmation is on an old head.
+        courierSendsTheNextReading()
+
+        val after = withTimeout(10_000) { vm.state.first { it.notice.orEmpty().contains("confirm again") } }
+        assertTrue(after.notice!!.contains("New readings arrived"))
+    }
+
+    /** The courier's phone sends the reading after the ten from [readings], half a minute after the last. */
+    private suspend fun courierSendsTheNextReading() {
+        val last = readings().last()
+        val next = HashChainService.appendHash(
+            TemperatureEvent("TE-next", "SHIP-1", "LOG-1", last.timestamp + minute / 2, 5.0, "", "", SyncStatus.PENDING, seq = 11),
+            last.currentHash
+        )
+        val user = server.currentUser
+        server.currentUser = "courier"
+        server.appendReadings("SHIP-1", listOf(next), last.currentHash, "courier-phone", "s").getOrThrow()
+        server.currentUser = user
     }
 
     @Test

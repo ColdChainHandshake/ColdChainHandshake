@@ -4,11 +4,13 @@ import com.coldchain.handshake.crypto.ServerChainHead
 import com.coldchain.handshake.models.Handover
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShakeTestResult
+import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.VvmStage
 import com.coldchain.handshake.repository.ColdChainRemote
 import com.coldchain.handshake.repository.HandoverConfirmation
 import com.coldchain.handshake.repository.HandoverOutcome
 import com.coldchain.handshake.repository.HandoverRepository
+import com.coldchain.handshake.repository.HandoverState
 import com.coldchain.handshake.repository.RemoteRejection
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepository
@@ -39,12 +41,16 @@ class ServerHandover(
     private val history: ShipmentHistorySyncCoordinator,
     private val uploadPending: suspend (String) -> Result<Unit>,
     private val deviceId: () -> String,
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val pendingReleases: PendingReleases = PendingReleases.inMemory()
 ) {
 
     /**
      * For the current custodian, who names who takes over. The server compares both people's confirmations
      * by head, so everything recorded here must reach it first.
+     *
+     * Recording doesn't stop here: the receiver's verdict covers readings up to their own confirmation, so the
+     * courier keeps recording until custody moves, and [renewRelease] confirms again on each new head.
      */
     suspend fun release(shipmentId: String, toUserId: String): Result<HandoverOutcome> {
         uploadPending(shipmentId).getOrElse { return Result.failure(it) }
@@ -53,12 +59,80 @@ class ServerHandover(
             ?: return Result.failure(IllegalStateException("The server has no record of this shipment."))
 
         return confirm(HandoverConfirmation(shipmentId, 0, deviceId(), head.headHash, toUserId = toUserId))
+            .onSuccess { outcome -> remember(shipmentId, toUserId, outcome) }
+    }
+
+    /**
+     * Sends what was recorded since, then confirms the same handover again on the server's new head, so a receiver
+     * confirming now finds the custodian's confirmation on the history they checked.
+     *
+     * @return The server's answer, or null when nothing is waiting here or custody has already moved on, in which
+     *   case the waiting handover is forgotten.
+     */
+    suspend fun renewRelease(shipmentId: String): Result<HandoverOutcome?> {
+        val toUserId = pendingReleases.get(shipmentId) ?: return Result.success(null)
+        uploadPending(shipmentId).getOrElse { return Result.failure(it) }
+
+        val head = remote.getChainHead(shipmentId).getOrElse { return Result.failure(it) }
+            ?: return Result.failure(IllegalStateException("The server has no record of this shipment."))
+
+        val renewed = confirm(HandoverConfirmation(shipmentId, 0, deviceId(), head.headHash, toUserId = toUserId))
+        val failure = renewed.exceptionOrNull()
+            ?: return renewed.onSuccess { outcome -> remember(shipmentId, toUserId, outcome) }
+
+        return when {
+            failure is RemoteRejection && failure.code == RemoteRejection.ALREADY_CONFIRMED ->
+                remote.getShipment(shipmentId).map { found ->
+                    HandoverOutcome(HandoverState.WAITING, found?.status ?: ShipmentStatus.IN_TRANSIT)
+                }
+            custodyMovedOn(shipmentId) -> {
+                pendingReleases.remove(shipmentId)
+                Result.success(null)
+            }
+            else -> Result.failure(failure)
+        }
+    }
+
+    /** Renews every handover waiting on this phone; the first failure is returned once all were tried. */
+    suspend fun renewReleases(): Result<Unit> {
+        val failures = pendingReleases.shipmentIds().mapNotNull { renewRelease(it).exceptionOrNull() }
+        return failures.firstOrNull()?.let { Result.failure(it) } ?: Result.success(Unit)
+    }
+
+    private fun remember(shipmentId: String, toUserId: String, outcome: HandoverOutcome) {
+        if (outcome.state == HandoverState.WAITING) pendingReleases.put(shipmentId, toUserId)
+        else pendingReleases.remove(shipmentId)
+    }
+
+    /**
+     * The person named holds it now, or nobody can hand it over any more. When the server can't be asked, the
+     * answer is no, so a dropped connection never forgets a handover still waiting.
+     */
+    private suspend fun custodyMovedOn(shipmentId: String): Boolean {
+        val custody = remote.getCustody(shipmentId).getOrElse { return false } ?: return true
+        val status = remote.getShipment(shipmentId).getOrElse { return false }?.status ?: return true
+        val open = status == ShipmentStatus.IN_TRANSIT || status == ShipmentStatus.QUARANTINED
+        return !open || pendingReleases.get(shipmentId) == custody.custodianId
     }
 
     /**
      * For the person taking over. Their verdict can be stricter than the checks but never more lenient.
      */
     suspend fun receive(
+        shipmentId: String,
+        verdict: HandoverVerdict?,
+        reason: String?,
+        vvmStage: VvmStage,
+        shakeTest: ShakeTestResult
+    ): Result<HandoverResult> {
+        val first = receiveOnce(shipmentId, verdict, reason, vvmStage, shakeTest)
+        val stale = (first.exceptionOrNull() as? RemoteRejection)?.code == RemoteRejection.STALE_HEAD
+        // The courier keeps recording until custody moves, so a reading can land between fetching the history and
+        // confirming. Fetch and check again once, so the verdict covers what the server now holds.
+        return if (stale) receiveOnce(shipmentId, verdict, reason, vvmStage, shakeTest) else first
+    }
+
+    private suspend fun receiveOnce(
         shipmentId: String,
         verdict: HandoverVerdict?,
         reason: String?,
