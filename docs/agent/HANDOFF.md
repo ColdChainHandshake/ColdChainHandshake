@@ -1,6 +1,6 @@
 # Handoff: what the owner needs to do
 
-Updated on 27 Nov 2026. Questions first, then your list, most urgent first. Claude carries on with everything these
+Updated on 28 Nov 2026. Questions first, then your list, most urgent first. Claude carries on with everything these
 don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
 ## Questions for you
@@ -16,20 +16,23 @@ None open.
 
 ## Your list
 
-### 0. Next session, device steps that need you (27 Nov)
+### 0. State of your devices and accounts (night of 27 to 28 Nov)
 
-- **The S24:** nothing is recording on it now (`SHIP-1D87CC` ended QUARANTINED at 15:32, the app stopped by
-  itself). Leave it plugged in at the start of the next session; Claude will ask when it needs it unlocked.
-- **A sign-in code for the release build:** the release app (`com.coldchain.handshake`, no `.debug`) is a separate
-  install and isn't signed in. Checking it signed in under R8 needs one email code from your inbox, on the emulator.
-- **Multi-leg on devices (5.3), optional:** proven on fakes and on the local Docker stack. On the dev project it would
-  need a second courier account (for example `you+courier2@gmail.com`) and its sign-up code from your inbox.
+- **Nothing is recording anywhere.** `SHIP-2DE57A` and `SHIP-CB7F34` (both multi-leg, both ACCEPTED) are finished.
+- **The S24 now has two installs, both signed in:** the debug app as Gate3 Courier and the release app
+  (`com.coldchain.handshake`, signed with your upload key) as Gate3 Receiver. The debug app's Nearby devices and
+  location were revoked with `adb` for one test and then allowed again through the app's own prompt.
+- **The emulator:** the release app is signed in as Courier Two (`you+courier2@gmail.com`, a new account on the dev
+  project); its Nearby devices was granted by `adb`, location and camera refused. The debug app is signed in as
+  Gate3 Sender.
+- **No codes are needed for the next steps** (Gate 5's review, Phase 4, Phase 6). Claude will write here if a
+  device step needs you.
 - **The release key:** `D:\cch-keys\cch-release.jks` and `keystore.properties` were created today (PKCS12, alias
   `cch-release`, random passwords in the file, never printed or committed). Back up `D:\cch-keys`. A signed release
   build needs the environment variable `CCH_RELEASE_KEYS=D:\cch-keys\keystore.properties`; without it the release
   APK is built unsigned, as on CI.
 - **Three false alerts on the dev project:** DATA_GAP on `SHIP-49A74F` from the receiver's account (10:46:55 to
-  10:46:56 today: 49:29, 12:58 and 718:54). They came from a bug fixed today (`91db6ea`); clients can't delete alerts,
+  10:46:56 on 27 Nov: 49:29, 12:58 and 718:54). They came from a bug fixed that day (`91db6ea`); clients can't delete alerts,
   so they stay. Delete them in the dashboard if you like.
 
 ### 1. Optional, 1 minute: OTP expiry (security review S7)
