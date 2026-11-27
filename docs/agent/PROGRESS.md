@@ -33,7 +33,7 @@ Status words: `done`, `doing`, `blocked` (with the reason), or blank for not sta
 
 ## Session of 27 Nov 2026, evening
 
-### Status at session start (~16:40)
+### Status at session start (~20:20)
 
 - **Git:** `rebuild/trust-core`, HEAD `2674949`, clean. Tags `gate-0` to `gate-3`. One stash (the honesty pass of
   26 Nov, applied and committed as `9b40ab2`; kept, never dropped)
@@ -120,6 +120,21 @@ after the rule: seeds.txt …CommonComponentRegistrar: CommonComponentRegistrar(
   seen on a device
 - Rule slip, recorded: Gradle ran for 34 s (`checkReleaseKeepRules`) while the emulator was booting at 20:27; the
   emulator was stopped at once and restarted after the builds
+
+### Courier A's final status, lint, audits: `done`
+
+- [x] `db0ce9b`, test-first: opening a shipment this phone holds asks the server for its status first (no polling);
+  `TransitViewModelTest.openingAShipmentThisPhoneHoldsShowsTheServersStatusFromTheStart` failed first (IN_TRANSIT),
+  passes after; `withNoSignalAShipmentThisPhoneHoldsStillOpensAsThisPhoneHasIt` keeps the local copy offline
+- [x] Lint 22 → 12 warnings (`f3636bc`), 0 errors; the 12 left are justified in `docs/agent/audit_5_5.md`, which also
+  holds the intent-security check (the release APK's own manifest: only the launcher and system-guarded library
+  components exported, no intent extras read), Play policy notes and the R8 summary
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+  (CCH_RELEASE_KEYS set, no emulator) BUILD SUCCESSFUL in 21m 37s | core-domain 127 failed 0 | debug 579 failed 0
+  | release 519 failed 0 | lint 0 errors, 12 warnings | checkReleaseKeepRules passed      (at db0ce9b; then --stop)
+```
 
 ## Session of 27 Nov 2026
 
@@ -1201,8 +1216,9 @@ message use those numbers.
   Block 4 item 4); never run on hardware (`HARDWARE = none`)
 - [ ] 4.4 Receiver reads and verifies the logger at handover. Domain half done (FINISH Block 4 item 2); the screen
   wiring is FINISH item 1's
-- [ ] 4.5 Firmware. Interfaces, failing tests and `WALKTHROUGH.md` done in `487db13`. From 26 Nov
-  `FIRMWARE_OWNER = claude`: Claude writes the bodies. PlatformIO skeleton skipped while `HARDWARE = none`
+- [x] 4.5 Firmware. Interfaces, failing tests and `WALKTHROUGH.md` done in `487db13`. With `FIRMWARE_OWNER = claude`
+  Claude wrote the bodies on 26 Nov: 39/39 host tests pass with MSYS2 g++ (Session of 26 Nov). PlatformIO skeleton
+  skipped while `HARDWARE = none`; never run on a board
 
 Proof for 4.5, 6 Nov:
 
@@ -1215,20 +1231,24 @@ ctest --preset host-tests
 
 The sanitizer and fuzz presets were not built: MinGW has no ASan and libFuzzer needs clang.
 
-**Gate 4:** not started.
+**Gate 4:** not started; after Gate 5 (4.1 and 4.3 remain), closing as "met without hardware" (`HARDWARE = none`).
 
 ## Phase 5: App architecture, background work and completeness
 
 The live list for Phase 5 is "FINISH run, Block 5" below and CONTINUE Step 2 above.
 
 - [x] 5.1 ViewModels, Hilt, role-based navigation. Done 24 Nov (CONTINUE run, Step 2; `8cbdf71`)
-- [ ] 5.2 Foreground service, WorkManager sync, queued GPS, incremental download
-- [ ] 5.3 Multi-leg custody in the UI
-- [ ] 5.4 Opaque QR codes
-- [ ] 5.5 Android skills audits
-- [ ] 5.6 Release build
+- [x] 5.2 Foreground service, WorkManager sync, queued GPS, incremental download. Service and window fix 26 Nov; GPS
+  in the service and finding 11's incremental fetch 27 Nov (`e942e87`, `1a4691c`); proven on the S24 (Sessions of
+  26 and 27 Nov)
+- [x] 5.3 Multi-leg custody in the UI. 27 Nov (`837aa9c`); on devices with `SHIP-2DE57A` (27 Nov, evening)
+- [x] 5.4 Opaque QR codes. 26 Nov (`DECISIONS.md`)
+- [x] 5.5 Android skills audits. Permissions, ANR, Compose (`4793425`); intent security, Play policy, R8, lint
+  (`docs/agent/audit_5_5.md`); on the emulator: see Session of 27 Nov, evening
+- [x] 5.6 Release build. R8, signing from `CCH_RELEASE_KEYS`, version 0.5.0 (`da4e737`); run on devices under R8
+  (27 Nov, evening; one keep rule fixed, `55bc5c9`)
 
-**Gate 5:** not started.
+**Gate 5:** reviewer and security review of `gate-3..HEAD` next (Session of 27 Nov, evening).
 
 ## Phase 6: Verification kit and hand-off
 
@@ -1292,8 +1312,5 @@ emulator: cold start after pm clear, LaunchState COLD, TotalTime 5566 ms, no FAT
     DISPATCHED), no FATAL or ANR
   - [x] Transit, Handover, Alerts ViewModels: done 24 Nov (CONTINUE run, Step 2)
 - [x] 5.1c Hilt builds everything; `RepositoryProvider` deleted. Done 24 Nov (`dccf20c`, `8cbdf71`)
-- [ ] 5.2 Foreground service for recording; WorkManager sync; the Handover screen downloads its own history
-- [ ] 5.3 Multi-leg custody in the UI
-- [ ] 5.4 Opaque QR codes
-- [ ] 5.5 Android audits on the emulator
-- [ ] 5.6 Release build settings
+- [x] 5.2 to 5.6: done, see "Phase 5" above (this list is kept as it stood; the live record is in the sessions of
+  26 and 27 Nov at the top)

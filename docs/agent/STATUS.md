@@ -39,6 +39,14 @@ wrong about the world: the first real run found a server rule the fake server di
   every minute with the screen off and the network on (28 minutes; not in Doze). Room 4 → 5 kept all 797 readings of
   the previous shipment on the phone. The receiver (emulator) recorded FAIL; the shipment was QUARANTINED, custody
   moved, and the S24 stopped recording by itself. No coordinates are kept anywhere: they are the owner's location.
+- **The signed release build under R8, and multi-leg custody on devices (27 Nov, `SHIP-2DE57A`):** the release
+  APK (R8 full mode, resource shrinking, the upload key) found one missing keep rule on its first start on the S24
+  (ML Kit's registrars), fixed and guarded by a build check. Then, on the dev project: courier A (S24, debug build)
+  took custody and recorded 11 readings; courier B (emulator, **release build**) took over and recorded 6 more on the
+  same chain; the receiver (S24, **release build**) recorded PASS. Custody START, TRANSFER, TRANSFER; ACCEPTED; each
+  handover's two confirmations on the same head from two physical devices; each courier's phone stopped recording by
+  itself when custody moved, and B's phone showed ACCEPTED. Sign-up, sign-in, uploads, GPS, the scanner and
+  confirmations all ran under R8 with no class or serialization error in the logs.
 - **Finding 11 on the dev project (edge logs):** a phone watching a shipment went from ~89 requests a minute to ~12
   while readings arrive and ~3.6 while nothing changes; the courier waiting for the receiver from ~48 to ~17, with
   one confirmation per new reading instead of one every 5 s.
@@ -101,9 +109,12 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
 
 ## Not proven
 
-- Notifications and real timers on any device.
-- Recording after the app's process is killed outright, and an alert raised while offline reaching the server
-  afterwards (planned on the S24 with the second shipment). Screen-off and Doze are proven (above).
+- An alert's notification seen on a device's screen. The recording notification and the notifications prompt were
+  seen on the S24 and the emulator, and on the S24 an alert raised offline escalated on WorkManager's real timer
+  (27 Nov), but nobody checked the alert's own notification there.
+- GPS in deep Doze. GPS with the screen off and the network on is proven (above).
+- A courier taking over on Handover being asked for Nearby devices and location (`687e62a`): proven in a screen
+  test, not yet on a device.
 - A real logger. None will be used (`HARDWARE = none`); the virtual logger exists in code but the app doesn't use
   it yet.
 
@@ -133,6 +144,6 @@ firmware, closing as "met without hardware") are next.
 | 11 | The receiver re-downloads everything every 3 s | Closed. Only new readings, asked for only when the head moved; watchers back off from 3 s to 30 s; the courier re-confirms only after a new reading. Measured on the dev project (27 Nov) | `PollBackoffTest`, `ShipmentHistorySyncCoordinatorTest.aFetchWithNothingNewAsksOnlyForTheHead`, `TransitViewModelTest.whileWatchingAndNothingChangesTheServerIsAskedLessAndLess`, `RecordingLoopTest.whileWaitingWithNothingNewRecordedTheCourierDoesNotConfirmAgain` |
 | 12 | The QR code was trusted text | Unit | `ShipmentWorkflowTest.aScannedCodeIsNeverTurnedIntoAShipment` |
 | 13 | The handover trusted the caller's temperature result | Unit; the argument no longer exists | `HandoverOrchestratorTest.test16_temperatureFailedQuarantinesShipment` |
-| 14 | Only one handover per shipment | Closed on fakes and Docker: courier → courier → receiver, the second courier records from taking over (27 Nov). Not yet on devices | `MultiLegHandoverTest`, `LiveSupabaseIntegrationTest.aShipmentGoesThroughTwoCouriersBeforeTheReceiver`, `HandoverViewModelTest.aCourierTakingOverFromAnotherCourierStartsRecordingOnTheirPhone` |
+| 14 | Only one handover per shipment | Closed. On fakes and Docker, and on devices against the dev project: `SHIP-2DE57A` went courier → courier → receiver, the second courier recording from taking over (27 Nov) | `MultiLegHandoverTest`, `LiveSupabaseIntegrationTest.aShipmentGoesThroughTwoCouriersBeforeTheReceiver`, `HandoverViewModelTest.aCourierTakingOverFromAnotherCourierStartsRecordingOnTheirPhone` |
 | 15 | No ViewModels, global state, demo code in production | Closed in code: a ViewModel per screen, Hilt builds everything, `RepositoryProvider` deleted, role-based tabs (24 Nov); demo code is debug-only. Process death checked on the S24 | `ReleaseHasNoDebugToolsTest`; `AppRootViewModelTest`, `DispatchViewModelTest`, `TransitViewModelTest`, `HandoverViewModelTest`, `AlertsViewModelTest`, `ScreenTabsTest` |
 | 16 | Build pinned to one PC, a test hit a live server, old target SDK, no CI | Closed. A clean clone builds (Gate 1), and CI runs on GitHub: unit tests, lint, release build, database tests and the firmware tests (first green run 26 Nov) | `OfflineTestGuardTest`; the clean-clone build (`PROGRESS.md`, Gate 1); https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/45842949385 |
