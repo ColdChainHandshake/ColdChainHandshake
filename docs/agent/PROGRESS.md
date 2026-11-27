@@ -6,8 +6,8 @@ the emulator (a "Tamper Detected" flash that moved the Handover form; false DATA
 location coming back after a background restart, the S24 run of `SHIP-1D87CC` (kills, 74 minutes offline, an alert
 raised offline, GPS, a FAIL handover, the S24 stopping by itself), 5.3 multi-leg (fakes and the local stack), 5.5
 audit fixes (permissions, a lazy history, the product's own range). 5.6 started: the upload keystore exists in
-`D:\cch-keys`; R8, signing and version `0.5.0` are in `app/build.gradle` (see the 5.6 entry below for whether the
-signed, minified build was proven). Still to do, in order:
+`D:\cch-keys`; R8, signing and version `0.5.0` are in `app/build.gradle` (`da4e737`): the signed, minified APK
+builds (25.4 MB) and `apksigner verify` passes; not yet run on a device (`DECISIONS.md`, 27 Nov). Still to do, in order:
 1. **5.6:** `CCH_RELEASE_KEYS='D:\cch-keys\keystore.properties' ./gradlew assembleRelease`; fix any R8 missing-class
    or keep problem; `apksigner verify`; install the release APK on the emulator (start it with
    `-gpu swiftshader_indirect -no-snapshot`: the host renderer draws app windows black) and check it opens to
