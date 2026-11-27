@@ -131,7 +131,7 @@ the emulator with `adb install -r` (still signed in). The S24 kept the build of 
   after 89d5009: BUILD SUCCESSFUL in 3m 39s | core-domain 127 failed 0 | debug 557 failed 0 | release 499 failed 0 | lint 0 errors (22 warnings)
 ```
 
-### Device: `SHIP-1D87CC` on the S24 with the GPS build (`doing`, from 12:13)
+### Device: `SHIP-1D87CC` on the S24 with the GPS build: `done` (12:13 to 15:33)
 
 Debug APK of `f098dcc` (BuildConfig: dev ref 1, demo 0, `sb_secret_` 0). The phone's location is the owner's real
 location: no coordinates, screenshots or place names are kept anywhere, only counts, accuracy and delays.
@@ -168,6 +168,18 @@ location: no coordinates, screenshots or place names are kept anywhere, only cou
   the 3-minute limit; no alert from the receiver's user on the server since 10:47 (today's fix `91db6ea` on a device)
 - The owner used the phone during the run (power key at 12:41 and 13:40, airplane off ~13:42). The screen was on
   12:41 to 13:04; the rest of the offline run was screen-off. `dumpsys battery reset` at 15:23
+- [x] **No "Tamper Detected" flash and no jumping form on Handover** (today's `0e6e849` on a device): the receiver's
+  Handover sampled about every 2 s from 15:31:10 to 15:32:28, across reading 195 arriving at 15:31:36: the Record
+  button stayed at (540, 2022) in every sample, and no "Tamper", "server holds", "this device has" or "syncing" text
+- [x] **The receiver's FAIL** at 15:32:50: the screen offered only Fail ("FINAL VERDICT: FAIL"), reason from the checks
+  ("Temperature went out of range"). Server: QUARANTINED; custody TRANSFER leg 2 to the receiver at 15:32:53; the
+  receiver's FAIL and the courier's renewal (15:32:41) on the same head `1626d41d` (seq 196), devices `1241f8d4`
+  (emulator) and `88017876` (S24)
+- [x] **The S24 stopped by itself** (the renewal path on a device): `RecordingService` gone by 15:33:17, its
+  notification removed; no reading after seq 196, no confirmation after, no GPS point after 15:32:24
+- The emulator again drew every app window black after a cold boot (15:24) and raised the same "no focused window"
+  ANR, this time with the window focused before any tap; the guest log showed `lowmemorykiller … device is not
+  responding`. With `-gpu swiftshader_indirect` it drew and focused normally (`DECISIONS.md`)
 - **The emulator, first try:** an ANR "Input dispatching timed out (Application does not have a focused window)" at
   12:16:47, after a cold boot and a fresh install, while the driver tapped before the window was focused. The ANR
   trace's main thread is idle in `Looper.pollOnce`, so not stuck in app code; the emulator then drew every app window
