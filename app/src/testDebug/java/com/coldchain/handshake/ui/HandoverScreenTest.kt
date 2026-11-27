@@ -1,7 +1,15 @@
 package com.coldchain.handshake.ui
 
+import android.Manifest
 import android.content.Context
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.result.ActivityResultRegistry
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.core.app.ActivityOptionsCompat
+import com.coldchain.handshake.repository.ShipmentMember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -171,6 +179,8 @@ class HandoverScreenTest {
         showing = false
         compose.waitForIdle()
         viewModels.forEach { it.viewModelScope.cancel() }
+        // A courier taking over starts recording, whose ticks write to the database.
+        simulator.stopContinuousSimulation()
         db.close()
     }
 
@@ -197,11 +207,13 @@ class HandoverScreenTest {
         role: MemberRole,
         uploaded: List<TemperatureEvent> = readings(genesisHash = genesis),
         courierReleased: Boolean = false,
-        offlineOnArrival: Boolean = false
+        offlineOnArrival: Boolean = false,
+        releasedTo: String = "receiver",
+        permissions: ActivityResultRegistry? = null
     ) {
         runBlocking {
             if (uploaded.isNotEmpty()) server.appendReadings("SHIP-1", uploaded, genesis, "courier-phone", "s").getOrThrow()
-            if (courierReleased) courierReleases()
+            if (courierReleased) courierReleases(releasedTo)
             server.currentUser = user
             val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
             account.setState(AccountState.Ready(user, null, UserProfile(user, role)))
@@ -210,18 +222,45 @@ class HandoverScreenTest {
         }
         if (offlineOnArrival) server.offlineError = IOException("No connection")
         val viewModel = screenViewModel()
-        compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }
+        compose.setContent {
+            if (permissions == null) {
+                if (showing) HandoverScreen(viewModel = viewModel)
+            } else {
+                val registry: ActivityResultRegistry = permissions
+                val owner = object : ActivityResultRegistryOwner {
+                    override val activityResultRegistry = registry
+                }
+                CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
+                    if (showing) HandoverScreen(viewModel = viewModel)
+                }
+            }
+        }
     }
 
-    private fun courierReleases() {
+    private fun courierReleases(to: String = "receiver") {
         val user = server.currentUser
         server.currentUser = "courier"
         runBlocking {
             server.confirmHandover(
-                HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = "receiver")
+                HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = to)
             ).getOrThrow()
         }
         server.currentUser = user
+    }
+
+    /** Answers every permission request with yes, and keeps what was asked and how many confirmations were sent by then. */
+    private inner class AnsweringPermissions : ActivityResultRegistry() {
+        val asked = mutableListOf<Pair<List<String>, Int>>()
+        override fun <I, O> onLaunch(
+            requestCode: Int,
+            contract: ActivityResultContract<I, O>,
+            input: I,
+            options: ActivityOptionsCompat?
+        ) {
+            val wanted = (input as Array<*>).map { it as String }
+            asked += wanted to server.confirmations.size
+            dispatchResult(requestCode, wanted.associateWith { true })
+        }
     }
 
     private fun await(text: String): SemanticsNodeInteraction {
@@ -409,6 +448,36 @@ class HandoverScreenTest {
         assertEquals("courier", confirmation.userId)
         assertEquals("receiver", confirmation.details.toUserId)
         assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
+    // Found on the emulator (27 Nov): a second courier taking over on this screen was never asked for Nearby devices or
+    // location, as Take Custody on Transit asks, so their recording ran only while the app was open.
+    @Test
+    fun aCourierTakingOverIsAskedForWhatRecordingNeedsBeforeConfirming() {
+        server.members.getValue("SHIP-1") += ShipmentMember("courier-b", MemberRole.COURIER, "Cody")
+        val permissions = AnsweringPermissions()
+        showOnServer("courier-b", MemberRole.COURIER, courierReleased = true, releasedTo = "courier-b", permissions = permissions)
+        val before = server.confirmations.size
+
+        await("Record PASS handover").performClick()
+
+        compose.waitUntil(10_000) { idleMain(); server.confirmations.any { it.userId == "courier-b" } }
+        val (wanted, confirmationsThen) = permissions.asked.single()
+        assertTrue(wanted.toString(), Manifest.permission.BLUETOOTH_CONNECT in wanted)
+        assertTrue(wanted.toString(), Manifest.permission.ACCESS_FINE_LOCATION in wanted)
+        assertEquals("asked before confirming", before, confirmationsThen)
+        assertEquals("courier-b", server.custody.getValue("SHIP-1").custodianId)
+    }
+
+    @Test
+    fun aReceiverTakingOverIsAskedForNothing() {
+        val permissions = AnsweringPermissions()
+        showOnServer("receiver", MemberRole.RECEIVER, courierReleased = true, permissions = permissions)
+
+        await("Record PASS handover").performClick()
+
+        await("Custody has moved. The shipment is now ACCEPTED.")
+        assertTrue(permissions.asked.toString(), permissions.asked.isEmpty())
     }
 
     @Test

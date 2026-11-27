@@ -48,6 +48,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.coldchain.handshake.ui.components.RecordingPermissions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -172,6 +177,30 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
     val needsSignIn = me == null && shipment?.genesisHash != null
     val canRecord = !needsSignIn &&
         (!onServer || (!isCustodian && (myRole == MemberRole.COURIER || myRole == MemberRole.RECEIVER)))
+
+    // A courier taking over from another courier records from then on, so they are asked for what recording in the
+    // background needs before their confirmation is sent, as Take Custody asks on Transit. The answer only limits
+    // recording; the confirmation is sent either way. Kept across a configuration change while the prompt is up.
+    val context = LocalContext.current
+    var pendingVerdict by rememberSaveable { mutableStateOf<HandoverVerdict?>(null) }
+    var pendingReason by rememberSaveable { mutableStateOf<String?>(null) }
+    val takeOverPermissions = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        pendingVerdict?.let { viewModel.record(it, pendingReason) }
+        pendingVerdict = null
+        pendingReason = null
+    }
+    val record: (HandoverVerdict, String?) -> Unit = { verdict, reason ->
+        val wanted = if (onServer && myRole == MemberRole.COURIER) RecordingPermissions.missing(context) else emptyList()
+        if (wanted.isEmpty()) {
+            viewModel.record(verdict, reason)
+        } else {
+            pendingVerdict = verdict
+            pendingReason = reason
+            takeOverPermissions.launch(wanted.toTypedArray())
+        }
+    }
 
     // Historical Last Recorded Location
     val lastRecordedLocation = ui.lastLocation
@@ -819,7 +848,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                 handoverResult != null || storedHandover != null -> "Handover Recorded"
                 else -> null
             },
-            onRecord = { verdict, reason -> viewModel.record(verdict, reason) },
+            onRecord = record,
             modifier = Modifier.fillMaxWidth()
         )
 

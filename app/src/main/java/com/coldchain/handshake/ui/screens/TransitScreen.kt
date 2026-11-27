@@ -3,7 +3,6 @@ package com.coldchain.handshake.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.LocationManager
-import android.os.Build
 import androidx.core.location.LocationManagerCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -76,6 +75,7 @@ import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.recording.RecordingService
 import com.coldchain.handshake.ui.components.PermissionSettings
 import com.coldchain.handshake.ui.components.QRScannerDialog
+import com.coldchain.handshake.ui.components.RecordingPermissions
 import com.coldchain.handshake.ui.components.TemperatureCard
 import com.coldchain.handshake.ui.theme.PrimaryCold
 import com.coldchain.handshake.ui.theme.StatusAmber
@@ -153,13 +153,20 @@ fun TransitScreen(
         viewModel.takeCustody()
     }
     val takeCustody: () -> Unit = {
-        val wanted = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !granted(Manifest.permission.BLUETOOTH_CONNECT)) {
-                add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-            if (locationPermissions.none(::granted)) addAll(locationPermissions)
-        }
+        val wanted = RecordingPermissions.missing(context)
         if (wanted.isEmpty()) viewModel.takeCustody() else custodyPermissionsLauncher.launch(wanted.toTypedArray())
+    }
+
+    // Recording without Nearby devices runs only while the app is open. The person is asked first; only once Android
+    // won't ask any more does the button lead to this app's settings.
+    var nearbyRefusedForGood by remember { mutableStateOf(false) }
+    val nearbyLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        locationAllowed = locationPermissions.any(::granted)
+        nearbyRefusedForGood = !RecordingService.canRunInForeground(context) &&
+            PermissionSettings.refusedForGood(context, results.keys, results)
+        viewModel.keepRecordingInBackground()
     }
 
     // Allowed later from the location card: the recording already running adds location without starting again.
@@ -235,13 +242,20 @@ fun TransitScreen(
         }
         if (isRunning && !RecordingService.canRunInForeground(context)) {
             Text(
-                "Recording continues only while this app is open. Allow Nearby devices for this app in Settings " +
+                "Recording continues only while this app is open. Allow Nearby devices for this app " +
                     "to keep it recording with the screen off.",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall
             )
-            TextButton(onClick = { PermissionSettings.open(context) }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("Open Settings")
+            TextButton(
+                onClick = {
+                    val wanted = RecordingPermissions.missing(context)
+                    if (nearbyRefusedForGood || wanted.isEmpty()) PermissionSettings.open(context)
+                    else nearbyLauncher.launch(wanted.toTypedArray())
+                },
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text(if (nearbyRefusedForGood) "Open Settings" else "Allow Nearby devices")
             }
             Spacer(modifier = Modifier.height(8.dp))
         }
