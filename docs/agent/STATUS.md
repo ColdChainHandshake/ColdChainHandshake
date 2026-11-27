@@ -1,6 +1,6 @@
 # Status: what is proven, and on what
 
-Updated 26 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock. No physical
+Updated 27 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock. No physical
 temperature logger has been used at any point (`HARDWARE = none`): every reading so far is simulated on a phone.
 
 "Real system" means a hosted Supabase project, an emulator or phone, or a real database running in Docker.
@@ -28,7 +28,20 @@ wrong about the world: the first real run found a server rule the fake server di
     before the fix nothing was sent while the screen was off.
   - Before that fix, 28 readings recorded once a minute through 28 minutes of screen-off and deep Doze stayed on the
     phone and reached the server in order, contiguous, once the app came back to the screen.
-  - Airplane mode for 30 minutes: in progress (PROGRESS).
+  - Overnight, 26 to 27 Nov: 582 readings made in nearly 10 hours of screen-off deep Doze all reached the server,
+    at most 8 s late (battery history and server times, PROGRESS 27 Nov).
+
+- **The S24 again, 27 Nov, `SHIP-1D87CC`, the build with GPS in the recording service:** the service ran as
+  `connectedDevice|location`; the first GPS points on the dev project reached it 1 to 2 s after each fix. `am kill`
+  left it alone; a real `kill -9` was restarted by Android in 4 s, location included, with no gap in the readings.
+  **74 minutes offline** (airplane mode, deep Doze reached): the 72 readings made offline, a temperature alert
+  raised offline and a GPS point recorded offline all reached the server in order on reconnecting. GPS kept arriving
+  every minute with the screen off and the network on (28 minutes; not in Doze). Room 4 → 5 kept all 797 readings of
+  the previous shipment on the phone. The receiver (emulator) recorded FAIL; the shipment was QUARANTINED, custody
+  moved, and the S24 stopped recording by itself. No coordinates are kept anywhere: they are the owner's location.
+- **Finding 11 on the dev project (edge logs):** a phone watching a shipment went from ~89 requests a minute to ~12
+  while readings arrive and ~3.6 while nothing changes; the courier waiting for the receiver from ~48 to ~17, with
+  one confirmation per new reading instead of one every 5 s.
 
 The rest ran on the local Docker stack (Supabase's own Postgres 17, GoTrue, PostgREST and Kong images), not a
 hosted project.
@@ -115,11 +128,11 @@ firmware, closing as "met without hardware") are next.
 | 6 | Data gaps counted as safe | Unit | `RegressionTest.finding6_dataGapsAreUnknownNotSafe` |
 | 7 | A new alert every tick, no escalation | Unit | `RegressionTest.finding7_oneExcursionCreatesOneAlert`; `AlertNotificationsTest.theWorkerEscalatesWhatIsDueNotifiesAndBooksTheNextCheck` |
 | 8 | A FAIL handover couldn't be recorded; some statuses never set | Unit | `HandoverDecisionTest.aDeclaredFailureNeedsAReason`; `ShipmentLifecycleTest.everyPairOfStatusesIsEitherLegalOrRejected` |
-| 9 | Recording, sync and GPS stop when the screen changes | Recording and sync: fixed, and proven on the S24 with the screen off and in deep Doze against the dev project (26 Nov). GPS still only while the Transit screen is open (open, `DECISIONS.md`) | `RecordingLoopTest`, `RecordingServiceTest`, `SyncWorkerTest`, `SupabaseClientProviderTest.theSessionStaysWhenTheAppGoesToTheBackground`; `SHIP-49A74F` on the dev project |
-| 10 | An app update could wipe the database | Unit (real SQLite under Robolectric) | `ColdChainDatabaseMigrationTest.aVersion2ChainKeepsItsReadingsThroughTheMigration` |
-| 11 | The receiver re-downloads everything every 3 s | Partly: downloads only new readings, still polls every 3 s. Phase 5 | none for the polling |
+| 9 | Recording, sync and GPS stop when the screen changes | Closed. Recording, sync and GPS run in the recording service; proven on the S24 against the dev project: screen off, deep Doze, a real kill, 74 minutes offline (26 and 27 Nov). GPS in deep Doze is not proven | `RecordingLoopTest`, `RecordingServiceTest`, `LocationRecorderTest`, `SyncServiceTest`, `SyncWorkerTest`, `SupabaseClientProviderTest.theSessionStaysWhenTheAppGoesToTheBackground`; `SHIP-49A74F`, `SHIP-1D87CC` on the dev project |
+| 10 | An app update could wipe the database | Unit (real SQLite under Robolectric), and on the S24: version 4 → 5 kept all 797 readings (27 Nov) | `ColdChainDatabaseMigrationTest.aVersion2ChainKeepsItsReadingsThroughTheMigration` |
+| 11 | The receiver re-downloads everything every 3 s | Closed. Only new readings, asked for only when the head moved; watchers back off from 3 s to 30 s; the courier re-confirms only after a new reading. Measured on the dev project (27 Nov) | `PollBackoffTest`, `ShipmentHistorySyncCoordinatorTest.aFetchWithNothingNewAsksOnlyForTheHead`, `TransitViewModelTest.whileWatchingAndNothingChangesTheServerIsAskedLessAndLess`, `RecordingLoopTest.whileWaitingWithNothingNewRecordedTheCourierDoesNotConfirmAgain` |
 | 12 | The QR code was trusted text | Unit | `ShipmentWorkflowTest.aScannedCodeIsNeverTurnedIntoAShipment` |
 | 13 | The handover trusted the caller's temperature result | Unit; the argument no longer exists | `HandoverOrchestratorTest.test16_temperatureFailedQuarantinesShipment` |
-| 14 | Only one handover per shipment | Partly: the server supports several legs (Docker); the phone still refuses a second one. 5.3 | `0003_trust_core`; `HandoverDecisionTest.aSecondHandoverForTheSameShipmentIsRefusedNotSilentlyLost` |
+| 14 | Only one handover per shipment | Closed on fakes and Docker: courier → courier → receiver, the second courier records from taking over (27 Nov). Not yet on devices | `MultiLegHandoverTest`, `LiveSupabaseIntegrationTest.aShipmentGoesThroughTwoCouriersBeforeTheReceiver`, `HandoverViewModelTest.aCourierTakingOverFromAnotherCourierStartsRecordingOnTheirPhone` |
 | 15 | No ViewModels, global state, demo code in production | Closed in code: a ViewModel per screen, Hilt builds everything, `RepositoryProvider` deleted, role-based tabs (24 Nov); demo code is debug-only. Process death checked on the S24 | `ReleaseHasNoDebugToolsTest`; `AppRootViewModelTest`, `DispatchViewModelTest`, `TransitViewModelTest`, `HandoverViewModelTest`, `AlertsViewModelTest`, `ScreenTabsTest` |
 | 16 | Build pinned to one PC, a test hit a live server, old target SDK, no CI | Closed. A clean clone builds (Gate 1), and CI runs on GitHub: unit tests, lint, release build, database tests and the firmware tests (first green run 26 Nov) | `OfflineTestGuardTest`; the clean-clone build (`PROGRESS.md`, Gate 1); https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/45842949385 |

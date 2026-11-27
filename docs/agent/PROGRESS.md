@@ -1,20 +1,30 @@
 # Progress
 
-**Next action (26 Nov, 22:35, stopped at a usage limit):** 5.2 code done and proven on the S24 (screen off, deep
-Doze, 13 min of airplane mode: readings 59 to 72 recorded offline reached the server in order 4 s after reconnecting,
-22:32). Firmware done (39/39). 5.4 done. Still to do, in order:
-1. `git stash list`: "honesty pass, untested" holds screen-text edits (Phone A/B, Supabase Polling, Simulated Time,
-   Worker ID hidden for server shipments, Go to Dispatch only for senders, handed-over dialog). Apply, run the full
-   proof, commit.
-2. Finish the S24 run: the receiver (emulator, still signed in, watching `SHIP-49A74F`) records PASS; expect
-   TRANSFERRED/ACCEPTED (the reinstall gap was 2 min 6 s). Then `SHIP-1D87CC`: `am kill` (pid unchanged), a real
-   kill (`run-as … kill -9`), an alert raised offline reaching the server. Needs the owner to unlock the S24.
-   A full 30-minute airplane run is still owed for Gate 5 (this one was 13 minutes).
-3. 5.3 multi-leg: several couriers in "Courier's Email", recording starts when custody comes to a courier
-   (Transit watch and Handover), a 3-phone domain test, then a multi-leg `LiveSupabaseIntegrationTest` case on the
-   local stack. 5.5 audits, 5.6 release (keystore in `D:\cch-keys`), Gate 5 with its reviewer (also review the
-   window fix and the recording service: the automatic security reviews failed).
-4. Then 4.3 and 4.1 (`05b342e`-compatible), Gate 4 "met without hardware", Phase 6, Gate 6.
+**Next action (27 Nov, ~16:05, the owner stopped the session to leave):** done today, all on `rebuild/trust-core`:
+the honesty pass, the receiver's PASS on `SHIP-49A74F`, GPS in the recording service, finding 11, two bugs found on
+the emulator (a "Tamper Detected" flash that moved the Handover form; false DATA_GAP alerts from a watching phone),
+location coming back after a background restart, the S24 run of `SHIP-1D87CC` (kills, 74 minutes offline, an alert
+raised offline, GPS, a FAIL handover, the S24 stopping by itself), 5.3 multi-leg (fakes and the local stack), 5.5
+audit fixes (permissions, a lazy history, the product's own range). 5.6 started: the upload keystore exists in
+`D:\cch-keys`; R8, signing and version `0.5.0` are in `app/build.gradle` (see the 5.6 entry below for whether the
+signed, minified build was proven). Still to do, in order:
+1. **5.6:** `CCH_RELEASE_KEYS='D:\cch-keys\keystore.properties' ./gradlew assembleRelease`; fix any R8 missing-class
+   or keep problem; `apksigner verify`; install the release APK on the emulator (start it with
+   `-gpu swiftshader_indirect -no-snapshot`: the host renderer draws app windows black) and check it opens to
+   sign-in with no crash. Signed-in flows under R8 need a sign-in code from the owner's inbox (HANDOFF).
+2. **5.5, the rest:** intent security (only the launcher is exported; nothing reads intent extras), Play policy
+   notes (foreground service types location and connectedDevice need Play declarations; location in the data
+   safety form), on the emulator: the notifications prompt on Android 13+, accessibility labels and 48 dp targets,
+   light and dark mode, screenshots to `docs/agent/evidence/`. The permission fixes of `4793425` to be checked on a
+   device (deny twice, the button opens Settings).
+3. **Gate 5:** a fresh reviewer (one sitting, at most 25 mutants, findings to a file) with MASTER's Gate 5 criteria,
+   plus a manual security review of `gate-3..HEAD` (window fix, recording service, session change, firmware, GPS,
+   finding 11, multi-leg), because the automatic commit reviews keep failing. Evidence for the criteria is in this
+   file (S24: screen off, deep Doze overnight, kill -9, 74 minutes offline, process death). Tag `gate-5`.
+4. Phase 4: 4.3 and 4.1 (`05b342e`-compatible), Gate 4 "met without hardware"; then Phase 6 and Gate 6.
+Open findings: the courier's phone keeps a handed-over shipment as IN_TRANSIT locally; GPS in deep Doze unproven
+(screen-off GPS with the network on is proven); a watcher's "nothing has reached the server for N minutes" belongs on
+its screen (not built); 5.3 not yet on devices (needs a second courier account).
 Memory rule (owner, 24 Nov, still in force): 16 GB RAM; never Gradle and the emulator at once; full proof in the
 foreground, then `./gradlew --stop`, then the emulator; one emulator only. `PHONE = present`.
 End of every session: push the branch, make a verified bundle on D:.
