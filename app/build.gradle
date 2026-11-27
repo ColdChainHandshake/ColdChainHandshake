@@ -175,6 +175,33 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas".toString())
 }
 
+// R8's full mode keeps a class a -keep rule names, but not its no-argument constructor unless the rule says so.
+// Firebase's component discovery, which ML Kit uses for the QR scanner, builds each *Registrar with that constructor
+// by reflection; without it the release app logged "Could not instantiate ...Registrar" on the S24 (27 Nov). Unit
+// tests run unminified code and can't see this, so the release build checks R8's own list of what it kept.
+def releaseSeeds = layout.buildDirectory.file('outputs/mapping/release/seeds.txt')
+tasks.register('checkReleaseKeepRules') {
+    description = 'Fails when R8 kept a component registrar without the constructor that builds it.'
+    dependsOn 'minifyReleaseWithR8'
+    def seeds = releaseSeeds
+    inputs.file(seeds)
+    doLast {
+        def lines = seeds.get().asFile.readLines()
+        def kept = lines.toSet()
+        def registrars = lines.findAll {
+            !it.contains(':') && it.endsWith('Registrar') && it != 'com.google.firebase.components.ComponentRegistrar'
+        }
+        if (registrars.isEmpty()) throw new GradleException('No component registrar in R8 seeds: has the check gone stale?')
+        def missing = registrars.findAll { name ->
+            !kept.contains("${name}: ${name.substring(name.lastIndexOf('.') + 1)}()".toString())
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException("R8 kept these without their no-argument constructor: ${missing.join(', ')}")
+        }
+    }
+}
+tasks.matching { it.name == 'assembleRelease' }.configureEach { dependsOn 'checkReleaseKeepRules' }
+
 dependencies {
     implementation project(':core-domain')
 

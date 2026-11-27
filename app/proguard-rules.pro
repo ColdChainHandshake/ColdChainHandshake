@@ -10,3 +10,10 @@
 # through ServiceLoader, and supabase-kt looks its plugins and serializers up at run time, so both are kept whole.
 -keep class io.ktor.client.engine.** { *; }
 -keep class io.github.jan.supabase.** { *; }
+
+# firebase-components 16.1.0 (pulled in by ML Kit barcode-scanning 17.3.0) keeps each ComponentRegistrar but not its
+# no-argument constructor, which R8's full mode drops; component discovery builds registrars with it by reflection.
+# Without this the QR scanner's ML Kit can't start in release. `checkReleaseKeepRules` in build.gradle guards it.
+-keepclassmembers class * implements com.google.firebase.components.ComponentRegistrar {
+    public <init>();
+}
