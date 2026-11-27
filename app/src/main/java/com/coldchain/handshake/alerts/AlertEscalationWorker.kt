@@ -7,6 +7,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.repository.AlertRepository
 import com.coldchain.handshake.repository.ShipmentRepository
 import com.coldchain.handshake.repository.TelemetryRepository
@@ -28,7 +29,8 @@ class AlertEscalationWorker @AssistedInject constructor(
     private val alerts: AlertRepository,
     private val shipments: ShipmentRepository,
     private val telemetry: TelemetryRepository,
-    private val safetyEngine: SafetyEngine
+    private val safetyEngine: SafetyEngine,
+    private val recording: RecordingStore
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -39,7 +41,10 @@ class AlertEscalationWorker @AssistedInject constructor(
         val silenceCheck = LoggerSilenceCheck(
             shipmentRepository = shipments,
             telemetryRepository = telemetry,
-            safetyEngine = safetyEngine
+            safetyEngine = safetyEngine,
+            // This phone records the shipment it remembers recording, and any kept on this phone alone. The rest it
+            // only watches, holding what it has downloaded so far.
+            recordsHere = { shipment -> shipment.genesisHash == null || shipment.id == recording.shipmentId }
         )
 
         return runCatching { listOfNotNull(silenceCheck.run(), runner.run()).minOrNull() }.fold(

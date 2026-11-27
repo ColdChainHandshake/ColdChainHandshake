@@ -27,6 +27,7 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
 import com.coldchain.handshake.safety.AlertEscalationEngine
 import com.coldchain.handshake.safety.FakeAlertRepository
@@ -77,7 +78,10 @@ class AlertNotificationsTest {
     private val workers = object : WorkerFactory() {
         override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters) =
             if (workerClassName == AlertEscalationWorker::class.java.name) {
-                AlertEscalationWorker(appContext, workerParameters, alerts, shipments, telemetry, SafetyEngine(alerts, shipments))
+                AlertEscalationWorker(
+                    appContext, workerParameters, alerts, shipments, telemetry, SafetyEngine(alerts, shipments),
+                    RecordingStore.inMemory()
+                )
             } else {
                 null
             }

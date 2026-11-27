@@ -1,6 +1,7 @@
 package com.coldchain.handshake.safety
 
 import com.coldchain.handshake.models.ProductProfiles
+import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.repository.ShipmentRepository
 import com.coldchain.handshake.repository.TelemetryRepository
@@ -10,11 +11,16 @@ import kotlinx.coroutines.flow.firstOrNull
 /**
  * Evaluation otherwise runs only when a reading arrives, so a logger that stopped would raise nothing.
  * This runs on a timer instead. It holds no state of its own, so it recovers from process death.
+ *
+ * Only a shipment whose readings this phone records ([recordsHere]) can go quiet here. One it only watches is
+ * checked up to its newest downloaded reading: whether no reading has reached the server lately is for the
+ * watching screen to say, not an alert on the shipment's record.
  */
 class LoggerSilenceCheck(
     private val shipmentRepository: ShipmentRepository,
     private val telemetryRepository: TelemetryRepository,
     private val safetyEngine: SafetyEngine,
+    private val recordsHere: suspend (Shipment) -> Boolean = { true },
     private val clock: () -> Long = System::currentTimeMillis
 ) {
 
@@ -32,8 +38,13 @@ class LoggerSilenceCheck(
 
         return moving.mapNotNull { shipment ->
             val events = telemetryRepository.getTemperatures(shipment.id).firstOrNull().orEmpty()
-            safetyEngine.processTelemetryAndEnforceSafety(shipment, events, now, windowEnd = now)
+            // A phone that only watches a shipment holds what it has downloaded so far, so the time since its newest
+            // reading is its own download's silence, not the logger's. Its readings are still checked, up to the last.
+            val recordedHere = recordsHere(shipment)
+            val windowEnd = if (recordedHere) now else events.maxOfOrNull { it.timestamp } ?: return@mapNotNull null
+            safetyEngine.processTelemetryAndEnforceSafety(shipment, events, now, windowEnd = windowEnd)
                 .alertSaveResult?.getOrThrow()
+            if (!recordedHere) return@mapNotNull null
 
             val silenceLimit = ProductProfiles.byId(shipment.productProfileId).maxSilenceMs
             val lastHeard = events.maxOfOrNull { it.timestamp } ?: shipment.journeyStartedAt

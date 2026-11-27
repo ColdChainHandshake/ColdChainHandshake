@@ -112,6 +112,30 @@ class LoggerSilenceCheckTest {
         assertEquals(ShipmentStatus.QUARANTINED, shipments.savedShipments.getValue("SHIP-1").status)
     }
 
+    // Found on the dev project (27 Nov): a receiver's phone, opened after a night switched off, recorded "No readings for
+    // 718:54" on the server for SHIP-49A74F, whose readings were all there, never more than 125 s apart. It measured
+    // from the newest reading it had downloaded, so the silence was its own download's, not the logger's.
+    @Test
+    fun aShipmentThisPhoneOnlyWatchesRaisesNoGapForReadingsNotYetDownloaded() = runBlocking {
+        val lastReading = t0 + 5 * minute
+        prepare(lastReadingAt = lastReading)
+
+        val next = LoggerSilenceCheck(shipments, telemetry, engine, recordsHere = { false }) { lastReading + 12 * 60 * minute }.run()
+
+        assertTrue(alerts.savedAlerts.toString(), alerts.savedAlerts.isEmpty())
+        assertNull("nothing to wake up for: the next reading comes with a download", next)
+    }
+
+    @Test
+    fun aShipmentThisPhoneOnlyWatchesStillRaisesWhatItsDownloadedReadingsShow() = runBlocking {
+        shipments.saveShipment(moving())
+        telemetry.saveTemperatures(ownReadings(30 * minute, 12.0)).getOrThrow()
+
+        LoggerSilenceCheck(shipments, telemetry, engine, recordsHere = { false }) { t0 + 12 * 60 * minute }.run()
+
+        assertEquals(listOf(AlertType.TEMPERATURE_BREACH), alerts.savedAlerts.map { it.type })
+    }
+
     @Test
     fun shipmentsThatAreNotMovingAreLeftAlone() = runBlocking {
         listOf(ShipmentStatus.CREATED, ShipmentStatus.DISPATCHED, ShipmentStatus.ACCEPTED, ShipmentStatus.QUARANTINED)

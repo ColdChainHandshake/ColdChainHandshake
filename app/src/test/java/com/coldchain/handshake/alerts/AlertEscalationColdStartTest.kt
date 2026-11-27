@@ -14,6 +14,14 @@ import com.coldchain.handshake.di.ServerModule
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
 import com.coldchain.handshake.models.EscalationLevel
+import com.coldchain.handshake.models.Shipment
+import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.models.SyncStatus
+import com.coldchain.handshake.models.TemperatureEvent
+import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.recording.RecordingStore
+import com.coldchain.handshake.repository.ShipmentRepository
+import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.AlertRepository
 import com.coldchain.handshake.repository.ColdChainRemote
@@ -61,6 +69,9 @@ class AlertEscalationColdStartTest {
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var alerts: AlertRepository
     @Inject lateinit var startup: AppStartup
+    @Inject lateinit var shipments: ShipmentRepository
+    @Inject lateinit var telemetry: TelemetryRepository
+    @Inject lateinit var recording: RecordingStore
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
@@ -96,6 +107,46 @@ class AlertEscalationColdStartTest {
 
         assertEquals(ListenableWorker.Result.success(), result)
         assertEquals(EscalationLevel.SUPERVISOR, alerts.getOpenAlerts().single().escalationLevel)
+    }
+
+    /** A server shipment on the move whose newest reading on this phone is twelve hours old. */
+    private fun aShipmentLastHeardTwelveHoursAgo(id: String) = runBlocking {
+        val genesis = "a".repeat(64)
+        val lastHeard = System.currentTimeMillis() - 12 * 60 * 60_000L
+        shipments.adoptRemoteShipment(
+            Shipment(id, id, "LOG-1", "A", "B", "W-1", ShipmentStatus.IN_TRANSIT, journeyStartedAt = lastHeard - 5 * 60_000L, genesisHash = genesis)
+        ).getOrThrow()
+        val readings = HashChainService.buildChain(
+            (4 downTo 0).map { back ->
+                TemperatureEvent("TE-$id-$back", id, "LOG-1", lastHeard - back * 60_000L, 5.0, "", "", SyncStatus.SYNCED)
+            },
+            genesis
+        )
+        telemetry.saveTemperatures(readings).getOrThrow()
+    }
+
+    // Found on the dev project (27 Nov): the receiver's phone recorded three DATA_GAP alerts on SHIP-49A74F, one for
+    // "718:54", measured from the newest reading it had downloaded before a night switched off. The readings were all
+    // on the server. Only the phone that records a shipment can say its logger went quiet.
+    @Test
+    fun theWorkerRaisesNoGapForAShipmentThisPhoneOnlyWatches() = runBlocking {
+        aShipmentLastHeardTwelveHoursAgo("SHIP-W")
+        recording.shipmentId = null
+
+        TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workerFactory).build().doWork()
+
+        assertTrue(alerts.getOpenAlerts().toString(), alerts.getOpenAlerts().none { it.type == AlertType.DATA_GAP })
+    }
+
+    @Test
+    fun theWorkerRaisesAGapForTheShipmentThisPhoneRecords() = runBlocking {
+        aShipmentLastHeardTwelveHoursAgo("SHIP-R")
+        recording.shipmentId = "SHIP-R"
+
+        TestListenableWorkerBuilder<AlertEscalationWorker>(context).setWorkerFactory(workerFactory).build().doWork()
+
+        assertEquals(listOf(AlertType.DATA_GAP), alerts.getOpenAlerts().map { it.type })
+        recording.shipmentId = null
     }
 
     @Test
