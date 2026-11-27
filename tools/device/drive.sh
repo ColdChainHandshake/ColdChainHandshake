@@ -25,6 +25,8 @@ screen() { lay | python -I "$DEVICE_TOOLS/list_screen.py"; }
 tap() {
     local xy
     xy=$(lay | python -I "$DEVICE_TOOLS/find_element.py" "$1" "${2:-0}") || { echo "TAP FAILED: $1"; return 1; }
+    # Two numbers only: they reach the device's shell (Gate 5 review S12).
+    [[ "$xy" =~ ^[0-9]+\ [0-9]+$ ]] || { echo "TAP FAILED: odd position '$xy'"; return 1; }
     "$A" -s "$S" shell input tap $xy
     sleep "${3:-2}"
 }
