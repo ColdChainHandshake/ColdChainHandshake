@@ -47,6 +47,11 @@ wrong about the world: the first real run found a server rule the fake server di
   handover's two confirmations on the same head from two physical devices; each courier's phone stopped recording by
   itself when custody moved, and B's phone showed ACCEPTED. Sign-up, sign-in, uploads, GPS, the scanner and
   confirmations all ran under R8 with no class or serialization error in the logs.
+- **Process death while offline (28 Nov, `SHIP-192472`, the S24):** Gate 5's review found by reading the library
+  that a restart with no signal could stop recording; reproduced with the real client (the account turned signed out)
+  and fixed. On the S24, with only the app's network cut for 53 minutes, its process was killed outright; Android
+  restarted it and recording carried on with no signal; once the network returned all 60 readings reached the server,
+  in order, none missing, at most 61 s apart across the kill. Before 28 Nov a kill had only been tried online.
 - **Permissions on devices (27 Nov, `SHIP-CB7F34`):** a courier who refuses Nearby devices and location twice still
   takes custody, is offered the prompt again from Transit, then Settings, which opens. A courier taking over on
   Handover (the S24, permissions revoked) was asked for both before their confirmation was sent, and then recorded

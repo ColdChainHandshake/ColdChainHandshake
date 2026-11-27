@@ -198,6 +198,28 @@ Two, Gate3 Courier, Gate3 Receiver).
   while readings arrived, so one tap missed (nothing wrong was sent; the server shows the confirmation only after the
   retap). Recorded for Phase 6
 
+### Gate 5 S1 on the S24: process death after 53 minutes offline, `SHIP-192472`: `done` (01:03 to 02:03, 28 Nov)
+
+Debug build of `2e73ea1` on the S24 (Gate3 Courier). The sender (emulator) created and dispatched `SHIP-192472`; the
+emulator was then closed. Run with `tools/device/offline_restart.sh` (`0935cec`); only the app's network was cut, the
+phone stayed online.
+- [x] Take Custody 01:03:08, foreground `0x18`; reading 1 on the server at 01:03:09. `app_offline` at 01:04:06
+- [x] Offline: 19 readings on the phone at 01:21, 35 at 01:37, 54 at 01:57 (53 not sent), still in the foreground
+- [x] **`kill_app` at 01:57:07** (`run-as … kill -9`, pid 29454) after 53 minutes offline, so the access token was past
+  its refresh point. Android restarted the service (pid 5778), in the foreground as `0x18` within 20 s, no FATAL.
+  Recording carried on with no signal: readings 55 at 01:57:37, 56, 57 at 01:59:39 … 59 at 02:01:40 on the phone
+- [x] `app_online` at 02:02:25. The phone's queue was empty at 02:02:37. Edge logs: two `register_device` 401s at
+  02:02:26 (the stale token, as sync started), the repository's retry refreshed the token at 02:02:30 (200), then
+  `register_device` 204 and `append_readings` 200
+- [x] **Server:** 60 readings, seq 1 to 60, every step 1, at most 61 s apart, one device; across the kill 54 at
+  01:56:36 and 55 at 01:57:37. The readings made offline reached the server from 02:02:32 to 02:02:43
+
+```text
+select … from readings where shipment_id='SHIP-192472'
+  readings 60 | seq 1..60 | max_seq_step 1 | max_gap_s 61 | devices 1 | offline readings received 02:02:32..02:02:43
+  around the kill: 53@01:55:36, 54@01:56:36, [kill 01:57:07], 55@01:57:37, 56@01:58:38, 57@01:59:39
+```
+
 ### Courier A's final status, lint, audits: `done`
 
 - [x] `db0ce9b`, test-first: opening a shipment this phone holds asks the server for its status first (no polling);
