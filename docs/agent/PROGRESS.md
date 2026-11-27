@@ -1,5 +1,14 @@
 # Progress
 
+**Update (28 Nov, 01:45):** done since the review, each test-first and committed: S1 (`2e73ea1`: reproduced with the
+real client, an offline restart turned the courier SignedOut or left Loading), S6 with mutants 20 and 23 (`3caf5f3`),
+mutant 10 (`3382063`), C8 and S4b (`a405bb4`), S4 (`d18c53b`), S7 (`0a1d3e4`), S3 (`bd0f1ea`), S12 (`001b0bb`),
+STATUS C3 and C6. The S1 device run is under way: `SHIP-192472` on the S24's debug app (build `2e73ea1`), its network
+cut since 01:04 (`tools/device/offline_restart.sh`), recording offline (35 readings at 01:37, in the foreground);
+`kill_app` due at 01:55. **The full proof at `001b0bb` was stopped by Claude Code for low memory** and may not be
+restarted without the owner (HANDOFF Q5), so `gate-5` waits for it. Left: rotation on the current build (C2),
+STATUS C1/C2/C7, the reviewer's re-check after the full proof.
+
 **Next action (28 Nov, ~01:00): Gate 5 review returned NOT MET** (`docs/agent/gate5_review.md`). In order:
 1. **S1 (blocks the gate):** a restart offline with the access token past 80 % of its life leaves the account
    Loading; `RecordingLoop.restore` gives up after 30 s and the service stops. Reproduce with the real auth client in
