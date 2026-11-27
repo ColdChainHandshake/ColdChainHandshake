@@ -2,6 +2,7 @@ package com.coldchain.handshake.data.remote
 
 import com.coldchain.handshake.crypto.DeviceSigner
 import com.coldchain.handshake.repository.AccountState
+import com.coldchain.handshake.repository.ColdChainRemote
 import com.coldchain.handshake.repository.FakeColdChainServer
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.RemoteRejection
@@ -25,7 +26,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -173,6 +176,30 @@ class SupabaseAccountRepositoryTest {
         repository.completeProfile(" Ana ", MemberRole.RECEIVER).getOrThrow()
 
         assertEquals(MemberRole.RECEIVER, (repository.state.value as AccountState.Ready).profile.role)
+    }
+
+    // The "About you" form calls this from its own scope, which leaves the screen the moment they are Ready. On the
+    // emulator (27 Nov) a new courier's phone was registered only when the app was opened again.
+    @Test
+    fun completingAProfileRegistersThePhoneEvenWhenTheFormLeavesAtOnce() = runBlocking {
+        val slowServer = object : ColdChainRemote by server {
+            override suspend fun registerDevice(deviceId: String, publicKey: String): Result<Unit> {
+                delay(200)
+                return server.registerDevice(deviceId, publicKey)
+            }
+        }
+        val newcomer = SupabaseAccountRepository(client, slowServer, signer, { "device-1" }, cache, scope)
+        newcomer.verifyCode("ana@example.com", "123456").getOrThrow()
+        withTimeout(RETRIES_GIVE_UP_MS) { newcomer.state.first { it is AccountState.NeedsProfile } }
+        profileRows = """[{"display_name":"Ana","role":"courier"}]"""
+
+        val form = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        form.launch { newcomer.completeProfile("Ana", MemberRole.COURIER) }
+        withTimeout(RETRIES_GIVE_UP_MS) { newcomer.state.first { it is AccountState.Ready } }
+        form.cancel()
+
+        withTimeout(2_000) { while (server.devices.isEmpty()) delay(10) }
+        assertEquals("public-key", server.devices["device-1"])
     }
 
     @Test

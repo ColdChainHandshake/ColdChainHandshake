@@ -39,7 +39,7 @@ class SupabaseAccountRepository(
     private val signer: DeviceSigner,
     private val deviceId: () -> String,
     private val profileCache: ProfileCache,
-    scope: CoroutineScope
+    private val scope: CoroutineScope
 ) : AccountRepository {
 
     private val _state = MutableStateFlow<AccountState>(AccountState.Loading)
@@ -109,8 +109,12 @@ class SupabaseAccountRepository(
         Unit
     }
 
+    /**
+     * The form that asks leaves the screen as soon as the person is Ready, cancelling its own coroutine, so what follows
+     * (registering this phone) runs in the repository's scope and finishes anyway.
+     */
     override suspend fun completeProfile(displayName: String, role: MemberRole): Result<Unit> =
-        remote.completeProfile(displayName.trim(), role).onSuccess { arrive() }
+        remote.completeProfile(displayName.trim(), role).onSuccess { scope.launch { arrive() }.join() }
 
     override suspend fun refresh(): Result<Unit> = attempt { arrive() }
 
