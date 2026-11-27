@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
@@ -39,8 +40,10 @@ fun <T> OptionSelector(
         )
         options.forEach { option ->
             Row(
+                // A radio button with no click of its own drops its minimum touch size, so the row keeps 48 dp.
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .selectable(
                         selected = option == selected,
                         onClick = { onSelect(option) },
