@@ -108,6 +108,71 @@ the emulator with `adb install -r` (still signed in). The S24 kept the build of 
                                                                                                     4 + 14 + 13, 0 failed
 ```
 
+### GPS in the recording service, finding 11, and the honesty leftovers: `done` in code
+
+- [x] **GPS** (`e942e87`, `f098dcc`): `RecordingServiceTest` 12 (6 new: location type, no location, Android refusing the
+  type, location allowed later, stopping, a fix queued; the refusal test fails against a mutant without the
+  `connectedDevice` fallback, `expected:<16> but was:<0>`), `LocationRecorderTest` 4, `SyncServiceTest` +3 (queued
+  offline then sent, refused set aside, local never sent), `ColdChainDatabaseMigrationTest` +1 and the v5 hash,
+  `TransitViewModelTest` +4. Found by the advisor before the device run: after a background restart nothing gave
+  location back and the card read the permission, not the service; fixed test-first (`onAppOpened`, `active`)
+- [x] **Finding 11** (`1a4691c`): `PollBackoffTest` 5, `ShipmentHistorySyncCoordinatorTest.aFetchWithNothingNewAsksOnlyForTheHead`
+  (failed first: 2 readings requests, expected 1), `TransitViewModelTest.whileWatchingAndNothingChangesTheServerIsAskedLessAndLess`
+  (failed first: 80 requests in the third minute; now at most 6), `RecordingLoopTest.whileWaitingWithNothingNewRecordedTheCourierDoesNotConfirmAgain`
+  (failed first: 14 confirmations, expected 1), `withNoHandoverWaitingCustodyIsReadOnlyNowAndThen` (failed first: 6),
+  `whenTheReceiverConfirmsWhileTheCourierWaitsRecordingStopsAtOnce` (a mutant without the new path times out)
+- [x] Honesty leftovers (`af29c6e`): readings by number, "On this phone", no account UUID as "Worker" on Transit or
+  Handover; "Checked every 3 to 30 s"; a watcher's card no longer shows its own position as the courier's
+- Test isolation fixed (`89d5009`): `HandoverViewModelTest` cancels its ViewModels before the next test sets Main
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+  12:01  BUILD FAILED: debug 557, 2 failed (HandoverViewModelTest: "Dispatchers.Main is used concurrently with setting it")
+  after 89d5009: BUILD SUCCESSFUL in 3m 39s | core-domain 127 failed 0 | debug 557 failed 0 | release 499 failed 0 | lint 0 errors (22 warnings)
+```
+
+### Device: `SHIP-1D87CC` on the S24 with the GPS build (`doing`, from 12:13)
+
+Debug APK of `f098dcc` (BuildConfig: dev ref 1, demo 0, `sb_secret_` 0). The phone's location is the owner's real
+location: no coordinates, screenshots or place names are kept anywhere, only counts, accuracy and delays.
+
+- [x] **Room 4 → 5 on a real phone** (finding 10): before the install the S24's database was version 4 with 797
+  contiguous readings of `SHIP-49A74F`; after it, version 5, the same 797, an empty `gps_points`
+- [x] **Take Custody asked for location** ("While using the app", precise). `dumpsys activity services`:
+  `isForeground=true types=0x00000018` (`connectedDevice|location`). Reading 1 at 12:14:57
+- [x] **The first GPS points on the dev project:** each fix reached the server 1 to 2 s after it was made, accuracy
+  within 14 to 20 m, one a minute with the readings
+- [x] **`am kill`**: pid 6824 before and after, still `0x18`
+- [x] **A real kill** (`run-as … kill -9`, 12:15:50): Android restarted the service 4 s later, pid 8270, again in the
+  foreground with `0x18`, location included (a restart by the system counts as started by a system component).
+  Reading 2 at 12:15:58, 61 s after reading 1: no gap. GPS fix 2 at 12:15:58, 1.9 s to the server
+- [x] **The courier's requests while recording, in the background** (12:16:30 to 12:21:30): 20 in 5 minutes, 4 a
+  minute (readings, GPS, head, custody, one each). This morning, waiting for the receiver on the old build: ~48 a minute
+- [x] **The courier confirmed the handover to the receiver while online** (12:23): "Confirmed. This phone keeps recording…"
+- [x] **Finding 11's numbers on the dev project, after** (edge logs per user; before = this morning): the receiver
+  watching on Transit while readings arrived, 45 requests in 3 min 50 s, ~12 a minute (before ~89); the same watcher
+  while the courier was offline and nothing changed, 18 in 5 minutes, ~3.6 a minute (head and custody every ~33 s);
+  the courier waiting after release, 52 in 3 minutes, ~17 a minute (before ~48), with 3 confirmations, one per new
+  reading (before: 87 in 10 minutes, 77 refused as already made); the courier recording with nothing waiting, 4 a minute
+- [x] **Offline 74 minutes** (airplane mode on by adb at 12:28:45, off at about 13:42, by hand on the phone: the
+  owner). Heat spike on at 12:28:52 (reading 15 at 10.4 °C). Screen off and a simulated unplug at 12:29:35; deep
+  Doze (`mState=IDLE`) by 12:36:30. The phone's own queue, read with `run-as`: 22 readings (8 unsent) at 12:36, and
+  a TEMPERATURE_BREACH alert raised offline at 12:34:09, shipment QUARANTINED on the phone
+- [x] **After reconnecting:** the 72 readings made offline (seq 15 to 86, 12:29:06 to 13:41:00) all reached the server
+  at 13:42:50, in order; across the shipment's 186 readings no two are more than 61 s apart. The alert reached the
+  server at 13:42:51, already escalated to PHARMACIST while offline. The one GPS point recorded offline (12:29)
+  arrived at 13:42:50; no other fix was made offline (indoors, airplane mode)
+- [x] **GPS with the screen off, network on:** from 14:01:58 to 14:30:44 (battery history) the screen was off and a
+  fix reached the server every minute, ~1 s after it was made. Not in Doze then: GPS in deep Doze is unproven
+- [x] **No false gap alert from the watching phone:** the receiver watched the courier's silence for 8 minutes past
+  the 3-minute limit; no alert from the receiver's user on the server since 10:47 (today's fix `91db6ea` on a device)
+- The owner used the phone during the run (power key at 12:41 and 13:40, airplane off ~13:42). The screen was on
+  12:41 to 13:04; the rest of the offline run was screen-off. `dumpsys battery reset` at 15:23
+- **The emulator, first try:** an ANR "Input dispatching timed out (Application does not have a focused window)" at
+  12:16:47, after a cold boot and a fresh install, while the driver tapped before the window was focused. The ANR
+  trace's main thread is idle in `Looper.pollOnce`, so not stuck in app code; the emulator then drew every app window
+  black. Cold-booted again with `-no-snapshot`; the app then opened normally (focus checked before any tap)
+
 ## Session of 26 Nov 2026
 
 ### Status at session start
