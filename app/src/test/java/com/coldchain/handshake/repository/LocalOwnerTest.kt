@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.local.DatabaseProvider
+import com.coldchain.handshake.data.local.entities.GpsPointEntity
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import kotlinx.coroutines.CoroutineScope
@@ -79,6 +80,19 @@ class LocalOwnerTest {
         assertNotNull(session.localOwnerProblem.value)
         assertEquals(null, session.confirmedOwner.value)
         assertEquals(3, telemetryRepository.getTemperatures("SHIP-1").first().size)
+    }
+
+    // Gate 5 review S7 (28 Nov): unsent location points weren't counted, so they were deleted with the rest.
+    @Test
+    fun anotherPersonsUnsentLocationIsKeptAndTheNewSessionRefused() = runBlocking {
+        leaveReadings(SyncStatus.SYNCED)
+        db.gpsPointDao().insert(GpsPointEntity("GPS-1", "SHIP-1", 10.0, 76.0, 15f, 1_700_000_000_000L))
+
+        signIn("someone-new")
+
+        withTimeout(5_000) { while (!account.signedOut) delay(20) }
+        assertNotNull(session.localOwnerProblem.value)
+        assertEquals(1, db.gpsPointDao().getPending().size)
     }
 
     @Test

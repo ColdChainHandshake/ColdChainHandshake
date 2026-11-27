@@ -75,7 +75,9 @@ class LocalSession(
         val onServer = db.shipmentDao().getAllShipmentsDirect().filter { it.genesisHash != null }.map { it.id }.toSet()
         return db.temperatureEventDao().getPendingEvents().count { it.shipmentId in onServer } +
             db.alertDao().getPendingAlerts().count { it.shipmentId in onServer } +
-            db.handoverDao().getPendingHandovers().count { it.shipmentId in onServer }
+            db.handoverDao().getPendingHandovers().count { it.shipmentId in onServer } +
+            // Location points are records too, and were deleted unsent before (Gate 5 review S7).
+            db.gpsPointDao().getPending().count { it.shipmentId in onServer }
     }
 
     private suspend fun forgetLocalData() {
