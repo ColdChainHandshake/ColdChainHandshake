@@ -49,6 +49,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.compose.material3.TextButton
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,12 +67,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.coldchain.handshake.debugtools.DebugTools
+import com.coldchain.handshake.models.ProductProfile
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.recording.RecordingService
+import com.coldchain.handshake.ui.components.PermissionSettings
 import com.coldchain.handshake.ui.components.QRScannerDialog
 import com.coldchain.handshake.ui.components.TemperatureCard
 import com.coldchain.handshake.ui.theme.PrimaryCold
@@ -159,11 +163,24 @@ fun TransitScreen(
     }
 
     // Allowed later from the location card: the recording already running adds location without starting again.
+    // Refused for good, asking again does nothing: the location card then opens this app's settings instead.
+    var locationRefusedForGood by remember { mutableStateOf(false) }
     val locationLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) {
+    ) { results ->
         locationAllowed = locationPermissions.any(::granted)
+        locationRefusedForGood = !locationAllowed &&
+            PermissionSettings.refusedForGood(context, locationPermissions.toList(), results)
         if (locationAllowed) viewModel.keepRecordingInBackground()
+    }
+
+    // Permissions can change in Settings while this screen is away, so they are read again each time it comes back.
+    LifecycleResumeEffect(Unit) {
+        val nowAllowed = locationPermissions.any(::granted)
+        if (nowAllowed && !locationAllowed) viewModel.keepRecordingInBackground()
+        locationAllowed = nowAllowed
+        if (nowAllowed) locationRefusedForGood = false
+        onPauseOrDispose { }
     }
 
     // ----------------------------------------------------
@@ -223,6 +240,9 @@ fun TransitScreen(
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall
             )
+            TextButton(onClick = { PermissionSettings.open(context) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("Open Settings")
+            }
             Spacer(modifier = Modifier.height(8.dp))
         }
         custodyNotice?.let {
@@ -592,7 +612,11 @@ fun TransitScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(sortedEvents, key = { it.id }) { event ->
-                        TelemetryEventRow(event = event, timeFormatter = timeFormatter)
+                        TelemetryEventRow(
+                            event = event,
+                            timeFormatter = timeFormatter,
+                            profile = ProductProfiles.byId(currentShipment?.productProfileId ?: ProductProfiles.DEFAULT.id)
+                        )
                     }
                 }
             }
@@ -859,11 +883,14 @@ fun TransitScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Button(
-                            onClick = { locationLauncher.launch(locationPermissions) },
+                            onClick = {
+                                if (locationRefusedForGood) PermissionSettings.open(context)
+                                else locationLauncher.launch(locationPermissions)
+                            },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = StatusAmber)
                         ) {
-                            Text("Allow Location", fontSize = 12.sp)
+                            Text(if (locationRefusedForGood) "Allow Location in Settings" else "Allow Location", fontSize = 12.sp)
                         }
                     } else if (!ui.locating) {
                         // Allowed, but the recording service isn't recording it: not recording at all, restarted in the
@@ -979,7 +1006,11 @@ fun TransitScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(sortedEvents, key = { it.id }) { event ->
-                        TelemetryEventRow(event = event, timeFormatter = timeFormatter)
+                        TelemetryEventRow(
+                            event = event,
+                            timeFormatter = timeFormatter,
+                            profile = ProductProfiles.byId(currentShipment?.productProfileId ?: ProductProfiles.DEFAULT.id)
+                        )
                     }
                 }
             }
@@ -1009,9 +1040,11 @@ private fun IconButtonWithAction(
 @Composable
 private fun TelemetryEventRow(
     event: TemperatureEvent,
-    timeFormatter: SimpleDateFormat
+    timeFormatter: SimpleDateFormat,
+    profile: ProductProfile
 ) {
-    val isExcursion = event.temperature > 8.0 || event.temperature < 2.0
+    // Out of range for this shipment's own product, not a fixed 2 to 8 °C.
+    val isExcursion = event.temperature !in profile.minC..profile.maxC
     val tempColor = if (isExcursion) StatusRed else StatusGreen
 
     val (syncBg, syncTextColor) = when (event.syncStatus) {

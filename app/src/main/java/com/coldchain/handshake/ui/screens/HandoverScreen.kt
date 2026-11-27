@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -63,6 +65,7 @@ import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverVerdictEngine
 import com.coldchain.handshake.models.HandoverVerdict
+import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.repository.HistorySyncState
@@ -443,16 +446,17 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
                 } else {
-                    // Show compact table of historical telemetry (up to 15 events shown, scrollable)
-                    Column(
+                    // The whole trip, scrollable. Lazy, because a trip has hundreds of readings and a new one arrives
+                    // every minute; only the rows on screen are built. Out of range means the shipment's own product.
+                    val profile = ProductProfiles.byId(shipment.productProfileId)
+                    LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (telemetryEvents.size > 5) 160.dp else (telemetryEvents.size * 32).dp)
-                            .verticalScroll(rememberScrollState()),
+                            .height(if (telemetryEvents.size > 5) 160.dp else (telemetryEvents.size * 32).dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        telemetryEvents.forEach { event ->
-                            val isWarm = event.temperature > 8.0 || event.temperature < 2.0
+                        items(telemetryEvents, key = { it.id }) { event ->
+                            val isWarm = event.temperature !in profile.minC..profile.maxC
                             val tempColor = if (isWarm) StatusRed else StatusGreen
 
                             Surface(

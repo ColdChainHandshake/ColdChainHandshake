@@ -59,6 +59,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
@@ -92,11 +93,23 @@ fun QRScannerDialog(
     var manualCodeInput by remember { mutableStateOf("") }
     var scanCompleted by remember { mutableStateOf(false) }
 
+    // Refused for good, asking again does nothing: the button then opens this app's settings instead.
+    var cameraRefusedForGood by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasCameraPermission = isGranted
         permissionRequested = true
+        cameraRefusedForGood = !isGranted && PermissionSettings.refusedForGood(
+            context, listOf(Manifest.permission.CAMERA), mapOf(Manifest.permission.CAMERA to false)
+        )
+    }
+
+    // The camera may have been allowed in Settings meanwhile.
+    LifecycleResumeEffect(Unit) {
+        hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        onPauseOrDispose { }
     }
 
     LaunchedEffect(Unit) {
@@ -282,9 +295,12 @@ fun QRScannerDialog(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(
-                                onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }
+                                onClick = {
+                                    if (cameraRefusedForGood) PermissionSettings.open(context)
+                                    else permissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
                             ) {
-                                Text("Grant Camera Permission")
+                                Text(if (cameraRefusedForGood) "Allow Camera in Settings" else "Grant Camera Permission")
                             }
                         }
                     }
