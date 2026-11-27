@@ -74,6 +74,22 @@ class ShipmentWorkflowTest {
         assertEquals(ShipmentStatus.CREATED, server.shipments.getValue("SHIP-9").status)
     }
 
+    // 5.3, multi-leg custody: the sender names every courier of the trip in the courier field, separated by commas.
+    @Test
+    fun severalCourierEmailsAreEachAddedAsACourier() = runBlocking {
+        server.knownEmails += "courier-b@example.com"
+        workflow.create(draft).getOrThrow()
+
+        workflow.addPeople("SHIP-9", " courier@example.com, courier-b@example.com ", "receiver@example.com").getOrThrow()
+
+        val people = server.members.getValue("SHIP-9")
+        assertEquals(
+            listOf("courier@example.com", "courier-b@example.com"),
+            people.filter { it.role == MemberRole.COURIER }.map { it.userId }
+        )
+        assertEquals(listOf("receiver@example.com"), people.filter { it.role == MemberRole.RECEIVER }.map { it.userId })
+    }
+
     @Test
     fun dispatchingWaitsForTheServer() = runBlocking {
         workflow.create(draft).getOrThrow()

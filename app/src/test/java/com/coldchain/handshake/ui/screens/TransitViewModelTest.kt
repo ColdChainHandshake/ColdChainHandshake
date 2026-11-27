@@ -282,6 +282,35 @@ class TransitViewModelTest {
         visible.cancel()
     }
 
+    // 5.3, multi-leg custody: a second courier watching on Transit when custody comes to them starts recording, after
+    // fetching the history so their phone carries the same chain on.
+    @Test
+    fun whileWatchingCustodyComingToMeAsACourierStartsRecordingHere() = runTest {
+        val genesis = server.seedShipment("SHIP-1", custodian = "courier")
+        courierSends(genesis, 1)
+        courierSends(genesis, 2)
+        signInAs("courier-b", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(3_500)
+        assertFalse(simulator.isRunning.value)
+
+        server.custody["SHIP-1"] = CustodyState(2, "courier-b")
+        advanceTimeBy(31_000)
+
+        assertTrue(vm.state.value.isCustodian)
+        assertFalse(vm.state.value.watching)
+        assertTrue("recording on this phone", simulator.isRunning.value)
+        assertFalse(simulator.isMonitorOnly.value)
+        assertEquals(1, backgroundStarts)
+        // The two readings courier A sent, then any this phone has made since, as one chain from the server's genesis.
+        val held = telemetry.getTemperatures("SHIP-1").first().sortedBy { it.seq }
+        assertTrue("${held.size} readings", held.size >= 2)
+        assertTrue(HashChainService.verifyChain(held, genesis).valid)
+        visible.cancel()
+    }
+
     @Test
     fun whileWatchingTheCouriersLocationIsFetched() = runTest {
         server.seedShipment("SHIP-1", custodian = "courier")

@@ -35,11 +35,18 @@ class ShipmentWorkflow(
     }
 
     /**
-     * Separate from [create], so a mistyped email doesn't lose a shipment the server already holds.
+     * Separate from [create], so a mistyped email doesn't lose a shipment the server already holds. [courierEmails]
+     * may name several couriers, separated by commas, for a trip with more than one leg (5.3); each is added as a
+     * courier, then the receiver.
      */
-    suspend fun addPeople(shipmentId: String, courierEmail: String, receiverEmail: String): Result<Unit> =
-        remote.addMember(shipmentId, courierEmail.trim(), MemberRole.COURIER)
-            .mapCatching { remote.addMember(shipmentId, receiverEmail.trim(), MemberRole.RECEIVER).getOrThrow() }
+    suspend fun addPeople(shipmentId: String, courierEmails: String, receiverEmail: String): Result<Unit> {
+        val couriers = courierEmails.split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
+            .ifEmpty { listOf(courierEmails.trim()) }
+        for (courier in couriers) {
+            remote.addMember(shipmentId, courier, MemberRole.COURIER).getOrElse { return Result.failure(it) }
+        }
+        return remote.addMember(shipmentId, receiverEmail.trim(), MemberRole.RECEIVER)
+    }
 
     suspend fun dispatch(shipmentId: String): Result<Shipment> {
         val members = remote.getMembers(shipmentId).getOrElse { return Result.failure(it) }

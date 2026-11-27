@@ -626,7 +626,8 @@ private fun PeopleFields(
     OutlinedTextField(
         value = courierEmail,
         onValueChange = onCourierEmail,
-        label = { Text("Courier's Email") },
+        // Several couriers, in the order they carry it, for a trip with more than one leg (5.3).
+        label = { Text("Courier emails (commas between)") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth()
     )

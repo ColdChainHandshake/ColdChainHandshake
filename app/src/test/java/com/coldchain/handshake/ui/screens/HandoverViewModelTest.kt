@@ -12,6 +12,10 @@ import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingStore
+import com.coldchain.handshake.repository.HandoverConfirmation
+import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.models.VvmStage
@@ -94,10 +98,54 @@ class HandoverViewModelTest {
     }
 
     private val created = mutableListOf<HandoverViewModel>()
+    /** Which shipment this phone records, and how often the background recording was asked for. */
+    private val recordingStore = RecordingStore.inMemory()
+    private var backgroundStarts = 0
+    private val recorder = CourierRecorder(simulator, recordingStore) { backgroundStarts++ }
 
     private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = HandoverViewModel(
-        account, simulator, history, telemetry, alerts, handovers, server, serverHandover, orchestrator, saved
+        account, simulator, history, telemetry, alerts, handovers, server, serverHandover, orchestrator, recorder, saved
     ).also { created += it }
+
+    // 5.3, multi-leg custody: a second courier takes over on their own phone, which records from then on. Courier A's
+    // phone stops when it sees custody move, so courier B's must start at once or the trip gets a gap.
+    @Test
+    fun aCourierTakingOverFromAnotherCourierStartsRecordingOnTheirPhone() = runBlocking {
+        server.members.getValue("SHIP-1") += ShipmentMember("courier-b", MemberRole.COURIER, "Bea")
+        openOnServer("courier-b", MemberRole.COURIER)
+        server.currentUser = "courier"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = "courier-b")
+        ).getOrThrow()
+        server.currentUser = "courier-b"
+        val vm = viewModel()
+
+        vm.record(HandoverVerdict.PASS, null).join()
+
+        assertEquals("courier-b", server.custody.getValue("SHIP-1").custodianId)
+        assertEquals(ShipmentStatus.IN_TRANSIT, server.shipments.getValue("SHIP-1").status)
+        assertTrue("recording on courier B's phone", simulator.isRunning.value)
+        assertFalse(simulator.isMonitorOnly.value)
+        assertEquals("SHIP-1", recordingStore.shipmentId)
+        assertEquals(1, backgroundStarts)
+    }
+
+    @Test
+    fun aReceiverTakingOverRecordsNothing() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        server.currentUser = "courier"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = "receiver")
+        ).getOrThrow()
+        server.currentUser = "receiver"
+        val vm = viewModel()
+
+        vm.record(HandoverVerdict.PASS, null).join()
+
+        assertEquals(ShipmentStatus.ACCEPTED, server.shipments.getValue("SHIP-1").status)
+        assertFalse(simulator.isRunning.value)
+        assertEquals(0, backgroundStarts)
+    }
 
     private fun readings(count: Int = 10, genesisHash: String = genesis) = HashChainService.buildChain(
         (count - 1 downTo 0).map { back ->

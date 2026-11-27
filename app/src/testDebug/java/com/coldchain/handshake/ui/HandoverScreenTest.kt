@@ -29,6 +29,8 @@ import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.models.VvmStage
+import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.AlertRepositoryImpl
 import com.coldchain.handshake.repository.FakeAccountRepository
@@ -159,6 +161,7 @@ class HandoverScreenTest {
         server,
         serverHandover,
         orchestrator,
+        CourierRecorder(simulator, RecordingStore.inMemory()) {},
         SavedStateHandle()
     ).also { viewModels += it }
 

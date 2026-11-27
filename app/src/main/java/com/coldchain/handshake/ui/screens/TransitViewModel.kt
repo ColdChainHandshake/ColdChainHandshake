@@ -16,6 +16,7 @@ import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.recording.RecordedLocation
 import com.coldchain.handshake.recording.RecordedLocations
 import com.coldchain.handshake.repository.CustodyState
+import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.PollBackoff
 import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
@@ -254,13 +255,26 @@ class TransitViewModel @Inject constructor(
                 workflow.open(shipmentId)
             }
             val user = me
-            if (custody != null && user != null && custody.custodianId == user) {
+            if (custody != null && user != null && custody.custodianId == user && takeOverRecording(shipmentId)) {
                 _state.update { it.copy(isCustodian = true) }
                 setWatching(false)
             }
             firstRound = false
             delay(backoff.after(changed))
         }
+    }
+
+    /**
+     * Custody has come to this person. A courier (5.3, a later leg) records from now on, on a history complete up to
+     * the server's head, so their phone carries the same chain on; a receiver has nothing to record. False if the history
+     * couldn't be fetched, so the next round tries again.
+     */
+    private suspend fun takeOverRecording(shipmentId: String): Boolean {
+        if ((account.state.value as? AccountState.Ready)?.profile?.role != MemberRole.COURIER) return true
+        history.hydrateHistory(shipmentId).getOrElse { return false }
+        val shipment = shipments.getShipment(shipmentId).firstOrNull() ?: return false
+        if (shipment.status in CourierRecorder.ON_THE_MOVE && !simulator.isRunning.value) recorder.start(shipment)
+        return true
     }
 
     companion object {

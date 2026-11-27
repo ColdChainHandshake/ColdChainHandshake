@@ -17,6 +17,7 @@ import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.models.VvmStage
+import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.AlertRepository
@@ -27,6 +28,7 @@ import com.coldchain.handshake.repository.HandoverOutcome
 import com.coldchain.handshake.repository.HandoverRepository
 import com.coldchain.handshake.repository.HandoverState
 import com.coldchain.handshake.repository.HistorySyncState
+import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.PollBackoff
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentMember
@@ -112,6 +114,7 @@ class HandoverViewModel @Inject constructor(
     private val remote: ColdChainRemote,
     private val serverHandover: ServerHandover,
     private val orchestrator: HandoverOrchestrator,
+    private val recorder: CourierRecorder,
     private val saved: SavedStateHandle
 ) : ViewModel() {
 
@@ -309,6 +312,14 @@ class HandoverViewModel @Inject constructor(
                         ?.let { history.getServerHead(shipment.id).value?.headHash }
                     _state.update { it.copy(notice = notice, confirmedHead = waitingOn) }
                     serverRefresh.update { it + 1 }
+                    // A courier taking over from another courier (5.3) records from now on: the one before stops as
+                    // soon as their phone sees custody move. The history was fetched just before confirming.
+                    val taken = (result as? HandoverResult.Confirmed)?.outcome
+                    if (taken?.state == HandoverState.TRANSFERRED && taken.status in CourierRecorder.ON_THE_MOVE &&
+                        current.me?.profile?.role == MemberRole.COURIER
+                    ) {
+                        recorder.start(shipment.copy(status = taken.status))
+                    }
                 }
                 .onFailure { e -> _state.update { it.copy(error = e.message) } }
         } else {
