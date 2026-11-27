@@ -264,6 +264,21 @@ class SupabaseAccountRepositoryTest {
         assertTrue("$state", state is AccountState.Ready)
     }
 
+    // Gate 5 re-check R1: shown as signed in from the stored session, a real sign-out still signs them out.
+    @Test
+    fun signingOutWhileRestartedOfflineSignsThemOut() = runBlocking {
+        cache.save("user-1", UserProfile("Ana", MemberRole.COURIER))
+        tokenFails = true
+        logoutFails = true
+        val restarted = restartedWithAStoredSession(secondsLeft = 300)
+        withTimeout(RESTORE_WAIT_MS) { restarted.state.first { it is AccountState.Ready } }
+
+        restarted.signOut().getOrThrow()
+
+        withTimeout(RESTORE_WAIT_MS) { restarted.state.first { it is AccountState.SignedOut } }
+        assertNull(cache.stored)
+    }
+
     @Test
     fun restartedOfflineTheAccountCatchesUpOnceTheSignalReturns() = runBlocking {
         cache.save("user-1", UserProfile("Ana", MemberRole.COURIER))

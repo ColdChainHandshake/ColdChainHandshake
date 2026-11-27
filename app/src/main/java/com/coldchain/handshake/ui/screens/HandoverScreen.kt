@@ -796,8 +796,9 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
             isPendingSync -> "Waiting for every reading before the record can be checked"
             preliminaryVerdict == HandoverVerdict.PASS -> "Eligible for Acceptance"
             preliminaryVerdict == HandoverVerdict.UNKNOWN -> "The readings have a gap, so the shipment is held"
-            integrityEvaluation.state == IntegrityVerificationState.TAMPER_DETECTED -> "Ineligible / Tamper Detected"
-            else -> "Ineligible / Requirements Unmet"
+            integrityEvaluation.state == IntegrityVerificationState.TAMPER_DETECTED ->
+                "Not eligible: the record doesn't add up"
+            else -> "Not eligible: the checks above aren't met"
         }
 
         Surface(
