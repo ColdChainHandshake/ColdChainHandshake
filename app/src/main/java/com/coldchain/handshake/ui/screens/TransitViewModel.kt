@@ -4,17 +4,17 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.coldchain.handshake.alerts.AlertChecks
-import com.coldchain.handshake.di.DeviceId
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.ColdChainRemote
-import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepository
 import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordedLocation
+import com.coldchain.handshake.recording.RecordedLocations
 import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.navigation.ActiveShipmentRestorer
@@ -36,10 +36,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.UUID
 import javax.inject.Inject
 
 /**
@@ -50,7 +46,7 @@ import javax.inject.Inject
  * @property notice Why the last action didn't work.
  * @property handedOverShipmentId Set when custody moved away from this phone while it was recording.
  * @property remoteGps The custodian's last reported location, while watching.
- * @property gpsUploadStatus Whether this phone's last location reached the server.
+ * @property myLocation The newest location this phone recorded for the shipment, and whether the server has it.
  */
 data class TransitUiState(
     val shipment: Shipment? = null,
@@ -60,7 +56,7 @@ data class TransitUiState(
     val notice: String? = null,
     val handedOverShipmentId: String? = null,
     val remoteGps: GpsLocationData? = null,
-    val gpsUploadStatus: String? = null
+    val myLocation: RecordedLocation? = null
 )
 
 /**
@@ -85,7 +81,7 @@ class TransitViewModel @Inject constructor(
     private val remote: ColdChainRemote,
     private val telemetry: TelemetryRepository,
     private val recorder: CourierRecorder,
-    @DeviceId private val deviceId: String,
+    private val recordedLocations: RecordedLocations,
     private val alertChecks: AlertChecks,
     private val restorer: ActiveShipmentRestorer,
     private val saved: SavedStateHandle
@@ -113,7 +109,6 @@ class TransitViewModel @Inject constructor(
     val lastPersistenceError: StateFlow<String?> = simulator.lastPersistenceError
 
     private val me: String? get() = (account.state.value as? AccountState.Ready)?.userId
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     init {
         val savedId = saved.get<String>(KEY_SHIPMENT_ID)
@@ -126,10 +121,16 @@ class TransitViewModel @Inject constructor(
             simulator.activeShipment.collect { shipment ->
                 _state.update {
                     if (shipment?.id == it.shipment?.id) it.copy(shipment = shipment)
-                    else it.copy(shipment = shipment, isCustodian = false, remoteGps = null, gpsUploadStatus = null)
+                    else it.copy(shipment = shipment, isCustodian = false, remoteGps = null, myLocation = null)
                 }
                 saved[KEY_SHIPMENT_ID] = shipment?.id
             }
+        }
+        // The newest location the recording service queued here for the shipment on screen.
+        viewModelScope.launch {
+            simulator.activeShipment.map { it?.id }.distinctUntilChanged()
+                .flatMapLatest { id -> if (id == null) flowOf(null) else recordedLocations.latest(id) }
+                .collect { location -> _state.update { it.copy(myLocation = location) } }
         }
         viewModelScope.launch {
             account.state.collect { s -> _state.update { it.copy(signedInAs = (s as? AccountState.Ready)?.userId) } }
@@ -186,17 +187,8 @@ class TransitViewModel @Inject constructor(
         if (resolved.genesisHash != null) history.hydrateHistory(resolved.id)
     }
 
-    /** Only for a shipment the server holds, which then decides whether this person may report it. */
-    fun uploadLocation(latitude: Double, longitude: Double, accuracy: Float, timestamp: Long): Job = viewModelScope.launch {
-        val shipment = _state.value.shipment ?: return@launch
-        if (me == null || shipment.genesisHash == null) return@launch
-        val point = GpsPoint(UUID.randomUUID().toString(), shipment.id, latitude, longitude, accuracy, timestamp)
-        val status = remote.appendGpsPoints(shipment.id, deviceId, listOf(point)).fold(
-            { "Synced ${timeFormat.format(Date(timestamp))}" },
-            { "Not sent: ${it.message ?: "network issue"}" }
-        )
-        _state.update { it.copy(gpsUploadStatus = status) }
-    }
+    /** Location allowed since recording started: the recording already running adds it, without starting again. */
+    fun keepRecordingInBackground() = recorder.refreshBackground()
 
     fun acknowledgeHandover() = _state.update { it.copy(handedOverShipmentId = null) }
 

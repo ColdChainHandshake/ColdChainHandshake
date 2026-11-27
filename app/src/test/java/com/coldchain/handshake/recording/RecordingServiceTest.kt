@@ -9,7 +9,16 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
+import android.app.Notification
+import android.app.Service
+import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE as CONNECTED_DEVICE
+import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION as LOCATION
+import com.coldchain.handshake.data.local.ColdChainDatabase
+import com.coldchain.handshake.di.LocationModule
 import com.coldchain.handshake.di.ServerModule
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowService
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
@@ -48,7 +57,7 @@ import javax.inject.Inject
  * it the foreground or restarts it with nothing to record. A shipment kept on this phone alone, so nothing is sent.
  */
 @HiltAndroidTest
-@UninstallModules(ServerModule::class)
+@UninstallModules(ServerModule::class, LocationModule::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = HiltTestApplication::class)
 class RecordingServiceTest {
@@ -66,6 +75,12 @@ class RecordingServiceTest {
     @Inject lateinit var simulator: TemperatureSimulator
     @Inject lateinit var shipments: ShipmentRepository
     @Inject lateinit var store: RecordingStore
+    @Inject lateinit var database: ColdChainDatabase
+
+    private val fakeLocations = FakeLocationSource()
+
+    @BindValue @JvmField
+    val boundLocationSource: LocationSource = fakeLocations
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val local = Shipment(
@@ -166,6 +181,99 @@ class RecordingServiceTest {
         assertFalse(simulator.isRunning.value)
     }
 
+    private fun allowLocation() = shadowOf(context as Application)
+        .grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+
+    // MASTER 5.5 item 2 (finding 9's last part): the service records where the shipment is while it records it, so
+    // location goes on with the screen off like the readings. Android 14 and later need the service's `location` type
+    // for that, and the type needs the location permission.
+    @Test
+    fun withLocationAllowedItAlsoRunsAsALocationServiceAndAsksForFixes() {
+        allowNearbyDevices()
+        allowLocation()
+        recorder.startHere(local)
+
+        val service = started().get()
+
+        assertEquals(CONNECTED_DEVICE or LOCATION, service.foregroundServiceType)
+        assertTrue(fakeLocations.running)
+    }
+
+    @Test
+    fun withoutLocationItRecordsAsBeforeAndAsksForNoFixes() {
+        allowNearbyDevices()
+        recorder.startHere(local)
+
+        val service = started().get()
+
+        assertEquals(CONNECTED_DEVICE, service.foregroundServiceType)
+        assertFalse(fakeLocations.running)
+        assertFalse(shadowOf(service).isStoppedBySelf)
+    }
+
+    // Location is a while-in-use permission: Android 14 and later refuse a `location` service created while the app is
+    // in the background (a restart after the process was killed), even with the permission granted. Losing location
+    // must never cost the readings.
+    @Test
+    @Config(shadows = [RefusesTheLocationType::class])
+    fun whenAndroidRefusesTheLocationTypeItKeepsRecordingWithoutIt() {
+        allowNearbyDevices()
+        allowLocation()
+        recorder.startHere(local)
+
+        val service = started().get()
+
+        assertEquals(CONNECTED_DEVICE, service.foregroundServiceType)
+        assertTrue(shadowOf(service).lastForegroundNotificationId != 0)
+        assertFalse(fakeLocations.running)
+        assertFalse(shadowOf(service).isStoppedBySelf)
+        assertTrue(simulator.isRunning.value)
+    }
+
+    // A courier who refused location at Take Custody and allows it later, from the Transit screen, gets it on the
+    // recording already running, without starting again.
+    @Test
+    fun allowingLocationLaterAddsItToTheRecordingAlreadyRunning() {
+        allowNearbyDevices()
+        recorder.startHere(local)
+        val controller = started()
+        assertFalse(fakeLocations.running)
+
+        allowLocation()
+        controller.get().onStartCommand(Intent(context, RecordingService::class.java), 0, 2)
+
+        assertEquals(CONNECTED_DEVICE or LOCATION, controller.get().foregroundServiceType)
+        assertTrue(fakeLocations.running)
+    }
+
+    @Test
+    fun whenRecordingStopsTheFixesStopToo() {
+        allowNearbyDevices()
+        allowLocation()
+        recorder.startHere(local)
+        val service = started().get()
+
+        recorder.pause()
+
+        eventually("the service stops itself") { shadowOf(service).isStoppedBySelf }
+        assertFalse(fakeLocations.running)
+    }
+
+    @Test
+    fun aFixWhileRecordingAShipmentOnTheServerIsQueued() {
+        allowNearbyDevices()
+        allowLocation()
+        val onServer = local.copy(id = "SHIP-S", genesisHash = "a".repeat(64))
+        runBlocking { shipments.adoptRemoteShipment(onServer).getOrThrow() }
+        recorder.startHere(onServer)
+        started()
+
+        fakeLocations.deliver(LocationFix(9.98, 76.28, 12f, System.currentTimeMillis()))
+
+        eventually("the fix is queued") { runBlocking { database.gpsPointDao().getPending().size == 1 } }
+        assertEquals("SHIP-S", runBlocking { database.gpsPointDao().getPending().single().shipmentId })
+    }
+
     @Test
     fun aRestartPicksUpTheShipmentThatWasRecording() {
         allowNearbyDevices()
@@ -175,5 +283,36 @@ class RecordingServiceTest {
 
         eventually("recording resumes") { simulator.isRunning.value }
         assertEquals(local.id, simulator.activeShipment.value?.id)
+    }
+}
+
+/** Stands in for the fused location provider: says whether fixes were asked for, and hands over the ones a test gives. */
+class FakeLocationSource : LocationSource {
+    @Volatile var running = false
+        private set
+    private var onFix: ((LocationFix) -> Unit)? = null
+
+    override fun start(onFix: (LocationFix) -> Unit) {
+        this.onFix = onFix
+        running = true
+    }
+
+    override fun stop() {
+        onFix = null
+        running = false
+    }
+
+    fun deliver(fix: LocationFix) {
+        onFix?.invoke(fix)
+    }
+}
+
+/** Android 14 and later on a background start: a `location` service is refused, anything else is allowed. */
+@Implements(Service::class)
+class RefusesTheLocationType : ShadowService() {
+    @Implementation
+    override fun startForeground(id: Int, notification: Notification, foregroundServiceType: Int) {
+        if (foregroundServiceType and LOCATION != 0) throw SecurityException("Starting FGS with type location requires permissions")
+        super.startForeground(id, notification, foregroundServiceType)
     }
 }

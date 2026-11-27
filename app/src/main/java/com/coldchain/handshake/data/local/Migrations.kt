@@ -39,3 +39,17 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL("ALTER TABLE temperature_events ADD COLUMN receivedAt INTEGER")
     }
 }
+
+/** Version 5 queues the locations the recording service records (MASTER 5.5 item 2). Nothing existing changes. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Room's own statements, from schemas/.../5.json.
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `gps_points` (`id` TEXT NOT NULL, `shipmentId` TEXT NOT NULL, " +
+                "`latitude` REAL NOT NULL, `longitude` REAL NOT NULL, `accuracyMeters` REAL NOT NULL, " +
+                "`deviceTimestamp` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_gps_points_shipmentId` ON `gps_points` (`shipmentId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_gps_points_syncStatus` ON `gps_points` (`syncStatus`)")
+    }
+}

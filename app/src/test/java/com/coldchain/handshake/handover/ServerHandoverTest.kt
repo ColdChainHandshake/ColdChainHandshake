@@ -66,7 +66,7 @@ class ServerHandoverTest {
         override fun sign(payload: ByteArray) = "signature"
     }
     private val sync = SyncServiceImpl(
-        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), server,
+        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), db.gpsPointDao(), server,
         ReadingUploader(server, signer, { "device-1" }), account, FakeNetworkMonitor(), { "device-1" }
     )
     private val history = ShipmentHistorySyncCoordinator(telemetry, server)

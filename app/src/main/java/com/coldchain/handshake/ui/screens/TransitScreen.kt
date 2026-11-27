@@ -1,16 +1,13 @@
 package com.coldchain.handshake.ui.screens
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.PackageManager
-import android.location.LocationManager
 import android.os.Build
-import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,7 +28,6 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -49,7 +45,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -80,12 +75,6 @@ import com.coldchain.handshake.ui.theme.PrimaryCold
 import com.coldchain.handshake.ui.theme.StatusAmber
 import com.coldchain.handshake.ui.theme.StatusGreen
 import com.coldchain.handshake.ui.theme.StatusRed
-import com.google.android.gms.location.Granularity
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -138,153 +127,41 @@ fun TransitScreen(
 
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
-    // ----------------------------------------------------
-    // FOREGROUND GPS STATE & CALLBACKS (Phone A)
-    // ----------------------------------------------------
-    var isGpsActive by remember { mutableStateOf(false) }
-    var gpsLocation by remember { mutableStateOf<GpsLocationData?>(null) }
-    var isWaitingForFix by remember { mutableStateOf(false) }
-    var locationPermissionDenied by remember { mutableStateOf(false) }
-    var locationServiceDisabled by remember { mutableStateOf(false) }
-    val lastGpsUploadStatus = ui.gpsUploadStatus
+    // Location is recorded by the recording service with the readings, not by this screen (MASTER 5.5 item 2).
+    val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+    fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    var locationAllowed by remember { mutableStateOf(locationPermissions.any(::granted)) }
 
-    // Remote GPS for Phone B (Monitor)
+    // The custodian's last reported location, while watching
     val remoteGpsLocation = ui.remoteGps
 
-    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
-
-    // The location client stays here until 5.2 moves recording into a foreground service; uploads go through the
-    // ViewModel, which sends them only for a shipment the server holds.
-    @Suppress("UNUSED_PARAMETER")
-    fun uploadLocation(ship: Shipment, latitude: Double, longitude: Double, accuracy: Float, timestamp: Long) {
-        viewModel.uploadLocation(latitude, longitude, accuracy, timestamp)
-    }
-
-    // Callback invoked on Phone A when foreground GPS yields new coordinates
-    val locationCallback = remember(currentShipment?.id) {
-        object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { loc ->
-                    val locTimestamp = if (loc.time > 0) loc.time else System.currentTimeMillis()
-                    val locData = GpsLocationData(
-                        latitude = loc.latitude,
-                        longitude = loc.longitude,
-                        accuracy = loc.accuracy,
-                        timestamp = locTimestamp
-                    )
-                    gpsLocation = locData
-                    isWaitingForFix = false
-
-                    // Phone A: Upload latest location to Supabase 'shipment_locations' table
-                    val ship = currentShipment
-                    if (ship != null) {
-                        uploadLocation(ship, loc.latitude, loc.longitude, loc.accuracy, locTimestamp)
-                    }
-                }
-            }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun startGpsTracking() {
-        isGpsActive = true
-        isWaitingForFix = true
-        locationPermissionDenied = false
-
-        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true ||
-                locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
-        locationServiceDisabled = !isGpsEnabled
-
-        try {
-            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                if (loc != null && gpsLocation == null) {
-                    val locTimestamp = if (loc.time > 0) loc.time else System.currentTimeMillis()
-                    val locData = GpsLocationData(
-                        latitude = loc.latitude,
-                        longitude = loc.longitude,
-                        accuracy = loc.accuracy,
-                        timestamp = locTimestamp
-                    )
-                    gpsLocation = locData
-                    isWaitingForFix = false
-
-                    val ship = currentShipment
-                    if (ship != null) {
-                        uploadLocation(ship, loc.latitude, loc.longitude, loc.accuracy, locTimestamp)
-                    }
-                }
-            }
-
-            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
-                .setMinUpdateIntervalMillis(3000L)
-                .setGranularity(Granularity.GRANULARITY_PERMISSION_LEVEL)
-                .setWaitForAccurateLocation(false)
-                .build()
-
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback,
-                Looper.getMainLooper()
-            )
-        } catch (e: SecurityException) {
-            locationPermissionDenied = true
-            isGpsActive = false
-            isWaitingForFix = false
-        } catch (_: Exception) {
-            isGpsActive = false
-            isWaitingForFix = false
-        }
-    }
-
-    fun stopGpsTracking() {
-        isGpsActive = false
-        isWaitingForFix = false
-        try {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
-        } catch (_: Exception) {}
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            stopGpsTracking()
-        }
-    }
-
-    val locationPermissions = arrayOf(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION
-    )
-
-    val permissionLauncher = rememberLauncherForActivityResult(
+    // Recording runs in a foreground service. On Android 14 and later its `connectedDevice` type needs Nearby devices,
+    // and its `location` type, which records where the shipment is, needs location. Both are asked for when custody is
+    // taken, before the service starts. Without Nearby devices recording runs only while the app is open; without
+    // location it records no location.
+    val custodyPermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (granted) {
-            locationPermissionDenied = false
-            startGpsTracking()
-        } else {
-            locationPermissionDenied = true
-            isGpsActive = false
-            isWaitingForFix = false
-        }
+    ) {
+        locationAllowed = locationPermissions.any(::granted)
+        viewModel.takeCustody()
     }
-
-    // Recording runs in a foreground service whose type, on Android 14 and later, needs Nearby devices. Asked for when
-    // custody is taken; refused, recording still runs, but only while the app is open.
-    val nearbyDevicesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { viewModel.takeCustody() }
     val takeCustody: () -> Unit = {
-        val needsNearby = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-        if (needsNearby) nearbyDevicesLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) else viewModel.takeCustody()
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !granted(Manifest.permission.BLUETOOTH_CONNECT)) {
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (locationPermissions.none(::granted)) addAll(locationPermissions)
+        }
+        if (wanted.isEmpty()) viewModel.takeCustody() else custodyPermissionsLauncher.launch(wanted.toTypedArray())
     }
 
-    // Custody moved away while this phone was recording: its location reports stop too.
-    LaunchedEffect(ui.handedOverShipmentId) {
-        if (ui.handedOverShipmentId != null) stopGpsTracking()
+    // Allowed later from the location card: the recording already running adds location without starting again.
+    val locationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        locationAllowed = locationPermissions.any(::granted)
+        if (locationAllowed) viewModel.keepRecordingInBackground()
     }
 
     // ----------------------------------------------------
@@ -612,7 +489,8 @@ fun TransitScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val loc = remoteGpsLocation ?: gpsLocation
+                    // Only the custodian's reported location: never this phone's own, shown as theirs.
+                    val loc = remoteGpsLocation
                     if (loc != null) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -947,9 +825,7 @@ fun TransitScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ----------------------------------------------------
-            // PHONE A: FOREGROUND GPS DISPLAY CARD
-            // ----------------------------------------------------
+            // This phone's location, recorded by the recording service with the readings
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -958,153 +834,59 @@ fun TransitScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.LocationOn,
-                                contentDescription = null,
-                                tint = if (isGpsActive) StatusGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "GPS TRACKING",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (isGpsActive) StatusGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
-                        ) {
-                            Text(
-                                text = if (isGpsActive) "● ACTIVE & SHARING" else "● INACTIVE",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                color = if (isGpsActive) StatusGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            )
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = if (locationAllowed) StatusGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "LOCATION", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    if (!isGpsActive) {
-                        if (locationPermissionDenied) {
-                            Text(
-                                text = "Location permission denied.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = StatusRed
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Button(
-                                onClick = {
-                                    locationPermissionDenied = false
-                                    permissionLauncher.launch(locationPermissions)
-                                },
-                                modifier = Modifier.fillMaxWidth().height(34.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = StatusAmber)
-                            ) {
-                                Text("Allow Location", fontSize = 12.sp)
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Location sharing is off. Tap Start to share this phone's location with the people on this shipment while this screen is open.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = {
-                                        val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        if (hasFine || hasCoarse) {
-                                            startGpsTracking()
-                                        } else {
-                                            permissionLauncher.launch(locationPermissions)
-                                        }
-                                    },
-                                    modifier = Modifier.height(34.dp)
-                                ) {
-                                    Icon(imageVector = Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Start GPS", fontSize = 12.sp)
-                                }
-                            }
+                    if (!locationAllowed) {
+                        Text(
+                            text = "Location isn't allowed for this app, so none is recorded with the readings.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = { locationLauncher.launch(locationPermissions) },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusAmber)
+                        ) {
+                            Text("Allow Location", fontSize = 12.sp)
                         }
                     } else {
-                        // GPS Active View
-                        if (locationServiceDisabled) {
-                            Text(
-                                text = "Location services disabled on device.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = StatusAmber
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                        }
-
-                        val loc = gpsLocation
-                        if (loc != null) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text("Latitude", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                                    Text(String.format(Locale.US, "%.6f", loc.latitude), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                                Column {
-                                    Text("Longitude", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                                    Text(String.format(Locale.US, "%.6f", loc.longitude), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                                Column {
-                                    Text("Accuracy", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                                    Text("${loc.accuracy.toInt()} m", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                                Column {
-                                    Text("Last update", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                                    Text(timeFormatter.format(Date(loc.timestamp)), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                            }
-                            lastGpsUploadStatus?.let { status ->
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = status,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 9.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = StatusAmber, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Waiting for GPS fix...",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = StatusAmber
-                                )
-                            }
-                        }
-
+                        Text(
+                            text = "Recorded with the readings while this phone records the shipment, and sent when " +
+                                "there is a connection.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
-
-                        OutlinedButton(
-                            onClick = { stopGpsTracking() },
-                            modifier = Modifier.fillMaxWidth().height(30.dp)
-                        ) {
-                            Text("Stop GPS", fontSize = 11.sp)
+                        val mine = ui.myLocation
+                        if (mine == null) {
+                            Text(text = "No location recorded yet.", style = MaterialTheme.typography.bodySmall, color = StatusAmber)
+                        } else {
+                            Text(
+                                text = String.format(
+                                    Locale.US, "%.5f, %.5f (within %d m) at %s",
+                                    mine.latitude, mine.longitude, mine.accuracyMeters.toInt(),
+                                    timeFormatter.format(Date(mine.deviceTimestamp))
+                                ),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = if (mine.sent) "Sent" else "Waiting to send",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (mine.sent) StatusGreen else StatusAmber
+                            )
                         }
                     }
                 }

@@ -11,7 +11,10 @@ import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.recording.CourierRecorder
+import com.coldchain.handshake.recording.RecordedLocation
+import com.coldchain.handshake.recording.RecordedLocations
 import com.coldchain.handshake.recording.RecordingStore
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
@@ -60,6 +63,8 @@ class TransitViewModelTest {
     /** Which shipment is recording, kept on the phone; and how often the background recording was started. */
     private val recordingStore = RecordingStore.inMemory()
     private var backgroundStarts = 0
+    /** The newest location the recording service queued for SHIP-1. */
+    private val recorded = MutableStateFlow<RecordedLocation?>(null)
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -73,7 +78,8 @@ class TransitViewModelTest {
     private fun viewModel(saved: SavedStateHandle = SavedStateHandle()): TransitViewModel {
         val recorder = CourierRecorder(simulator, recordingStore) { backgroundStarts++ }
         return TransitViewModel(
-            account, shipments, workflow, simulator, history, server, telemetry, recorder, "device-1", { alertChecks++ },
+            account, shipments, workflow, simulator, history, server, telemetry, recorder,
+            RecordedLocations { id -> if (id == "SHIP-1") recorded else flowOf(null) }, { alertChecks++ },
             ActiveShipmentRestorer(simulator, shipments, server, account, recorder), saved
         )
     }
@@ -234,7 +240,7 @@ class TransitViewModelTest {
 
         assertEquals("SHIP-2", vm.state.value.shipment?.id)
         assertNull(vm.state.value.remoteGps)
-        assertNull(vm.state.value.gpsUploadStatus)
+        assertNull(vm.state.value.myLocation)
         visible.cancel()
     }
 
@@ -253,18 +259,46 @@ class TransitViewModelTest {
         assertNull(vm.state.value.handedOverShipmentId)
     }
 
+    // Location moved from this screen to the recording service on 27 Nov (MASTER 5.5 item 2): the screen no longer
+    // sends it, it shows what the service recorded. Sending is in SyncServiceTest, recording in LocationRecorderTest
+    // and RecordingServiceTest. This replaces theCustodianReportsTheirLocation, which tested the screen's own upload.
     @Test
-    fun theCustodianReportsTheirLocation() = runTest {
+    fun theCustodianSeesTheNewestLocationThisPhoneRecordedAndWhetherItWasSent() = runTest {
         dispatched("SHIP-1")
         signInAs("courier", MemberRole.COURIER)
         val vm = viewModel()
         vm.onCodeScanned("SHIP-1").join()
         vm.takeCustody().join()
+        assertNull(vm.state.value.myLocation)
 
-        vm.uploadLocation(1.0, 2.0, 5f, 1_700_000_200_000).join()
+        recorded.value = RecordedLocation(9.98, 76.28, 12f, 1_700_000_200_000, sent = false)
+        assertEquals(false, vm.state.value.myLocation?.sent)
 
-        assertEquals(1, server.gpsPoints.size)
-        assertTrue(vm.state.value.gpsUploadStatus!!.startsWith("Synced"))
+        recorded.value = recorded.value!!.copy(sent = true)
+        assertEquals(true, vm.state.value.myLocation?.sent)
+    }
+
+    @Test
+    fun allowingLocationLaterAsksTheRecordingAlreadyRunningToAddIt() = runTest {
+        dispatched("SHIP-1")
+        signInAs("courier", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        vm.takeCustody().join()
+        val before = backgroundStarts
+
+        vm.keepRecordingInBackground()
+
+        assertEquals(before + 1, backgroundStarts)
+    }
+
+    @Test
+    fun allowingLocationWithNothingRecordingStartsNothing() = runTest {
+        val vm = viewModel()
+
+        vm.keepRecordingInBackground()
+
+        assertEquals(0, backgroundStarts)
     }
 
     // Before 26 Nov recording always waited for the person after process death. Now it resumes when the process died

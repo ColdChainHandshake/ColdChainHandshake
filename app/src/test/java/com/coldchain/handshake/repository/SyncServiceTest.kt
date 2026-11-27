@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.coldchain.handshake.crypto.DeviceSigner
 import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.local.DatabaseProvider
+import com.coldchain.handshake.data.local.entities.toEntity
 import com.coldchain.handshake.data.network.NetworkMonitor
 import com.coldchain.handshake.models.Alert
 import com.coldchain.handshake.models.AlertType
@@ -72,6 +73,7 @@ class SyncServiceTest {
         temperatureEventDao = db.temperatureEventDao(),
         alertDao = db.alertDao(),
         handoverDao = db.handoverDao(),
+        gpsPointDao = db.gpsPointDao(),
         remote = server,
         uploader = ReadingUploader(server, signer, { "device-1" }),
         account = account,
@@ -169,6 +171,57 @@ class SyncServiceTest {
         assertTrue(stored().all { it.syncStatus == SyncStatus.REJECTED })
         assertEquals(1, server.appendCalls)
         assertNotNull(sync.getLastRejection().first())
+    }
+
+    /** Locations the recording service queued for SHIP-1, one a minute. */
+    private suspend fun queueLocations(count: Int, shipmentId: String = "SHIP-1"): List<GpsPoint> =
+        (1..count).map { GpsPoint("gps-$shipmentId-$it", shipmentId, 9.98 + it / 1000.0, 76.28, 12f, 1_700_000_000_000L + it * 60_000L) }
+            .onEach { db.gpsPointDao().insert(it.toEntity()) }
+
+    // MASTER 5.5 item 2: GPS points queued in Room and sent like readings, so a trip with no signal still has its route.
+    @Test
+    fun locationsQueuedWithNoSignalReachTheServerOnceItCanBeReached() = runBlocking {
+        shipmentOnServer()
+        val queued = queueLocations(3)
+        server.offlineError = IOException("No connection")
+
+        assertTrue(service().syncPendingData().isFailure)
+        assertTrue(server.gpsPoints.isEmpty())
+        assertEquals(3, db.gpsPointDao().getPending().size)
+
+        server.offlineError = null
+        service().syncPendingData().getOrThrow()
+
+        assertEquals(queued, server.gpsPoints)
+        assertTrue(db.gpsPointDao().getPending().isEmpty())
+    }
+
+    // The server takes locations only from the current custodian (CC002), so once custody has moved on a queued point
+    // can never be sent. It is set aside rather than tried on every sync for ever, and it isn't shown as a refusal of
+    // the person's readings.
+    @Test
+    fun aLocationTheServerRefusesIsSetAsideNotRetried() = runBlocking {
+        shipmentOnServer()
+        queueLocations(2)
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+        val sync = service()
+
+        sync.syncPendingData()
+        sync.syncPendingData()
+
+        assertTrue(server.gpsPoints.isEmpty())
+        assertTrue(db.gpsPointDao().getPending().isEmpty())
+        assertNull(sync.getLastRejection().first())
+    }
+
+    @Test
+    fun aLocationForAShipmentKeptOnThisPhoneIsNeverSent() = runBlocking {
+        shipments.saveShipment(Shipment("LOCAL-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.CREATED)).getOrThrow()
+        queueLocations(1, "LOCAL-1")
+
+        service().syncPendingData().getOrThrow()
+
+        assertTrue(server.gpsPoints.isEmpty())
     }
 
     @Test

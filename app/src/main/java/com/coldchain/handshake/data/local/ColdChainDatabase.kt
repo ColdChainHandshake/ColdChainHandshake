@@ -13,7 +13,9 @@ import com.coldchain.handshake.data.local.entities.HandoverEntity
 import com.coldchain.handshake.data.local.entities.ShipmentEntity
 import com.coldchain.handshake.data.local.entities.TemperatureEventEntity
 import com.coldchain.handshake.data.local.entities.ChaosEventEntity
+import com.coldchain.handshake.data.local.entities.GpsPointEntity
 import com.coldchain.handshake.data.local.dao.ChaosEventDao
+import com.coldchain.handshake.data.local.dao.GpsPointDao
 
 /**
  * Primary Room database for Cold Chain Handshake data backbone.
@@ -25,9 +27,10 @@ import com.coldchain.handshake.data.local.dao.ChaosEventDao
         TemperatureEventEntity::class,
         AlertEntity::class,
         HandoverEntity::class,
-        ChaosEventEntity::class
+        ChaosEventEntity::class,
+        GpsPointEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 @TypeConverters(RoomTypeConverters::class)
@@ -42,4 +45,6 @@ abstract class ColdChainDatabase : RoomDatabase() {
     abstract fun handoverDao(): HandoverDao
 
     abstract fun chaosEventDao(): ChaosEventDao
+
+    abstract fun gpsPointDao(): GpsPointDao
 }

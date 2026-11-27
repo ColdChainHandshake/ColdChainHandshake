@@ -98,7 +98,7 @@ class HandoverScreenTest {
     private val account = FakeAccountRepository()
 
     private val sync = SyncServiceImpl(
-        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), server,
+        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), db.gpsPointDao(), server,
         ReadingUploader(server, object : DeviceSigner {
             override val publicKey = "public-key"
             override fun sign(payload: ByteArray) = "signature"

@@ -72,7 +72,7 @@ class RecordingLoopTest {
         override fun sign(payload: ByteArray) = "signature"
     }
     private val sync = SyncServiceImpl(
-        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), server,
+        db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), db.gpsPointDao(), server,
         ReadingUploader(server, signer, { "courier-phone" }), account, FakeNetworkMonitor(), { "courier-phone" }
     )
     private val history = ShipmentHistorySyncCoordinator(telemetry, server)

@@ -113,7 +113,8 @@ class ColdChainDatabaseMigrationTest {
             1 to "f740cf5168238cf469e45dbf7d9daf80",
             2 to "16336bc1a46df29247067f953840fde0",
             3 to "dfd95156f9fdb479ca1bc5104da47f9b",
-            4 to "a81aef6e8a9a8062b5e88e319e183e0a"
+            4 to "a81aef6e8a9a8062b5e88e319e183e0a",
+            5 to "18c7ee79629b3e4abc03809e5ba27d58"
         )
         recorded.forEach { (version, hash) ->
             assertTrue("Schema $version has changed", schemaFile(version).contains("\"identityHash\": \"$hash\""))
@@ -183,6 +184,37 @@ class ColdChainDatabaseMigrationTest {
         assertNull(handover.reason)
         assertEquals(VvmStage.NOT_RECORDED, handover.vvmStage)
         assertEquals(ShakeTestResult.NOT_DONE, handover.shakeTest)
+    }
+
+    // Version 5 adds the queue of locations the recording service records (MASTER 5.5 item 2).
+    @Test
+    fun aVersion4PhoneKeepsItsReadingsAndGainsAnEmptyLocationQueue() {
+        createDatabase(4).apply {
+            insertShipment()
+            execSQL(
+                """
+                INSERT INTO temperature_events
+                    (id, shipmentId, loggerId, timestamp, temperature, previousHash, currentHash, syncStatus, seq, receivedAt)
+                VALUES ('TE-1', 'SHIP-1', 'LOG-1', 1700000000000, 5.5, 'previous', 'current', 'PENDING', 1, NULL)
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val database = DatabaseProvider.buildDatabase(context, dbName)
+        val reading = runBlocking { database.temperatureEventDao().getTemperaturesDirect("SHIP-1") }.single()
+        val queueBefore = runBlocking { database.gpsPointDao().getPending() }
+        runBlocking {
+            database.gpsPointDao().insert(
+                com.coldchain.handshake.data.local.entities.GpsPointEntity("gps-1", "SHIP-1", 9.98, 76.28, 12f, 1700000060000)
+            )
+        }
+        val queueAfter = runBlocking { database.gpsPointDao().getPending() }
+        database.close()
+
+        assertEquals(1L, reading.seq)
+        assertTrue(queueBefore.isEmpty())
+        assertEquals(listOf("gps-1"), queueAfter.map { it.id })
     }
 
     @Test

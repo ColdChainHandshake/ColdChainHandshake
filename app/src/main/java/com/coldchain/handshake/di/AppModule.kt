@@ -20,6 +20,12 @@ import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.recording.RecordingLoop
 import com.coldchain.handshake.recording.RecordingService
+import com.coldchain.handshake.recording.FusedLocationSource
+import com.coldchain.handshake.recording.LocationRecorder
+import com.coldchain.handshake.recording.LocationSource
+import com.coldchain.handshake.recording.RecordedLocations
+import com.coldchain.handshake.data.local.entities.toRecordedLocation
+import kotlinx.coroutines.flow.map
 import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.recording.SharedPreferencesRecordingStore
 import com.coldchain.handshake.recording.SyncRequests
@@ -151,6 +157,7 @@ object AppModule {
         temperatureEventDao = db.temperatureEventDao(),
         alertDao = db.alertDao(),
         handoverDao = db.handoverDao(),
+        gpsPointDao = db.gpsPointDao(),
         remote = remote,
         uploader = ReadingUploader(remote, signer, { deviceId }),
         account = account,
@@ -246,6 +253,23 @@ object AppModule {
     @Provides
     fun alertChecks(@ApplicationContext context: Context): AlertChecks =
         AlertChecks { AlertEscalationScheduler.checkNow(context) }
+
+    @Provides @Singleton
+    fun locationRecorder(simulator: TemperatureSimulator, db: ColdChainDatabase): LocationRecorder =
+        LocationRecorder(simulator, db.gpsPointDao())
+
+    @Provides
+    fun recordedLocations(db: ColdChainDatabase): RecordedLocations =
+        RecordedLocations { id -> db.gpsPointDao().latest(id).map { it?.toRecordedLocation() } }
+}
+
+/** Where the recording service's fixes come from, apart from the rest so tests can replace it. */
+@Module
+@InstallIn(SingletonComponent::class)
+object LocationModule {
+
+    @Provides @Singleton
+    fun locationSource(@ApplicationContext context: Context): LocationSource = FusedLocationSource(context)
 }
 
 /** The server and the account, apart from the rest so tests can replace them. */

@@ -1,6 +1,7 @@
 package com.coldchain.handshake.repository
 
 import com.coldchain.handshake.data.local.dao.AlertDao
+import com.coldchain.handshake.data.local.dao.GpsPointDao
 import com.coldchain.handshake.data.local.dao.HandoverDao
 import com.coldchain.handshake.data.local.dao.ShipmentDao
 import com.coldchain.handshake.data.local.dao.TemperatureEventDao
@@ -19,7 +20,7 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Sends what this phone recorded to the server's functions: readings through [ReadingUploader], then
- * alerts and any handover confirmation that couldn't be sent at the time.
+ * locations, alerts and any handover confirmation that couldn't be sent at the time.
  *
  * Only a shipment the server created is ever sent. One made in the debug build's local mode has no
  * server genesis and stays on the phone. A refusal from the server is final for that record: it's
@@ -30,6 +31,7 @@ class SyncServiceImpl(
     private val temperatureEventDao: TemperatureEventDao,
     private val alertDao: AlertDao,
     private val handoverDao: HandoverDao,
+    private val gpsPointDao: GpsPointDao,
     private val remote: ColdChainRemote,
     private val uploader: ReadingUploader,
     private val account: AccountRepository,
@@ -108,6 +110,7 @@ class SyncServiceImpl(
         temperatureEventDao.getPendingEvents().map { it.shipmentId }.distinct().forEach { shipmentId ->
             uploadShipment(shipmentId).onFailure { failures += it }
         }
+        syncLocations(failures)
         syncAlerts(failures)
         syncHandovers(failures)
 
@@ -138,6 +141,31 @@ class SyncServiceImpl(
                 Result.failure(failure)
             }
         )
+    }
+
+    /**
+     * Sends the queued locations, oldest first, a shipment at a time. The server takes them only from the current
+     * custodian, so a refusal means custody has moved on and they can never be sent: they are set aside, not shown as
+     * a refusal of the person's readings, and not tried again.
+     */
+    private suspend fun syncLocations(failures: MutableList<Throwable>) {
+        for ((shipmentId, queued) in gpsPointDao.getPending().groupBy { it.shipmentId }) {
+            if (!isOnServer(shipmentId)) continue
+            for (chunk in queued.chunked(LOCATIONS_PER_CALL)) {
+                val ids = chunk.map { it.id }
+                val failure = remote.appendGpsPoints(shipmentId, deviceId(), chunk.map { it.toDomain() }).exceptionOrNull()
+                when {
+                    failure == null -> gpsPointDao.updateSyncStatuses(ids, SyncStatus.SYNCED)
+                    failure is RemoteRejection -> gpsPointDao.updateSyncStatuses(ids, SyncStatus.REJECTED)
+                    else -> {
+                        // No connection: the rest of this shipment's points would fail the same way.
+                        gpsPointDao.updateSyncStatuses(ids, SyncStatus.FAILED)
+                        failures += failure
+                        break
+                    }
+                }
+            }
+        }
     }
 
     private suspend fun syncAlerts(failures: MutableList<Throwable>) {
@@ -211,7 +239,13 @@ class SyncServiceImpl(
 
     private suspend fun hasPendingData(): Boolean {
         return temperatureEventDao.getPendingEvents().isNotEmpty() ||
+            gpsPointDao.getPending().isNotEmpty() ||
             alertDao.getPendingAlerts().isNotEmpty() ||
             handoverDao.getPendingHandovers().isNotEmpty()
+    }
+
+    private companion object {
+        /** A day of points at one a minute is 1,440; each call sends at most this many. */
+        const val LOCATIONS_PER_CALL = 200
     }
 }

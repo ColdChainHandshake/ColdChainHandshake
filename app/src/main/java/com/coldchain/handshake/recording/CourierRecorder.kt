@@ -61,6 +61,14 @@ class CourierRecorder(
         if (store.shipmentId != null && !simulator.isRunning.value) background.keepRunning()
     }
 
+    /**
+     * Asks the background host again while recording, so a recording already running picks up a permission allowed
+     * since it started (location, from the Transit screen). Called from the open app.
+     */
+    fun refreshBackground() {
+        if (store.shipmentId != null && simulator.isRunning.value) background.keepRunning()
+    }
+
     companion object {
         /** How often the simulator looks at the clock. It records at most one reading a minute. */
         const val TICK_MS = 1_500L

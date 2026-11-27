@@ -32,6 +32,10 @@ import javax.inject.Inject
  * the shipment's logger; on Android 14 and later that type needs the Nearby devices permission (`BLUETOOTH_CONNECT`).
  * Without it the service still runs, but only while the app is open, and the Transit screen says so.
  *
+ * With location allowed it runs with the `location` type as well and records where the shipment is
+ * ([LocationRecorder], queued in Room and sent like the readings). If Android refuses that type, recording carries on
+ * without location.
+ *
  * While in the foreground it holds a partial wake lock, renewed every round with a timeout, because the simulator
  * makes each reading itself and a sleeping CPU would leave a gap. A real logger records on its own and the phone
  * back-fills, so that path won't need it.
@@ -44,19 +48,29 @@ import javax.inject.Inject
 class RecordingService : Service() {
 
     @Inject lateinit var loop: RecordingLoop
+    @Inject lateinit var locationSource: LocationSource
+    @Inject lateinit var locations: LocationRecorder
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var inForeground = false
+    private var locating = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!inForeground && canRunInForeground(this)) {
-            inForeground = enterForeground()
+        // Entering the foreground, or adding location to a recording already in it once location has been allowed.
+        val addLocation = inForeground && !locating && foregroundTypes() and LOCATION_TYPE != 0
+        if ((!inForeground || addLocation) && canRunInForeground(this)) {
+            val types = enterForeground()
             // Started for the foreground but refused: stop now, or Android ends the app for not calling startForeground.
-            if (!inForeground) return stopNow()
+            if (types == null && !inForeground) return stopNow()
+            inForeground = true
+            if (types != null && types and LOCATION_TYPE != 0 && !locating) {
+                locating = true
+                locationSource.start { fix -> scope.launch { locations.record(fix) } }
+            }
         }
         // The system restarting the service (no intent) can't keep it alive outside the foreground, so record nothing.
         if (intent == null && !inForeground) return stopNow()
@@ -70,6 +84,7 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
+        locationSource.stop()
         scope.cancel()
         releaseWakeLock()
         super.onDestroy()
@@ -81,29 +96,50 @@ class RecordingService : Service() {
     }
 
     private fun finish() {
+        locationSource.stop()
+        locating = false
         releaseWakeLock()
         if (inForeground) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         inForeground = false
         stopSelf()
     }
 
-    private fun enterForeground(): Boolean = try {
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), foregroundType())
-        true
-    } catch (e: Exception) {
-        // A restart from the background (ForegroundServiceStartNotAllowedException) or a missing prerequisite
-        // (SecurityException). Recording then lasts only while the app is open.
-        Log.w(TAG, "Could not record in the foreground: ${e.javaClass.simpleName}")
-        false
+    /**
+     * Enters the foreground with the location type as well when location is allowed, and without it if Android refuses
+     * that: location is a while-in-use permission, so Android 14 and later refuse a `location` service created while
+     * the app is in the background (a restart after the process was killed), even with the permission granted.
+     *
+     * @return the types the service runs with, or null if Android refused the foreground altogether.
+     */
+    private fun enterForeground(): Int? {
+        val wanted = foregroundTypes()
+        for (types in listOf(wanted, wanted and LOCATION_TYPE.inv()).distinct()) {
+            try {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(locating = types and LOCATION_TYPE != 0), types)
+                return types
+            } catch (e: Exception) {
+                // A restart from the background (ForegroundServiceStartNotAllowedException) or a missing prerequisite
+                // (SecurityException). Without the foreground at all, recording lasts only while the app is open.
+                Log.w(TAG, "Could not record in the foreground with types $types: ${e.javaClass.simpleName}")
+            }
+        }
+        return null
     }
 
-    private fun foregroundType(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
+    private fun foregroundTypes(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
+        val located = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            .any { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+        return ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or (if (located) LOCATION_TYPE else 0)
+    }
 
-    private fun notification() = NotificationCompat.Builder(this, ensureChannel())
+    private fun notification(locating: Boolean) = NotificationCompat.Builder(this, ensureChannel())
         .setSmallIcon(android.R.drawable.ic_menu_recent_history)
         .setContentTitle("Recording this shipment")
-        .setContentText("Readings are simulated on this phone and sent when there is a connection.")
+        .setContentText(
+            if (locating) "Readings are simulated on this phone. They and the phone's location are sent when there is a connection."
+            else "Readings are simulated on this phone and sent when there is a connection."
+        )
         .setOngoing(true)
         .setOnlyAlertOnce(true)
         .setContentIntent(
@@ -144,6 +180,8 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 2
         private const val WAKE_LOCK_TAG = "cch:recording"
+        /** A compile-time constant, so it is safe to name below Android 10, where the types begin. */
+        private const val LOCATION_TYPE = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         /** Renewed every round of the loop; lapses on its own if the loop ever stalls. */
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60_000L
 

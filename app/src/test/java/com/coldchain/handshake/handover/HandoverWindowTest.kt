@@ -79,7 +79,7 @@ class HandoverWindowTest {
         val handovers = HandoverRepositoryImpl(db.handoverDao())
         val account = FakeAccountRepository().apply { setState(AccountState.Ready(user, null, UserProfile(user, role))) }
         val sync = SyncServiceImpl(
-            db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), server,
+            db.shipmentDao(), db.temperatureEventDao(), db.alertDao(), db.handoverDao(), db.gpsPointDao(), server,
             ReadingUploader(server, signer, { deviceId }), account, FakeNetworkMonitor(), { deviceId }
         )
         val history = ShipmentHistorySyncCoordinator(telemetry, server)
