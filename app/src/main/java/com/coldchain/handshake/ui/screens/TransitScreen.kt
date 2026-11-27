@@ -546,7 +546,7 @@ fun TransitScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Room Local Database",
+                    text = "On this phone",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -620,7 +620,9 @@ fun TransitScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Logger: ${shipment.loggerId} | Worker: ${shipment.workerId}",
+                            // On the server the sender's account ID stands in for a worker ID, which means nothing to a person.
+                            text = if (shipment.genesisHash == null) "Logger: ${shipment.loggerId} | Worker: ${shipment.workerId}"
+                            else "Logger: ${shipment.loggerId}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -906,7 +908,7 @@ fun TransitScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Room Local Database",
+                    text = "On this phone",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1019,7 +1021,7 @@ private fun TelemetryEventRow(
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = "${event.loggerId} • #${event.currentHash.take(8)}",
+                        text = "${event.loggerId} • reading ${event.seq}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = FontFamily.Monospace

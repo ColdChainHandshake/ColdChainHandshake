@@ -295,7 +295,9 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "Worker: ${shipment.workerId}   |   Logger: ${shipment.loggerId}",
+                    // On the server the sender's account ID stands in for a worker ID, which means nothing to a person.
+                    text = if (shipment.genesisHash == null) "Worker: ${shipment.workerId}   |   Logger: ${shipment.loggerId}"
+                    else "Logger: ${shipment.loggerId}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -481,7 +483,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "#${event.currentHash.take(6)}",
+                                            text = "#${event.seq}",
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant

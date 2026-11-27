@@ -1,6 +1,7 @@
 package com.coldchain.handshake.recording
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -180,7 +181,11 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 2
         private const val WAKE_LOCK_TAG = "cch:recording"
-        /** A compile-time constant, so it is safe to name below Android 10, where the types begin. */
+        /**
+         * A compile-time constant, inlined, so naming it is safe below Android 10; [foregroundTypes] returns no types
+         * there before it is ever used.
+         */
+        @SuppressLint("InlinedApi")
         private const val LOCATION_TYPE = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         /** Renewed every round of the loop; lapses on its own if the loop ever stalls. */
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60_000L
