@@ -38,7 +38,7 @@ kb_off() {
 # device's sh parses them again, so `;`, a backtick or `$(` would run there (security review S9).
 plain() {
     case "$1" in
-        ''|*[!A-Za-z0-9@._%+-]*) echo "refusing text with characters outside A-Z a-z 0-9 @ . _ % + -: $1" >&2; return 1 ;;
+        ''|*[!A-Za-z0-9@._%+,-]*) echo "refusing text with characters outside A-Z a-z 0-9 @ . _ % + , -: $1" >&2; return 1 ;;
     esac
 }
 
