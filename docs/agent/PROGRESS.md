@@ -91,6 +91,23 @@ the emulator with `adb install -r` (still signed in). The S24 kept the build of 
   phone waiting in the background about 48 a minute, with 77 of its 87 `confirm_handover` calls in 10 minutes refused
   as already confirmed (CC008), because it confirms again every 5 s on an unchanged head. Finding 11's baseline
 
+### Two bugs found on the emulator, fixed test-first: `done`
+
+- [x] **"Tamper Detected" flashed on Handover** (`0e6e849`): the screen collected the readings and the server head
+  separately and saw them out of step. `HandoverViewModelTest.whileReadingsArriveTheScreenNeverComparesTheNewHeadWithTheOldReadings`
+  failed first: `the screen saw fewer readings than the head: [0 < 10, 11 < 12]`. `aDeviceStillShortOfTheServersReadingsIsShownTheMismatch`
+  guards the other side; a mutant that never shows the real head fails it (`shown: [0/null, 10/10, 9/null]`)
+- [x] **False DATA_GAP alerts from a watching phone** (`91db6ea`): `LoggerSilenceCheckTest.aShipmentThisPhoneOnlyWatchesRaisesNoGapForReadingsNotYetDownloaded`
+  and `...StillRaisesWhatItsDownloadedReadingsShow` failed against a stub (`No readings for 720:00`; `[TEMPERATURE_BREACH, DATA_GAP]`);
+  `AlertEscalationColdStartTest.theWorkerRaisesNoGapForAShipmentThisPhoneOnlyWatches` failed through the real worker
+  before the wiring, `theWorkerRaisesAGapForTheShipmentThisPhoneRecords` passes both ways
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*HandoverViewModelTest*' --tests '*HandoverScreenTest*'   11 + 14, 0 failed
+./gradlew :app:testDebugUnitTest --tests '*AlertEscalationColdStartTest*' --tests '*AlertNotificationsTest*' --tests '*LoggerSilenceCheckTest*'
+                                                                                                    4 + 14 + 13, 0 failed
+```
+
 ## Session of 26 Nov 2026
 
 ### Status at session start
