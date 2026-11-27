@@ -11,6 +11,8 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.MemoryCodeVerifierCache
 import io.github.jan.supabase.auth.MemorySessionManager
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.user.UserSession
+import kotlinx.serialization.json.Json
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.ktor.client.engine.mock.MockEngine
@@ -53,6 +55,7 @@ class SupabaseAccountRepositoryTest {
     private var profileFails = false
     private var verifyFails = false
     private var logoutFails = false
+    private var tokenFails = false
 
     private fun MockRequestHandleScope.json(body: String, status: HttpStatusCode = HttpStatusCode.OK) =
         respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
@@ -71,6 +74,8 @@ class SupabaseAccountRepositoryTest {
             path == "/auth/v1/verify" -> json(session)
             path == "/auth/v1/logout" && logoutFails -> throw IOException("No connection")
             path == "/auth/v1/logout" -> json("{}")
+            path == "/auth/v1/token" && tokenFails -> throw IOException("No connection")
+            path == "/auth/v1/token" -> json(session)
             path == "/rest/v1/profiles" && profileFails -> throw IOException("No connection")
             path == "/rest/v1/profiles" -> json(profileRows)
             else -> json("null")
@@ -118,6 +123,8 @@ class SupabaseAccountRepositoryTest {
     private companion object {
         /** supabase-kt 3.8.0 tries a read four times over about seven seconds before failing. */
         const val RETRIES_GIVE_UP_MS = 15_000L
+        /** Well inside `RecordingLoop`'s 30 s wait for the account after a restart. */
+        const val RESTORE_WAIT_MS = 10_000L
     }
 
     private suspend fun awaitState(matches: (AccountState) -> Boolean): AccountState =
@@ -199,6 +206,78 @@ class SupabaseAccountRepositoryTest {
         form.cancel()
 
         withTimeout(2_000) { while (server.devices.isEmpty()) delay(10) }
+        assertEquals("public-key", server.devices["device-1"])
+    }
+
+    /**
+     * The app's process started again, as after a kill, with a session stored on the phone whose access token is
+     * [secondsLeft] from expiring out of an hour. The client is configured as `SupabaseClientProvider` builds the app's:
+     * the library's defaults, with only the lifecycle callbacks off.
+     */
+    private fun restartedWithAStoredSession(secondsLeft: Long): SupabaseAccountRepository {
+        val expiresAt = System.currentTimeMillis() / 1000 + secondsLeft
+        // The client works the expiry out from expires_in when a session is decoded, so it is set afterwards.
+        val stored = Json { ignoreUnknownKeys = true }.decodeFromString<UserSession>(
+            """{"access_token":"old","refresh_token":"refresh","expires_in":3600,"token_type":"bearer",
+               "user":{"id":"user-1","email":"ana@example.com","aud":"authenticated"}}"""
+        ).copy(expiresAt = kotlin.time.Instant.fromEpochSeconds(expiresAt))
+        assertEquals("the stored token's expiry", expiresAt, stored.expiresAt.epochSeconds)
+        val sessions = MemorySessionManager().also { runBlocking { it.saveSession(stored) } }
+        val restarted = createSupabaseClient("http://account.test", "key") {
+            httpEngine = MockEngine { request -> answer(request) }
+            install(Postgrest)
+            install(Auth) {
+                sessionManager = sessions
+                codeVerifierCache = MemoryCodeVerifierCache()
+                enableLifecycleCallbacks = false
+            }
+        }
+        return SupabaseAccountRepository(restarted, server, signer, { "device-1" }, cache, scope, offlineRetryMs = 200L)
+    }
+
+    // Gate 5 review S1 (28 Nov): restarted with no signal and a token in the last fifth of its life, the client
+    // can't load the session, and the account stayed Loading for as long as the signal was gone; recording after a
+    // kill gave up after 30 s and the courier saw only the loading screen.
+    @Test
+    fun restartedOfflineWithATokenDueForRefreshTheCourierIsStillReady() = runBlocking {
+        cache.save("user-1", UserProfile("Ana", MemberRole.COURIER))
+        tokenFails = true
+        profileFails = true
+
+        val restarted = restartedWithAStoredSession(secondsLeft = 300)
+
+        val state = withTimeout(RESTORE_WAIT_MS) { restarted.state.first { it !is AccountState.Loading } }
+        assertTrue("the client tried to refresh: $requests, state $state", requests.any { it.first == "/auth/v1/token" })
+        assertEquals(AccountState.Ready("user-1", "ana@example.com", UserProfile("Ana", MemberRole.COURIER)), state)
+    }
+
+    // Gate 5 review, mutant 24: a refresh that fails isn't a sign-out, which would make a restart forget the recording.
+    @Test
+    fun restartedOfflineWithAnExpiredTokenIsNotSignedOut() = runBlocking {
+        cache.save("user-1", UserProfile("Ana", MemberRole.COURIER))
+        tokenFails = true
+        profileFails = true
+
+        val restarted = restartedWithAStoredSession(secondsLeft = -60)
+
+        val state = withTimeout(RESTORE_WAIT_MS) { restarted.state.first { it !is AccountState.Loading } }
+        assertTrue("$state", state is AccountState.Ready)
+    }
+
+    @Test
+    fun restartedOfflineTheAccountCatchesUpOnceTheSignalReturns() = runBlocking {
+        cache.save("user-1", UserProfile("Ana", MemberRole.COURIER))
+        profileRows = """[{"display_name":"Ana","role":"courier"}]"""
+        tokenFails = true
+        val restarted = restartedWithAStoredSession(secondsLeft = 300)
+        withTimeout(RESTORE_WAIT_MS) { restarted.state.first { it !is AccountState.Loading } }
+        server.devices.clear()
+
+        tokenFails = false
+
+        // Nobody calls refresh: the repository tries again by itself. Signed in again for real, the phone is
+        // registered with the server, which needs a working session.
+        withTimeout(RETRIES_GIVE_UP_MS) { while (server.devices.isEmpty()) delay(50) }
         assertEquals("public-key", server.devices["device-1"])
     }
 

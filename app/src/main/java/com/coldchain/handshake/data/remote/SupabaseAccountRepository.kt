@@ -17,6 +17,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,7 +40,8 @@ class SupabaseAccountRepository(
     private val signer: DeviceSigner,
     private val deviceId: () -> String,
     private val profileCache: ProfileCache,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val offlineRetryMs: Long = OFFLINE_RETRY_MS
 ) : AccountRepository {
 
     private val _state = MutableStateFlow<AccountState>(AccountState.Loading)
@@ -54,12 +56,33 @@ class SupabaseAccountRepository(
             client.auth.sessionStatus.collectLatest { status ->
                 when (status) {
                     is SessionStatus.Authenticated -> arrive()
-                    is SessionStatus.NotAuthenticated -> _state.value = AccountState.SignedOut
-                    is SessionStatus.Initializing -> _state.value = AccountState.Loading
-                    // Being unable to refresh, usually from having no signal, isn't being signed out.
-                    is SessionStatus.RefreshFailure -> Unit
+                    // Restarted with no signal, the client can't load a session whose token is due for refresh: it
+                    // stays Initializing, or reports not signed in or a failed refresh (Gate 5 review S1; supabase-kt
+                    // 3.8.0, seen in SupabaseAccountRepositoryTest). Signing out deletes the stored session and a
+                    // missing signal doesn't, so a session still stored means "signed in, waiting for a signal".
+                    else -> waitForSignal(status)
                 }
             }
+        }
+    }
+
+    /**
+     * While the client can't load the session stored on this phone, the person is shown as signed in from it (with the
+     * profile kept here, else Unreachable), and loading it is tried again now and then. Ends when the client's status
+     * changes, which cancels this. With no session stored, they are signed out, or still loading while the client starts.
+     */
+    private suspend fun waitForSignal(status: SessionStatus) {
+        val user = runCatching { client.auth.sessionManager.loadSessionOrNull() }.getOrNull()?.user
+        if (user == null) {
+            _state.value = if (status is SessionStatus.Initializing) AccountState.Loading else AccountState.SignedOut
+            return
+        }
+        val cached = profileCache.load(user.id)
+        _state.value = if (cached != null) AccountState.Ready(user.id, user.email, cached)
+        else AccountState.Unreachable(user.id, user.email)
+        while (true) {
+            delay(offlineRetryMs)
+            runCatching { client.auth.loadFromStorage(autoRefresh = true) }
         }
     }
 
@@ -116,7 +139,14 @@ class SupabaseAccountRepository(
     override suspend fun completeProfile(displayName: String, role: MemberRole): Result<Unit> =
         remote.completeProfile(displayName.trim(), role).onSuccess { scope.launch { arrive() }.join() }
 
-    override suspend fun refresh(): Result<Unit> = attempt { arrive() }
+    /** With a session stored but not loaded (no signal at the start), loading it again comes first. */
+    override suspend fun refresh(): Result<Unit> = attempt {
+        if (client.auth.currentUserOrNull() == null && client.auth.sessionManager.loadSessionOrNull() != null) {
+            client.auth.loadFromStorage(autoRefresh = true)
+        } else {
+            arrive()
+        }
+    }
 
     override suspend fun registerDevice(): Result<Unit> {
         val result = attempt { signer.publicKey }
@@ -145,6 +175,11 @@ class SupabaseAccountRepository(
     } catch (e: Exception) {
         currentCoroutineContext().ensureActive()
         Result.failure(e)
+    }
+
+    companion object {
+        /** How often a session stored but not loaded is tried again while there is no signal. */
+        const val OFFLINE_RETRY_MS = 30_000L
     }
 
     @Serializable

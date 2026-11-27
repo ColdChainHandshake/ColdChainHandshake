@@ -49,7 +49,7 @@ class RecordingLoop(
     /**
      * After the process was restarted: picks recording up again for the shipment that was recording, if it is
      * still on the move and this phone still holds it. Otherwise forgets it. With no answer from the server about
-     * custody, this phone, which took custody, carries on.
+     * custody, or about the account, this phone, which took custody, carries on.
      */
     suspend fun restore(): Boolean {
         if (isRecording()) return true
@@ -58,10 +58,17 @@ class RecordingLoop(
         if (shipment == null || shipment.status !in CourierRecorder.ON_THE_MOVE) return forget()
 
         if (shipment.genesisHash != null) {
+            // Restarted with no signal, the account may not settle until the signal returns (Gate 5 review S1). As
+            // with custody, no answer means this phone, which took custody, carries on; only someone signed out, or a
+            // custodian the server names, ends it.
             val settled = withTimeoutOrNull(accountWaitMs) { account.state.first { it !is AccountState.Loading } }
-                ?: return false
-            val me = (settled as? AccountState.Ready)?.userId ?: return forget()
-            val custody = remote.getCustody(id).getOrNull()
+            val me = when (settled) {
+                null -> null
+                is AccountState.Ready -> settled.userId
+                is AccountState.Unreachable -> settled.userId
+                else -> return forget()
+            }
+            val custody = if (me == null) null else remote.getCustody(id).getOrNull()
             if (custody != null && custody.custodianId != me) {
                 asTheServerHasIt(shipment)
                 return forget()

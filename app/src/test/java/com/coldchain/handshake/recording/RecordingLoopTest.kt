@@ -337,6 +337,32 @@ class RecordingLoopTest {
         assertFalse(simulator.isMonitorOnly.value)
     }
 
+    // Gate 5 review S1 and mutant 14 (28 Nov): restarted with no signal, the account can take a while to settle, or
+    // never does until the signal returns. As with custody, this phone, which took custody, carries on recording.
+    @Test
+    fun afterARestartWithTheAccountNeverSettlingRecordingResumes() = runBlocking {
+        opened()
+        store.shipmentId = "SHIP-1"
+        account.setState(AccountState.Loading)
+
+        assertTrue(loop.restore())
+
+        assertTrue(simulator.isRunning.value)
+        assertEquals("SHIP-1", store.shipmentId)
+    }
+
+    @Test
+    fun afterARestartWithTheAccountUnreachableRecordingResumes() = runBlocking {
+        opened()
+        store.shipmentId = "SHIP-1"
+        account.setState(AccountState.Unreachable("courier", null))
+        server.offlineError = IOException("No signal")
+
+        assertTrue(loop.restore())
+
+        assertTrue(simulator.isRunning.value)
+    }
+
     @Test
     fun afterARestartNothingResumesForAShipmentHandedOverMeanwhile() = runBlocking {
         opened()
