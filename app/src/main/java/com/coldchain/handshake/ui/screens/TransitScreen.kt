@@ -181,12 +181,18 @@ fun TransitScreen(
         if (locationAllowed) viewModel.keepRecordingInBackground()
     }
 
-    // Permissions can change in Settings while this screen is away, so they are read again each time it comes back.
+    // Permissions can change in Settings while this screen is away, so they are read again each time it comes back. A
+    // recording already running is asked again when location or Nearby devices has just been allowed, so it adds
+    // location or moves into the foreground without starting over.
+    var foregroundAllowed by remember { mutableStateOf(RecordingService.canRunInForeground(context)) }
     LifecycleResumeEffect(Unit) {
         val nowAllowed = locationPermissions.any(::granted)
-        if (nowAllowed && !locationAllowed) viewModel.keepRecordingInBackground()
+        val nowForeground = RecordingService.canRunInForeground(context)
+        if ((nowAllowed && !locationAllowed) || (nowForeground && !foregroundAllowed)) viewModel.keepRecordingInBackground()
         locationAllowed = nowAllowed
+        foregroundAllowed = nowForeground
         if (nowAllowed) locationRefusedForGood = false
+        if (nowForeground) nearbyRefusedForGood = false
         onPauseOrDispose { }
     }
 
