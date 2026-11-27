@@ -121,6 +121,53 @@ after the rule: seeds.txt …CommonComponentRegistrar: CommonComponentRegistrar(
 - Rule slip, recorded: Gradle ran for 34 s (`checkReleaseKeepRules`) while the emulator was booting at 20:27; the
   emulator was stopped at once and restarted after the builds
 
+### 5.5 on the emulator and the take-over prompt on the S24, `SHIP-CB7F34`: `done` (22:50 to 23:20)
+
+Builds of `db0ce9b` on both devices. The sender (emulator, debug) created and dispatched `SHIP-CB7F34` (Courier
+Two, Gate3 Courier, Gate3 Receiver).
+- [x] **Deny twice → Settings** (emulator, release, Courier Two, no permissions): Take Custody asked for location,
+  then Nearby devices; both refused; custody was taken anyway and recording ran as a plain service. The banner read
+  "Allow Nearby devices" (new in `687e62a`; before it went straight to Settings). Tapped: both prompts again,
+  refused again. The button then read "Open Settings" and opened the app's page in Settings (`SpaActivity`, App info)
+- [x] **Found: Nearby devices allowed in Settings didn't reach the running recording.** With `pm grant … BLUETOOTH_CONNECT`
+  (what the Settings switch does) and back in the app, the banner was gone but the service had no `isForeground`.
+  Fixed test-first (`b17decb`): `TransitScreenTest.nearbyDevicesAllowedInSettingsMovesTheRunningRecordingIntoTheForeground`
+  failed first; `comingBackWithNothingAllowedAsksNothingMore` passes both ways
+- [x] **The take-over prompt on a real phone** (`687e62a`): the S24 debug app's Nearby devices and location revoked
+  with `pm revoke`; Courier Two named Gate3 Courier and confirmed; on the S24, Handover, Record PASS asked for location
+  ("While using the app") and Nearby devices (Allow) **before** anything was sent (server: 0 confirmations from
+  Gate3 Courier while the prompt was up); then leg 2 TRANSFER to Gate3 Courier from `88017876`, and the S24's service
+  in the foreground as `0x18`. Courier A then released to the receiver (S24, release), PASS: ACCEPTED, 3 legs, 14
+  readings. Nothing recording anywhere afterwards
+- [x] **48 dp targets and labels**, measured from the layout at 420 dpi (126 px) on Transit (empty, watching, top and
+  lower), the scanner (with and without camera), Handover (every scroll position), Alerts (empty and with a
+  shipment): every tappable element labelled; all at least 126 px except **the inspection's option rows, 85 px
+  (~32 dp)**. Fixed test-first (`8e8d182`): `OptionSelectorTest.everyOptionIsAtLeastAFingerTall` failed first
+  ("Check Again" measured 125 px: 48 dp after rounding)
+- [x] **Light and dark mode:** the app passes `darkTheme = true` in both system modes, so it shows one dark scheme;
+  the light scheme is unused (DECISIONS). Screenshots in `docs/agent/evidence/20261127_light_*.png` (no location on
+  either, checked in the layout before saving)
+- [x] **Found in that screenshot: an ended trip shown as UNKNOWN.** `SHIP-2DE57A` (PASS, ACCEPTED, 17 readings 60 s
+  apart on the server) showed "UNKNOWN (gap in the readings)" on Courier Two's phone two hours later: the screen
+  counted silence up to now. Fixed test-first (`67b034e`): the app reads when custody moved and `TripWindow` ends the
+  check there once a receiver holds it. `TripWindowTest` 4, `HandoverScreenTest.aShipmentOpenedAfterTheReceiverTookItIsCheckedUpToTheHandover`
+  (fails with the old window), `whileACourierHoldsItTheSilenceSinceTheLastReadingStillCounts`,
+  `ColdChainRemoteContractTest.custodyIsReadWithWhenItMoved`. `authenticated` may select `server_time` on the dev
+  project (`column_privileges`), so the new column read can't be refused
+- **The release app raised an ANR on the emulator** at 22:58 ("Waited 5001ms for FocusEvent"), with the camera
+  preview open under software rendering. At that moment the emulator's graphics composer used 91 % CPU, the phone and
+  wellbeing system apps had ANRs of their own, and the host had 1.9 GB free. The trace needs root, so the cause is
+  not proven; not seen on the S24. Afterwards the camera was refused on the emulator to keep the load down
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+  (CCH_RELEASE_KEYS set, no emulator) BUILD SUCCESSFUL in 28m 30s | core-domain 131 failed 0 | debug 585 failed 0
+  | release 520 failed 0 | lint 0 errors, 12 warnings | checkReleaseKeepRules passed      (at 67b034e; then --stop)
+```
+
+- **Observed, not fixed:** on Courier Two's Handover the form moved down 84 px between two layout reads 10 s apart
+  while readings arrived, so one tap missed (nothing wrong was sent; the server shows the confirmation only after the
+  retap). Recorded for Phase 6
+
 ### Courier A's final status, lint, audits: `done`
 
 - [x] `db0ce9b`, test-first: opening a shipment this phone holds asks the server for its status first (no polling);

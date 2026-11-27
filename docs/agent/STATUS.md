@@ -47,6 +47,10 @@ wrong about the world: the first real run found a server rule the fake server di
   handover's two confirmations on the same head from two physical devices; each courier's phone stopped recording by
   itself when custody moved, and B's phone showed ACCEPTED. Sign-up, sign-in, uploads, GPS, the scanner and
   confirmations all ran under R8 with no class or serialization error in the logs.
+- **Permissions on devices (27 Nov, `SHIP-CB7F34`):** a courier who refuses Nearby devices and location twice still
+  takes custody, is offered the prompt again from Transit, then Settings, which opens. A courier taking over on
+  Handover (the S24, permissions revoked) was asked for both before their confirmation was sent, and then recorded
+  in the foreground with location.
 - **Finding 11 on the dev project (edge logs):** a phone watching a shipment went from ~89 requests a minute to ~12
   while readings arrive and ~3.6 while nothing changes; the courier waiting for the receiver from ~48 to ~17, with
   one confirmation per new reading instead of one every 5 s.
@@ -113,8 +117,6 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
   seen on the S24 and the emulator, and on the S24 an alert raised offline escalated on WorkManager's real timer
   (27 Nov), but nobody checked the alert's own notification there.
 - GPS in deep Doze. GPS with the screen off and the network on is proven (above).
-- A courier taking over on Handover being asked for Nearby devices and location (`687e62a`): proven in a screen
-  test, not yet on a device.
 - A real logger. None will be used (`HARDWARE = none`); the virtual logger exists in code but the app doesn't use
   it yet.
 
