@@ -267,3 +267,105 @@ did not execute.
 - **C6 (an omission, not a contradiction).** STATUS's "no crash or ANR" is about the S24 on 23 and 24 Nov and is accurate for what it covers. But STATUS doesn't mention the ANR that the release build raised on the emulator on 27 Nov (22:58, "Waited 5001ms for FocusEvent"), which PROGRESS records as unexplained.
 - **C7.** The gate wording asks for "instrumented or scripted checks". The device evidence is hand-driven `adb` sessions written up in PROGRESS. It is careful and specific, but it cannot be re-run as a script or test.
 - **C8.** Screens: "✓ READINGS VERIFIED … match the server" and "TAMPER DETECTED" remain, against MASTER 5.5 item 1 ("remove … hash jargon") and its honesty rule. "Verified" over readings simulated on the courier's phone says more than is checked: only that the chain is unbroken and matches the server.
+
+## 5. Re-check at 76a110b
+
+Same reviewer, 28 Nov 2026, at HEAD `76a110b` (16 commits since `baf5a71`). Same rules as before: no device, emulator,
+`adb`, Supabase or MCP. Only targeted Gradle runs (three batches, one at a time), then `./gradlew --stop`. **The full
+suite was not run**, because the PC ran low on memory (HANDOFF Q5).
+
+**Verdict: GATE 5 MET WITH RESERVATIONS. Do not tag `gate-5` until the full proof at HEAD has run** (core-domain,
+debug and release unit tests, lint, both assembles). It is still outstanding: Claude Code stopped it for low memory,
+and it needs the owner (HANDOFF Q5). The S1 blocker is fixed, tested with the real supabase-kt client, and shown on
+the S24. No new finding blocks the gate.
+
+### 5.1 S1 and the "process death" row
+
+**S1: closed.** Evidence:
+
+- **The fix (`2e73ea1`):**
+  - `SupabaseAccountRepository.kt:56-87`: any status other than Authenticated goes to `waitForSignal`. A session still in storage gives Ready from the profile cache, else Unreachable, and `loadFromStorage` is retried every 30 s. With no stored session the result is SignedOut, or Loading while the client is Initializing.
+  - `RecordingLoop.kt:58-75`: `restore` carries on when the account never settles (`null`) or is Unreachable. Only NeedsProfile, SignedOut, or a custodian the server names ends the recording.
+- **JVM, with the real supabase-kt client and a mock HTTP engine** that throws `IOException` on `/auth/v1/token`:
+  - `restartedOfflineWithATokenDueForRefreshTheCourierIsStillReady`
+  - `…WithAnExpiredTokenIsNotSignedOut`
+  - `…TheAccountCatchesUpOnceTheSignalReturns`
+  - `RecordingLoopTest.afterARestartWithTheAccountNeverSettling…` and `…Unreachable…`
+  - Mutants 14 and 24 are now killed (5.2).
+- **Device, PROGRESS "Gate 5 S1 on the S24", build `2e73ea1`:**
+  - The app's own network was cut with the per-app firewall chain.
+  - It was killed with kill -9 after 53 minutes offline.
+  - The service restarted in the foreground (`0x18`) and kept recording with no signal.
+  - All 60 readings reached the server, seq 1 to 60, with no step over 1 and at most 61 s apart across the kill (54 at 01:56:36, 55 at 01:57:37).
+  - On reconnecting, two `register_device` 401s with the stale token were followed by a refresh at 02:02:30 and successful uploads. A 401 is not a `CC…` code, so `SupabaseColdChainRemote.call` (`:310-312`) returns it as a plain failure, which is retried, not marked as refused.
+
+**"Process death" row: MET WITH RESERVATION.** The reservations:
+
+- The device run cut the app's network, not airplane mode. supabase-kt sees the same connection failure either way.
+- It ran on `2e73ea1`, not HEAD. The later commits don't touch `restore` or the repository.
+- It is one run.
+
+### 5.2 Mutants re-run (10), each reverted with Edit
+
+| # | File | Mutation | Result | Killed by |
+|---|---|---|---|---|
+| 10 | `ServerHandover.kt` `custodyMovedOn` | `return !open` | killed | `HandoverWindowTest.afterARestartTheCourierSeesCustodyWithTheNextCourierAndStopsRenewing` |
+| 14 | `RecordingLoop.kt:66` | the account never settling → `return false` | killed | `RecordingLoopTest.afterARestartWithTheAccountNeverSettlingRecordingResumes` |
+| 20 | `HandoverViewModel.kt:326` | take-over records for any member role (`!= null`) | killed | `HandoverViewModelTest.theShipmentsReceiverRecordsNothingAfterAFailWhateverTheirProfileSays` |
+| 23 | `TransitViewModel.kt:307` | take-over records for any member role | killed | `TransitViewModelTest.whileWatchingCustodyComingToTheShipmentsReceiverRecordsNothingWhateverTheirProfileSays` (and `…MakesMeTheCustodian`) |
+| 24′ | `SupabaseAccountRepository.kt` `waitForSignal` | any status but Initializing → SignedOut, even with a session stored | killed | `SupabaseAccountRepositoryTest.restartedOfflineWithAnExpiredTokenIsNotSignedOut` (the due-for-refresh test alone didn't catch it) |
+| 26 | `SupabaseAccountRepository.kt:83` | the 30 s `loadFromStorage` retry never runs | **survived** | `…TheAccountCatchesUpOnceTheSignalReturns` passes without it. supabase-kt's own session job retries the refresh (`tryImportingSession`, `retryDelay`), so the loop is a second safety net that no test isolates. Not a safety gap |
+| 27 | `TemperatureCard.kt:45` | `watcherNote` ignores `tripEnded` | killed | `TemperatureCardTest.onceTheTripHasEndedTheWatcherIsToldNothingAboutTheCourier` |
+| 28 | `HandoverScreen.kt:142` | drop `ui.checkedAt` from the verdict's `remember` keys (S3) | **survived** | `HandoverViewModelTest.eachLookAtTheServerMovesTheTimeTheRecordIsJudgedAt` tests the ViewModel half. No screen test checks that the verdict changes when only `checkedAt` does. Display only, but it is the whole S3 fix on screen |
+| 29 | `LocalSession.kt:80` | unsent GPS points not counted | killed | `LocalOwnerTest.anotherPersonsUnsentLocationIsKeptAndTheNewSessionRefused` |
+| 30 | `TransitViewModel.kt:283` | `tripEnded` ignores a receiver holding the shipment | killed | `TransitViewModelTest.whileWatchingTheScreenKnowsTheTripEndedOnceTheReceiverHoldsTheShipment` |
+
+The two mutants in `TransitViewModel` (23 and 30) ran together; each failed its own named test.
+
+Clean tree after the reverts. `git diff --stat` was empty after each batch and at the end. `git status --short` is
+empty apart from this file's new section. The earlier `HANDOFF.md` change has since been committed by the author
+(`d13f5f5`).
+
+### 5.3 Regressions looked for in the new code
+
+- **Can someone who really signed out still be shown as Ready? No, by reading.** Two cases, both from the supabase-kt 3.8.0 bytecode:
+  - **Sign-out from the offline "Ready from cache" state.** There is no session in memory, so `signOut` skips `/logout` and runs `clearIfValidScope`, which calls `clearSession`. `clearSession` runs `deleteSession()` *before* `setSessionStatus(NotAuthenticated(isSignOut = true))`. `waitForSignal` then finds no stored session and sets SignedOut.
+  - **A refresh token revoked on the server.** `tryImportingSession` logs "The refresh token may have been revoked. Clearing session" and calls `clearSession`, with the same ordering.
+  - **Left open (R1, Low):** no test drives sign-out from the offline Ready-from-cache state (`signingOutWorksWithNoSignal` starts from a loaded session). Add one.
+- **Can the 30 s retry run with no session stored? No.** `waitForSignal` returns before the loop when `loadSessionOrNull()` gives no user, and `collectLatest` cancels the loop on any status change (Authenticated, or sign-out). With a stored session the server never accepts (for example a long outage), it retries every 30 s for as long as the process lives. That is harmless, and the library's own job retries anyway (mutant 26).
+- **R2 (Low): a failed member read right after a courier-to-courier take-over can stop courier B's phone from recording.** `HandoverViewModel.roleOnShipment` (`:373-378`) falls back to the screen's member list when `getMembers` fails. If that list is still empty, the role is null and B's phone records nothing until Transit's watcher takes over, which happens only if B is watching on Transit. This fails safe (a gap, then UNKNOWN).
+  - **Fix:** retry `getMembers` once, or decide from the custody row plus the cached member list.
+- **R3 (Info): `tripEnded` is only re-judged on the first round or when custody moves** (`TransitViewModel.kt:279-284`). If `getMembers` fails on that round for a shipment a receiver holds as QUARANTINED, "the courier's phone may be offline" can come back until custody moves again. ACCEPTED is caught by status.
+- **R4 (Info): S3's time advances only on a successful fetch.** With the receiver's own phone offline, the on-screen verdict freezes again. They can't record a PASS offline anyway (`ServerHandover.receiveOnce`), so it is display only.
+- **`RecordingLoop.restore`:**
+  - With the account Ready from cache and no network, `getCustody` fails and recording carries on, as intended.
+  - With the network up, a custodian the server names still ends the recording.
+  - NeedsProfile and SignedOut still forget it.
+  - **No regression found.**
+- **`tools/device/offline_restart.sh`:** the PID is checked as digits and the shipment ID against `[A-Z0-9-]`. `PKG` comes from the operator's environment and isn't checked (Info). `app_online` turns firewall chain 3 off whatever its state was before (Info).
+
+### 5.4 Claims C1 to C8, as STATUS.md and PROGRESS.md now stand
+
+| Claim | Now |
+|---|---|
+| C1 | **Resolved.** STATUS "Proven on real systems" adds offline process death (`SHIP-192472`). Small leftover: the finding 9 row in STATUS's table still cites only the online kill and the 74-minute run, not `SHIP-192472` or the new tests |
+| C2 | **Resolved** for the gate: PROGRESS "Rotation on the current builds" covers Transit while recording and Handover (`2e73ea1` debug), and the receiver's Handover with answers selected (`db0ce9b` release, a server shipment). These builds are not HEAD, and there is still no rotation test |
+| C3 | **Resolved.** STATUS now says "checked in debug local mode only". PROGRESS adds a server-shipment rotation check (not a kill) |
+| C4, C5 | **Resolved.** `3382063` reaches `custodyMovedOn`'s custodian branch, and mutant 10 is killed. The 26 Nov PROGRESS sentence stays as a dated record |
+| C6 | **Resolved.** STATUS mentions the emulator release ANR |
+| C7 | **Partly.** S1 now has a script (`tools/device/offline_restart.sh`). The other gate conditions are still hand-driven `adb` sessions, and STATUS doesn't say so |
+| C8 | **Mostly resolved** (`a405bb4`): "RECORD CHECK", "✓ RECORD UNBROKEN", "✗ RECORD DOESN'T ADD UP", and messages in plain words. **One string left:** `HandoverScreen.kt:799`, "Ineligible / Tamper Detected" (Low) |
+
+### 5.5 Other review findings at HEAD
+
+- **Fixed and covered:** S3 (mutant 28 shows the screen wiring is untested), S4, S4b, S6, S7, S12.
+- **Deferred with reasons in DECISIONS (28 Nov):** S2, S5, S8, S9, S10, S11. I accept them for Gate 5. S8 (location visible to every member, with no bounds) is a privacy item that should not slip past Phase 6.
+
+### 5.6 What remains before tagging `gate-5`
+
+1. **The full proof at HEAD**, with the owner's go (HANDOFF Q5).
+2. **Optional, not blocking:**
+   - a test for sign-out from the offline Ready-from-cache state (R1);
+   - a screen test for S3 (mutant 28);
+   - the "Tamper Detected" subtitle;
+   - the finding 9 row in STATUS.
