@@ -63,9 +63,13 @@ data class UploadedBatch(
     val publicKey: String?
 )
 
+/**
+ * @property sinceMs When the custodian took over, by the server's clock; null when the server didn't say.
+ */
 data class CustodyState(
     val leg: Int,
-    val custodianId: String
+    val custodianId: String,
+    val sinceMs: Long? = null
 )
 
 enum class HandoverState {

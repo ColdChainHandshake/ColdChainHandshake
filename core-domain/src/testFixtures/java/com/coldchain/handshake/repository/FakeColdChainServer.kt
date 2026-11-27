@@ -292,7 +292,7 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         if (receiving == null) {
             HandoverOutcome(HandoverState.WAITING, shipments.getValue(id).status)
         } else {
-            custody[id] = CustodyState(confirmation.leg + 1, receiving.userId)
+            custody[id] = CustodyState(confirmation.leg + 1, receiving.userId, sinceMs = System.currentTimeMillis())
             if (receiving.role == MemberRole.RECEIVER && shipments.getValue(id).status == ShipmentStatus.IN_TRANSIT) {
                 shipments[id] = shipments.getValue(id).copy(status = ShipmentStatus.ACCEPTED)
             }

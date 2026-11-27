@@ -69,6 +69,7 @@ import com.coldchain.handshake.crypto.IntegrityVerificationState
 import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverVerdictEngine
+import com.coldchain.handshake.handover.TripWindow
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShipmentStatus
@@ -135,9 +136,14 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
     }
 
     // Safety breach evaluation
-    val breachEvaluation = remember(telemetryEvents, shipment) {
-        shipment?.let { BreachDetector.evaluateForHandover(it, telemetryEvents, System.currentTimeMillis()) }
-            ?: BreachDetector.evaluateTelemetry(telemetryEvents)
+    // Up to now while a courier holds it; up to the handover once a receiver does (TripWindow).
+    val custodianRole = ui.members.firstOrNull { it.userId == ui.custody?.custodianId }?.role
+    val breachEvaluation = remember(telemetryEvents, shipment, ui.custody, custodianRole) {
+        shipment?.let {
+            BreachDetector.evaluateForHandover(
+                it, telemetryEvents, TripWindow.end(ui.custody, custodianRole, System.currentTimeMillis())
+            )
+        } ?: BreachDetector.evaluateTelemetry(telemetryEvents)
     }
     val temperaturePassed = breachEvaluation.temperaturePassed
     val cumulativeExcursionStr = remember(breachEvaluation) {

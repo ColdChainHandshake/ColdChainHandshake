@@ -174,6 +174,18 @@ class ColdChainRemoteContractTest {
         assertEquals(setOf("id", "lat", "lon", "accuracy_m", "device_ts"), sent.keys)
     }
 
+    // The time custody moved ends a finished trip's record (TripWindow), in the form PostgREST writes a timestamptz.
+    @Test
+    fun custodyIsReadWithWhenItMoved() = runBlocking {
+        answerWith("""[{"leg":3,"to_user":"receiver","server_time":"2026-11-27T15:58:11.126775+00:00"}]""")
+
+        val custody = remote.getCustody("SHIP-1").getOrThrow()!!
+
+        assertEquals(3, custody.leg)
+        assertEquals("receiver", custody.custodianId)
+        assertEquals(java.time.Instant.parse("2026-11-27T15:58:11.126Z").toEpochMilli(), custody.sinceMs)
+    }
+
     @Test
     fun aHandoverOutcomeIsRead() = runBlocking {
         answerWith("""{"state":"TRANSFERRED","status":"ACCEPTED"}""")

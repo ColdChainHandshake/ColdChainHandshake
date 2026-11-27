@@ -146,13 +146,13 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
 
     override suspend fun getCustody(shipmentId: String) = call {
         client.postgrest.from("custody_events")
-            .select(Columns.raw("leg,to_user")) {
+            .select(Columns.raw("leg,to_user,server_time")) {
                 filter { eq("shipment_id", shipmentId) }
                 order("leg", Order.DESCENDING)
                 limit(1)
             }
             .decodeSingleOrNull<CustodyRow>()
-            ?.let { CustodyState(it.leg, it.toUser) }
+            ?.let { CustodyState(it.leg, it.toUser, it.serverTime?.let(::serverTimeMs)) }
     }
 
     override suspend fun getChainHead(shipmentId: String) = call {
@@ -364,7 +364,15 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
     private data class CustodyStartRow(@SerialName("server_time") val serverTime: String)
 
     @Serializable
-    private data class CustodyRow(val leg: Int, @SerialName("to_user") val toUser: String)
+    private data class CustodyRow(
+        val leg: Int,
+        @SerialName("to_user") val toUser: String,
+        @SerialName("server_time") val serverTime: String? = null
+    )
+
+    /** A `timestamptz` as PostgREST writes it (ISO 8601 with an offset); null if it can't be read. */
+    private fun serverTimeMs(text: String): Long? =
+        runCatching { java.time.OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()
 
     @Serializable
     private data class ChainHeadRow(@SerialName("head_hash") val headHash: String, val count: Long)

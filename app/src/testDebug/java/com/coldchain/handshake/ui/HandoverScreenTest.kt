@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityOptionsCompat
 import com.coldchain.handshake.repository.ShipmentMember
+import com.coldchain.handshake.repository.CustodyState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -209,11 +210,13 @@ class HandoverScreenTest {
         courierReleased: Boolean = false,
         offlineOnArrival: Boolean = false,
         releasedTo: String = "receiver",
-        permissions: ActivityResultRegistry? = null
+        permissions: ActivityResultRegistry? = null,
+        thenOnTheServer: () -> Unit = {}
     ) {
         runBlocking {
             if (uploaded.isNotEmpty()) server.appendReadings("SHIP-1", uploaded, genesis, "courier-phone", "s").getOrThrow()
             if (courierReleased) courierReleases(releasedTo)
+            thenOnTheServer()
             server.currentUser = user
             val opened = ShipmentWorkflow(server, shipments) { "this-phone" }.open("SHIP-1").getOrThrow()
             account.setState(AccountState.Ready(user, null, UserProfile(user, role)))
@@ -478,6 +481,28 @@ class HandoverScreenTest {
 
         await("Custody has moved. The shipment is now ACCEPTED.")
         assertTrue(permissions.asked.toString(), permissions.asked.isEmpty())
+    }
+
+    // Found on the emulator (27 Nov): SHIP-2DE57A, accepted with a PASS, showed "UNKNOWN (gap in the readings)" on a
+    // phone that opened it two hours later, because the silence after its last reading was counted up to then.
+    @Test
+    fun aShipmentOpenedAfterTheReceiverTookItIsCheckedUpToTheHandover() {
+        val lastReading = now - 5 * minute
+
+        showOnServer("sender", MemberRole.SENDER, uploaded = readings(lastAt = lastReading, count = 6, genesisHash = genesis)) {
+            server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(status = ShipmentStatus.ACCEPTED)
+            server.custody["SHIP-1"] = CustodyState(2, "receiver", sinceMs = lastReading + 30_000L)
+        }
+
+        await("Temperature Result: ✓ IN RANGE")
+        assertTrue(compose.onAllNodes(hasText("UNKNOWN (gap", substring = true)).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun whileACourierHoldsItTheSilenceSinceTheLastReadingStillCounts() {
+        showOnServer("sender", MemberRole.SENDER, uploaded = readings(lastAt = now - 5 * minute, count = 6, genesisHash = genesis))
+
+        await("Temperature Result: UNKNOWN (gap in the readings)")
     }
 
     @Test
