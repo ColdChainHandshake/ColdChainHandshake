@@ -185,6 +185,24 @@ location: no coordinates, screenshots or place names are kept anywhere, only cou
   trace's main thread is idle in `Looper.pollOnce`, so not stuck in app code; the emulator then drew every app window
   black. Cold-booted again with `-no-snapshot`; the app then opened normally (focus checked before any tap)
 
+### 5.3 Multi-leg custody: `done` (on fakes and the local stack; not yet on devices)
+
+- [x] `MultiLegHandoverTest` (`0d0f844`), three phones on one fake server: courier A → courier B → receiver, custody
+  leg by leg, the chain carried on by B, A refused afterwards. Passed as written: the domain and server already did it
+- [x] The app side (`837aa9c`), test-first: `ShipmentWorkflowTest.severalCourierEmailsAreEachAddedAsACourier` (failed
+  first: "No account has that email address", the whole field taken as one email);
+  `HandoverViewModelTest.aCourierTakingOverFromAnotherCourierStartsRecordingOnTheirPhone` and
+  `TransitViewModelTest.whileWatchingCustodyComingToMeAsACourierStartsRecordingHere` (both failed first against a
+  stub: nothing recorded); `aReceiverTakingOverRecordsNothing`. The Dispatch field reads "Courier emails (commas between)"
+- [x] `LiveSupabaseIntegrationTest.aShipmentGoesThroughTwoCouriersBeforeTheReceiver` (`a3d6ab6`) on the local stack
+  (GoTrue, PostgREST, Kong, Postgres; CLI 3.3.0), after `db reset` and pgTAP
+
+```text
+npx supabase db reset && npx supabase test db                  Files=4, Tests=238 ... Result: PASS
+CCH_LIVE_SUPABASE_URL=… CCH_LIVE_SUPABASE_KEY=… ./gradlew :app:testDebugUnitTest   live tests 4, failures 0
+local database: the multi-leg shipment ACCEPTED, custody 1:START, 2:TRANSFER, 3:TRANSFER, 8 readings from 2 devices
+```
+
 ## Session of 26 Nov 2026
 
 ### Status at session start
