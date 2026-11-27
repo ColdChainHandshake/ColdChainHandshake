@@ -52,6 +52,9 @@ wrong about the world: the first real run found a server rule the fake server di
   and fixed. On the S24, with only the app's network cut for 53 minutes, its process was killed outright; Android
   restarted it and recording carried on with no signal; once the network returned all 60 readings reached the server,
   in order, none missing, at most 61 s apart across the kill. Before 28 Nov a kill had only been tried online.
+- **Rotation on the current builds (28 Nov, S24):** Transit while recording a dev-project shipment and Handover
+  (courier and receiver, release build) keep their shipment, the recording and the receiver's inspection answers
+  through landscape and back, in the same process.
 - **Permissions on devices (27 Nov, `SHIP-CB7F34`):** a courier who refuses Nearby devices and location twice still
   takes custody, is offered the prompt again from Transit, then Settings, which opens. A courier taking over on
   Handover (the S24, permissions revoked) was asked for both before their confirmation was sent, and then recorded

@@ -220,6 +220,23 @@ select … from readings where shipment_id='SHIP-192472'
   around the kill: 53@01:55:36, 54@01:56:36, [kill 01:57:07], 55@01:57:37, 56@01:58:38, 57@01:59:39
 ```
 
+### Rotation on the current builds (Gate 5 C2), and the receiver's Transit: `done` (02:03 to 02:20, 28 Nov)
+
+- [x] S24, debug `2e73ea1`, courier A recording `SHIP-192472` on the dev project. The S24's rotation settings were
+  saved (`accelerometer_rotation 0`, `user_rotation 0`), rotation forced with `settings put system user_rotation 1`
+  then 0, and the settings restored (checked: 0 and 0)
+  - Transit while recording: the same shipment in landscape and back, same pid 5778, still `isForeground=true 0x18`,
+    no FATAL
+  - Handover (custodian): `SHIP-192472 IN_TRANSIT` in landscape and back, no crash
+- [x] S24, **release** `db0ce9b`, the receiver's Handover for `SHIP-192472` with "Stage 2 (usable)" and "Passed"
+  selected: rotated to landscape and back, both still selected, same pid 21368 (the first such check with a server
+  shipment; before it was debug local mode only, STATUS C3). Then PASS: ACCEPTED, 2 legs, 71 readings; the S24's
+  debug app stopped recording by itself
+- **Found and fixed test-first (`25b4a6f`):** the receiver's Transit showed `SHIP-CB7F34` (accepted, 14 readings) as
+  the courier's recording card, "NO READING YET … simulated on this phone": custody reaching a receiver made the
+  watcher stop watching. The receiver case failed first; one older test that asserted this behaviour now asserts the
+  opposite (DECISIONS)
+
 ### Courier A's final status, lint, audits: `done`
 
 - [x] `db0ce9b`, test-first: opening a shipment this phone holds asks the server for its status first (no polling);
