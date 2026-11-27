@@ -33,6 +33,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -206,6 +207,72 @@ class RecordingLoopTest {
         withTimeout(1_000) { ended.await() }
         assertFalse(simulator.isRunning.value)
         assertEquals("SHIP-1", simulator.handedOver.value)
+    }
+
+    // Found on the S24 (27 Nov): after the handover the courier's phone still held the shipment as IN_TRANSIT. A screen
+    // showing a state the server has moved past isn't honest, so once custody moves this phone takes the server's
+    // status, whichever check noticed.
+    @Test
+    fun whenTheReceiverPassesWhileTheCourierWaitsThisPhoneHoldsTheShipmentAsAccepted() = runBlocking {
+        val renewalsOnly = RecordingLoop(
+            simulator, recorder, sync, serverHandover, server, account, shipments, store, { syncRequests++ },
+            loopMs = 20L, accountWaitMs = 500L, custodyEveryRounds = Long.MAX_VALUE
+        )
+        recorder.start(opened())
+        val ended = running.async { renewalsOnly.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+        serverHandover.release("SHIP-1", "receiver").getOrThrow()
+
+        server.currentUser = "receiver"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "receiver-phone", server.heads.getValue("SHIP-1").headHash, verdict = HandoverVerdict.PASS)
+        ).getOrThrow()
+        server.currentUser = "courier"
+        assertEquals(ShipmentStatus.ACCEPTED, server.shipments.getValue("SHIP-1").status)
+
+        withTimeout(1_000) { ended.await() }
+        assertEquals(ShipmentStatus.ACCEPTED, shipments.getShipment("SHIP-1").first()?.status)
+        assertEquals(ShipmentStatus.ACCEPTED, simulator.activeShipment.value?.status)
+    }
+
+    @Test
+    fun whenTheLoopsOwnCustodyReadFindsItMovedThisPhoneTakesTheServersStatus() = runBlocking {
+        recorder.start(opened())
+        val ended = running.async { loop.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(status = ShipmentStatus.QUARANTINED)
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+
+        withTimeout(5_000) { ended.await() }
+        assertEquals(ShipmentStatus.QUARANTINED, shipments.getShipment("SHIP-1").first()?.status)
+        assertEquals(ShipmentStatus.QUARANTINED, simulator.activeShipment.value?.status)
+    }
+
+    // A second courier taking over leaves the shipment on the road: nothing is moved past what the server says.
+    @Test
+    fun handedToAnotherCourierTheShipmentStaysInTransitHere() = runBlocking {
+        recorder.start(opened())
+        val ended = running.async { loop.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+
+        server.custody["SHIP-1"] = CustodyState(2, "courier-b")
+
+        withTimeout(5_000) { ended.await() }
+        assertFalse(simulator.isRunning.value)
+        assertEquals(ShipmentStatus.IN_TRANSIT, shipments.getShipment("SHIP-1").first()?.status)
+    }
+
+    @Test
+    fun afterARestartAShipmentHandedOverMeanwhileTakesTheServersStatus() = runBlocking {
+        opened()
+        store.shipmentId = "SHIP-1"
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(status = ShipmentStatus.ACCEPTED)
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+
+        assertFalse(loop.restore())
+
+        assertEquals(ShipmentStatus.ACCEPTED, shipments.getShipment("SHIP-1").first()?.status)
     }
 
     // Custody can only move away with this phone's own confirmation, so with no handover waiting it is read now and

@@ -62,7 +62,10 @@ class RecordingLoop(
                 ?: return false
             val me = (settled as? AccountState.Ready)?.userId ?: return forget()
             val custody = remote.getCustody(id).getOrNull()
-            if (custody != null && custody.custodianId != me) return forget()
+            if (custody != null && custody.custodianId != me) {
+                asTheServerHasIt(shipment)
+                return forget()
+            }
         }
 
         recorder.startHere(shipment)
@@ -78,7 +81,7 @@ class RecordingLoop(
             // Custody can move away only once this phone has confirmed a handover, and while one waits each renewal
             // asks. Otherwise it is read once a minute, as a safety net (finding 11).
             if (shipment.genesisHash != null && sendAndCheck(shipment, checkCustody = round % custodyEveryRounds == 0L)) {
-                simulator.onHandedOver(shipment)
+                simulator.onHandedOver(asTheServerHasIt(shipment))
                 break
             }
             round++
@@ -107,6 +110,17 @@ class RecordingLoop(
         if (!checkCustody) return false
         val custody = remote.getCustody(shipment.id).getOrNull() ?: return false
         return custody.custodianId != me
+    }
+
+    /**
+     * Custody has moved, so the shipment's status may have too (ACCEPTED or QUARANTINED at a receiver; still IN_TRANSIT
+     * with another courier). This phone takes the server's status rather than keep showing one the server has moved
+     * past. With no answer it keeps its own copy, which the next opening of the shipment brings up to date; recording
+     * ends either way.
+     */
+    private suspend fun asTheServerHasIt(shipment: Shipment): Shipment {
+        handover.refresh(shipment.id)
+        return shipments.getShipment(shipment.id).firstOrNull() ?: shipment
     }
 
     private fun forget(): Boolean {
