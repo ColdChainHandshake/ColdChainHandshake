@@ -789,12 +789,30 @@ fun TransitScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = TemperatureCard.lastReadingLine(sortedEvents.firstOrNull()?.timestamp) {
+                        text = TemperatureCard.lastReadingLine(sortedEvents.firstOrNull()?.timestamp, isMonitorMode) {
                             timeFormatter.format(Date(it))
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val watcherNote = if (!isMonitorMode) null else TemperatureCard.watcherNote(
+                        newestReadingAt = sortedEvents.firstOrNull()?.timestamp,
+                        checkedAt = ui.serverCheckedAt,
+                        checkFailing = ui.serverUnreachable,
+                        maxSilenceMs = ProductProfiles.byId(
+                            currentShipment?.productProfileId ?: ProductProfiles.DEFAULT.id
+                        ).maxSilenceMs,
+                        formatTime = { timeFormatter.format(Date(it)) }
+                    )
+                    if (watcherNote != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = watcherNote,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
 

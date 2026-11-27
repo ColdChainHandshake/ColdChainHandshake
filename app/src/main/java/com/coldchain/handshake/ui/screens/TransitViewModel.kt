@@ -53,6 +53,8 @@ import javax.inject.Inject
  * @property remoteGps The custodian's last reported location, while watching.
  * @property myLocation The newest location this phone recorded for the shipment, and whether the server has it.
  * @property locating The recording service records location right now (allowed is not enough: Android may refuse it).
+ * @property serverCheckedAt While watching, when this phone last fetched the shipment's readings from the server.
+ * @property serverUnreachable While watching, the last fetch failed: what is shown may be out of date.
  */
 data class TransitUiState(
     val shipment: Shipment? = null,
@@ -63,7 +65,9 @@ data class TransitUiState(
     val handedOverShipmentId: String? = null,
     val remoteGps: GpsLocationData? = null,
     val myLocation: RecordedLocation? = null,
-    val locating: Boolean = false
+    val locating: Boolean = false,
+    val serverCheckedAt: Long? = null,
+    val serverUnreachable: Boolean = false
 )
 
 /**
@@ -128,7 +132,10 @@ class TransitViewModel @Inject constructor(
             simulator.activeShipment.collect { shipment ->
                 _state.update {
                     if (shipment?.id == it.shipment?.id) it.copy(shipment = shipment)
-                    else it.copy(shipment = shipment, isCustodian = false, remoteGps = null, myLocation = null)
+                    else it.copy(
+                        shipment = shipment, isCustodian = false, remoteGps = null, myLocation = null,
+                        serverCheckedAt = null, serverUnreachable = false
+                    )
                 }
                 saved[KEY_SHIPMENT_ID] = shipment?.id
             }
@@ -241,7 +248,13 @@ class TransitViewModel @Inject constructor(
         var lastCustody: CustodyState? = null
         var firstRound = true
         while (true) {
-            val newReadings = history.hydrateHistory(shipmentId).getOrNull() ?: 0
+            val fetched = history.hydrateHistory(shipmentId)
+            val checkedAt = System.currentTimeMillis()
+            _state.update {
+                if (fetched.isSuccess) it.copy(serverCheckedAt = checkedAt, serverUnreachable = false)
+                else it.copy(serverUnreachable = true)
+            }
+            val newReadings = fetched.getOrNull() ?: 0
             val custody = remote.getCustody(shipmentId).getOrNull()
             val custodyMoved = custody != null && custody != lastCustody
             if (custody != null) lastCustody = custody

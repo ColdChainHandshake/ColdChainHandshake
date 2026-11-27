@@ -257,6 +257,31 @@ class TransitViewModelTest {
         assertTrue("$inTheThirdMinute requests in the third minute", inTheThirdMinute <= 6)
     }
 
+    // What the watcher's note rests on: when this phone last heard from the server, and whether it can't now. A quiet
+    // courier and the watcher's own lost connection must not look alike.
+    @Test
+    fun whileWatchingTheScreenKnowsWhenItLastReachedTheServerAndWhenItCannot() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(1_000)
+        val reached = vm.state.value.serverCheckedAt
+        assertTrue("checked: $reached", reached != null)
+        assertFalse(vm.state.value.serverUnreachable)
+
+        server.offlineError = IOException("No signal")
+        advanceTimeBy(35_000)
+        assertTrue(vm.state.value.serverUnreachable)
+        assertEquals(reached, vm.state.value.serverCheckedAt)
+
+        server.offlineError = null
+        advanceTimeBy(35_000)
+        assertFalse(vm.state.value.serverUnreachable)
+        visible.cancel()
+    }
+
     @Test
     fun aReadingArrivingWhileWatchingIsFetchedAndTheWatcherAsksQuicklyAgain() = runTest {
         val genesis = server.seedShipment("SHIP-1", custodian = "courier")

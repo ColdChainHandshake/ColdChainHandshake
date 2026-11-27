@@ -3,6 +3,7 @@ package com.coldchain.handshake.ui.components
 import com.coldchain.handshake.models.ProductProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -49,6 +50,38 @@ class TemperatureCardTest {
         val newest = TemperatureCard.lastReadingLine(1_700_000_000_000L) { at -> if (at == 1_700_000_000_000L) "09:13:20" else "?" }
         assertTrue(newest, newest.startsWith("Last reading: 09:13:20"))
         assertTrue(newest, newest.contains("simulated"))
+    }
+
+    // A watcher's readings are made on the courier's phone, not this one.
+    @Test
+    fun aWatchersLineSaysTheReadingsAreMadeOnTheCouriersPhone() {
+        val line = TemperatureCard.lastReadingLine(1_700_000_000_000L, watching = true) { "09:13:20" }
+        assertTrue(line, line.contains("courier's phone"))
+        assertFalse(line, line.contains("this phone"))
+    }
+
+    // A phone watching a shipment says when nothing newer has reached the server for longer than the product allows,
+    // as of its own last check, and says so differently when it is this phone that can't reach the server.
+    @Test
+    fun aWatcherIsToldWhenNothingNewerHasReachedTheServer() {
+        val newest = 1_700_000_000_000L
+        val time: (Long) -> String = { at -> if (at == newest) "09:13" else "09:25" }
+        val limit = vaccine.maxSilenceMs
+
+        assertNull(TemperatureCard.watcherNote(newest, newest + limit, checkFailing = false, maxSilenceMs = limit, formatTime = time))
+
+        val quiet = TemperatureCard.watcherNote(newest, newest + 12 * 60_000L, checkFailing = false, maxSilenceMs = limit, formatTime = time)!!
+        assertTrue(quiet, quiet.contains("No reading made after 09:13"))
+        assertTrue(quiet, quiet.contains("09:25"))
+        assertTrue(quiet, quiet.contains("12 min"))
+
+        val cut = TemperatureCard.watcherNote(newest, newest + 12 * 60_000L, checkFailing = true, maxSilenceMs = limit, formatTime = time)!!
+        assertTrue(cut, cut.startsWith("This phone last reached the server at 09:25"))
+        assertFalse(cut, cut.contains("courier"))
+
+        val never = TemperatureCard.watcherNote(null, null, checkFailing = true, maxSilenceMs = limit, formatTime = time)!!
+        assertTrue(never, never.contains("hasn't reached the server"))
+        assertNull(TemperatureCard.watcherNote(null, newest, checkFailing = false, maxSilenceMs = limit, formatTime = time))
     }
 
     // Security review S5: a value that isn't a number must never read as within range.
