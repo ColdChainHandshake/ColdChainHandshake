@@ -101,11 +101,11 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
     // History sync status for this shipment
     val syncState by viewModel.syncState.collectAsStateWithLifecycle()
 
-    // What the server holds, which is what catches a removed tail or a rewritten history
-    val serverHead by viewModel.serverHead.collectAsStateWithLifecycle()
-
-    // Chronological telemetry events strictly for this shipment
-    val telemetryEvents by viewModel.readings.collectAsStateWithLifecycle()
+    // This shipment's readings, and what the server holds, which catches a removed tail or a rewritten history.
+    // Taken as one pair, so the check never compares a new head with readings still on their way to the screen.
+    val shown by viewModel.shownHistory.collectAsStateWithLifecycle()
+    val serverHead = shown.serverHead
+    val telemetryEvents = shown.readings
 
     // Historical alerts strictly for this shipment
     val tripAlerts by viewModel.tripAlerts.collectAsStateWithLifecycle()

@@ -223,6 +223,69 @@ class HandoverViewModelTest {
         assertTrue(after.notice!!.contains("New readings arrived"))
     }
 
+    // Found on the emulator (27 Nov): twice a tap on the Handover form landed ~170 px low, each time within 2 s of a new
+    // reading arriving. The head is set the moment new readings are saved, and the stored readings follow a moment
+    // later, so the screen could compare the new head with the old readings: "this device has N readings but the
+    // server holds N+1", shown as tampering, with a longer message that moved the form.
+    @Test
+    fun whileReadingsArriveTheScreenNeverComparesTheNewHeadWithTheOldReadings() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        val seenBehind = mutableListOf<String>()
+        val watching = visible.launch {
+            vm.shownHistory.collect { shown ->
+                val onServer = shown.serverHead?.count
+                if (onServer != null && shown.readings.size < onServer) seenBehind += "${shown.readings.size} < $onServer"
+            }
+        }
+        visible.launch { vm.runWhileVisible() }
+        withTimeout(5_000) { telemetry.getTemperatures("SHIP-1").first { it.size == 10 } }
+
+        repeat(3) { n ->
+            courierSendsReading(seq = 11L + n)
+            withTimeout(10_000) { vm.serverHead.first { it?.count == 11L + n } }
+            withTimeout(5_000) { vm.readings.first { it.size == 11 + n } }
+        }
+
+        watching.cancel()
+        assertTrue("the screen saw fewer readings than the head: $seenBehind", seenBehind.isEmpty())
+    }
+
+    // The wait above must not hide a real gap: a device still short of the server's readings after the moment it takes
+    // them to reach the screen is shown the mismatch, which is what catches a removed tail.
+    @Test
+    fun aDeviceStillShortOfTheServersReadingsIsShownTheMismatch() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        val shown = mutableListOf<ShownHistory>()
+        val watching = visible.launch { vm.shownHistory.collect { shown += it } }
+        history.hydrateHistory("SHIP-1").getOrThrow()
+        withTimeout(5_000) { vm.shownHistory.first { it.readings.size == 10 && it.serverHead?.count == 10L } }
+
+        // The newest stored reading disappears from this phone, and nothing fetches it again.
+        db.runInTransaction { db.openHelper.writableDatabase.execSQL("DELETE FROM temperature_events WHERE seq = 10") }
+
+        val mismatch = kotlinx.coroutines.withTimeoutOrNull(HandoverViewModel.CATCH_UP_MS + 5_000) {
+            vm.shownHistory.first { it.readings.size == 9 && it.serverHead?.count == 10L }
+        } ?: throw AssertionError("shown: ${shown.map { "${it.readings.size}/${it.serverHead?.count}" }}")
+        watching.cancel()
+        assertEquals(9, mismatch.readings.size)
+    }
+
+    /** The courier's phone sends reading [seq], half a minute after the one before. */
+    private suspend fun courierSendsReading(seq: Long) {
+        val held = telemetry.getTemperatures("SHIP-1").first().sortedBy { it.seq }
+        val last = held.last()
+        val next = HashChainService.appendHash(
+            TemperatureEvent("TE-$seq", "SHIP-1", "LOG-1", last.timestamp + minute / 2, 5.0, "", "", SyncStatus.PENDING, seq = seq),
+            last.currentHash
+        )
+        val user = server.currentUser
+        server.currentUser = "courier"
+        server.appendReadings("SHIP-1", listOf(next), last.currentHash, "courier-phone", "s").getOrThrow()
+        server.currentUser = user
+    }
+
     /** The courier's phone sends the reading after the ten from [readings], half a minute after the last. */
     private suspend fun courierSendsTheNextReading() {
         val last = readings().last()

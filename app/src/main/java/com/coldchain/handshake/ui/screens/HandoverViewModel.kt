@@ -33,6 +33,7 @@ import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -41,6 +42,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -52,6 +55,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** The readings the Handover screen shows and the server head it checks them against. */
+data class ShownHistory(
+    val readings: List<TemperatureEvent> = emptyList(),
+    val serverHead: ServerChainHead? = null
+)
 
 /**
  * @property me The signed-in person; null when signed out or in debug local mode.
@@ -124,6 +133,26 @@ class HandoverViewModel @Inject constructor(
 
     val readings: StateFlow<List<TemperatureEvent>> = perShipment(emptyList(), telemetry::getTemperatures)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_SHARING_MS), emptyList())
+
+    /**
+     * The readings the screen shows and the server head it checks them against, as a pair that belongs together.
+     * The head is set the moment new readings are saved, and the stored readings follow a moment later; compared in
+     * between, they look like a device missing the server's newest readings, which the screen calls tampering. So a
+     * head ahead of the readings waits [CATCH_UP_MS] for them, showing the last head they agreed with meanwhile. Still
+     * behind after that, the pair is shown as it is and the mismatch stands.
+     */
+    val shownHistory: StateFlow<ShownHistory> = channelFlow {
+        var agreed: ServerChainHead? = null
+        combine(readings, serverHead, ::Pair).collectLatest { (events, head) ->
+            if (head != null && events.size < head.count) {
+                send(ShownHistory(events, agreed?.takeIf { it.count <= events.size }))
+                delay(CATCH_UP_MS)
+            } else {
+                agreed = head
+            }
+            send(ShownHistory(events, head))
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_SHARING_MS), ShownHistory())
 
     val tripAlerts: StateFlow<List<Alert>> = perShipment(emptyList(), alerts::getAllAlerts)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_SHARING_MS), emptyList())
@@ -327,6 +356,8 @@ class HandoverViewModel @Inject constructor(
     }
 
     companion object {
+        /** How long a new server head waits for the readings saved with it to reach the screen. */
+        const val CATCH_UP_MS = 2_000L
         const val HISTORY_POLL_MS = 3_000L
         const val RELEASED_NOTICE = "Confirmed. This phone keeps recording until custody moves. Waiting for the " +
             "other person to confirm on their own phone."
