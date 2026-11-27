@@ -166,6 +166,37 @@ class TransitViewModelTest {
         assertNotNull(vm.state.value.notice)
     }
 
+    // Found on devices (27 Nov): courier A handed SHIP-2DE57A to courier B while it was IN_TRANSIT, and A's phone kept
+    // that status after the receiver accepted it. Opening a shipment this phone already holds asks the server first.
+    @Test
+    fun openingAShipmentThisPhoneHoldsShowsTheServersStatusFromTheStart() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("courier", MemberRole.COURIER)
+        workflow.open("SHIP-1").getOrThrow()
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(status = ShipmentStatus.ACCEPTED)
+        server.custody["SHIP-1"] = CustodyState(3, "receiver")
+        val vm = viewModel()
+
+        vm.onCodeScanned("SHIP-1").join()
+
+        assertEquals(ShipmentStatus.ACCEPTED, vm.state.value.shipment?.status)
+        assertEquals(ShipmentStatus.ACCEPTED, shipments.getShipment("SHIP-1").first()?.status)
+    }
+
+    @Test
+    fun withNoSignalAShipmentThisPhoneHoldsStillOpensAsThisPhoneHasIt() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("courier", MemberRole.COURIER)
+        workflow.open("SHIP-1").getOrThrow()
+        server.offlineError = IOException("No signal")
+        val vm = viewModel()
+
+        vm.onCodeScanned("SHIP-1").join()
+
+        assertEquals(ShipmentStatus.IN_TRANSIT, vm.state.value.shipment?.status)
+        assertNull(vm.state.value.notice)
+    }
+
     @Test
     fun aKnownCodeOpensTheShipmentToWatch() = runTest {
         server.seedShipment("SHIP-1", custodian = "courier")

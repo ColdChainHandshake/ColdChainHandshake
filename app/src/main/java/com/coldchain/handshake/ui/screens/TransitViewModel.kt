@@ -202,11 +202,18 @@ class TransitViewModel @Inject constructor(
             .onFailure { e -> _state.update { it.copy(notice = e.message) } }
     }
 
-    /** A code only names a shipment this phone holds or the server lets this person open; nothing is built from it. */
+    /**
+     * A code only names a shipment this phone holds or the server lets this person open; nothing is built from it. One
+     * this phone holds is opened as the server has it now, so a courier who handed it on sees where it ended up, not the
+     * status it had when they let it go; with no answer, as this phone has it.
+     */
     fun onCodeScanned(code: String): Job = viewModelScope.launch {
-        var resolved = shipments.getShipment(code).firstOrNull()
-        if (resolved == null && me != null) {
-            resolved = workflow.open(code).onFailure { e -> _state.update { it.copy(notice = e.message) } }.getOrNull()
+        val held = shipments.getShipment(code).firstOrNull()
+        var resolved = held
+        if (me != null && (held == null || held.genesisHash != null)) {
+            val opened = workflow.open(code)
+            resolved = opened.getOrNull() ?: held
+            if (resolved == null) opened.onFailure { e -> _state.update { it.copy(notice = e.message) } }
         }
         if (resolved == null) return@launch
         _state.update { it.copy(notice = null) }
