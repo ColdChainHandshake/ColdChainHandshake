@@ -208,7 +208,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Historical Destination Inspection Report",
+                    text = "The trip's record, and the inspection at handover",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -425,7 +425,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Chronological Audit Log",
+                        text = "Oldest first",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

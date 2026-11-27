@@ -128,13 +128,16 @@ fun AppNavigation(statusLine: String, actionLabel: String, onAction: () -> Unit,
             }
             composable(Screen.Transit.route) {
                 TransitScreen(
-                    onNavigateToDispatch = {
-                        navController.navigate(Screen.Dispatch.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+                    // Only someone whose role has the Dispatch tab is offered the way there.
+                    onNavigateToDispatch = if (Screen.Dispatch !in tabs) null else {
+                        {
+                            navController.navigate(Screen.Dispatch.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
                             }
-                            launchSingleTop = true
-                            restoreState = true
                         }
                     }
                 )

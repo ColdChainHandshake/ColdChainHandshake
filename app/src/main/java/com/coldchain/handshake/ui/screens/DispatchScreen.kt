@@ -310,14 +310,17 @@ fun DispatchScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = workerId,
-                            onValueChange = { workerId = it },
-                            label = { Text("Worker ID") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        // Only a shipment kept on this phone stores a worker ID; the server records who created it.
+                        if (!signedIn) {
+                            OutlinedTextField(
+                                value = workerId,
+                                onValueChange = { workerId = it },
+                                label = { Text("Worker ID") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
                         OutlinedTextField(
                             value = loggerId,
                             onValueChange = { loggerId = it },
@@ -441,9 +444,12 @@ fun DispatchScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Worker ID", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(shipment.workerId, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        // On the server the sender's account ID stands here, which means nothing to a person.
+                        if (shipment.genesisHash == null) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Worker ID", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(shipment.workerId, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            }
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Paired Logger", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
