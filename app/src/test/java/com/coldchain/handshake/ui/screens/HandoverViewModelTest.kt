@@ -2,6 +2,7 @@ package com.coldchain.handshake.ui.screens
 
 import android.content.Context
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.handover.HandoverOrchestrator
@@ -84,14 +85,19 @@ class HandoverViewModelTest {
     @After
     fun tearDown() {
         visible.cancel()
+        // A ViewModel is cleared when its screen goes; here nothing clears them, so their work is stopped before the next
+        // test sets Dispatchers.Main again (one still emitting meanwhile fails that test).
+        created.forEach { it.viewModelScope.cancel() }
         simulator.stopContinuousSimulation()
         Dispatchers.resetMain()
         db.close()
     }
 
+    private val created = mutableListOf<HandoverViewModel>()
+
     private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = HandoverViewModel(
         account, simulator, history, telemetry, alerts, handovers, server, serverHandover, orchestrator, saved
-    )
+    ).also { created += it }
 
     private fun readings(count: Int = 10, genesisHash: String = genesis) = HashChainService.buildChain(
         (count - 1 downTo 0).map { back ->
