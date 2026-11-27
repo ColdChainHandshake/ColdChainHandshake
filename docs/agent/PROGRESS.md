@@ -1,6 +1,27 @@
 # Progress
 
-**Next action (27 Nov, ~16:05, the owner stopped the session to leave):** done today, all on `rebuild/trust-core`:
+**Next action (28 Nov, ~01:00): Gate 5 review returned NOT MET** (`docs/agent/gate5_review.md`). In order:
+1. **S1 (blocks the gate):** a restart offline with the access token past 80 % of its life leaves the account
+   Loading; `RecordingLoop.restore` gives up after 30 s and the service stops. Reproduce with the real auth client in
+   `SupabaseAccountRepositoryTest`, then fix test-first: restore carries on recording with a remembered shipment when
+   the account never settles (mutant 14); a refresh failure is not a sign-out (mutant 24); the app doesn't stay on
+   its loading screen (offline Ready or Unreachable from the profile cache); a later retry once the network returns.
+   Device proof on the S24's debug app with only the app's network cut (`cmd connectivity
+   set-package-networking-enabled false com.coldchain.handshake.debug`, not airplane mode: the owner is asleep):
+   take custody, offline 50+ min, `run-as … kill -9`, readings keep growing in Room offline, network back, all reach
+   the server in order. Script it under `tools/device/`
+2. **Take-over by shipment role (mutants 20, 23; S6):** a receiver's FAIL (QUARANTINED counts as on the move) must
+   not start recording on their phone; decide by the shipment member role. Mutant 10: a test reaching
+   `custodyMovedOn`'s custodian branch
+3. **Honesty (owner's rule):** S3 Handover verdict with a ticking "now" while a courier holds it; S4 no watcher note
+   once a receiver holds it; S4b "No alerts raised on this phone" unless alerts are fetched; C8 reword "READINGS
+   VERIFIED" / "TAMPER DETECTED"; S7 count unsent GPS points before sign-out
+4. Rotation on the current build on the emulator (C2); STATUS corrections C1 to C8; DECISIONS outcomes for S2, S5,
+   S8 to S12 (fixed or deferred)
+5. Full proof, then `SendMessage` the Gate 5 reviewer to re-check S1 and mutants 10, 14, 20, 23, 24; tag `gate-5`
+   only on MET. Then Phase 4 (4.3, 4.1), Gate 4, Phase 6, Gate 6
+
+**Earlier next action (27 Nov, ~16:05, the owner stopped the session to leave):** done today, all on `rebuild/trust-core`:
 the honesty pass, the receiver's PASS on `SHIP-49A74F`, GPS in the recording service, finding 11, two bugs found on
 the emulator (a "Tamper Detected" flash that moved the Handover form; false DATA_GAP alerts from a watching phone),
 location coming back after a background restart, the S24 run of `SHIP-1D87CC` (kills, 74 minutes offline, an alert
