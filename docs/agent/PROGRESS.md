@@ -21,6 +21,76 @@ End of every session: push the branch, make a verified bundle on D:.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
+## Session of 27 Nov 2026
+
+### Status at session start (10:28)
+
+- **Git:** `rebuild/trust-core`, HEAD `fe43193`, clean. Tags `gate-0` to `gate-3`. One stash, "honesty pass,
+  untested: screen texts (26 Nov)"
+- **Owner's message:** apply the stash first, prove it, commit. Before Gate 5, add GPS in the recording service,
+  finding 11's polling, the 30-minute airplane run, and a manual security review since `gate-3` by Gate 5's reviewer
+  (`DECISIONS.md`, 27 Nov). Full proof in the foreground, then `./gradlew --stop`, then device work
+- **Devices:** the S24 (`RZCY820AG0F`) awake, unlocked, on charge with Stay awake, the debug app of `229cefc`
+  recording `SHIP-49A74F` in the background (`RecordingService isForeground=true types=0x00000010`). No emulator.
+  Free RAM 6.8 GB of 15.6 GB
+- **`SHIP-49A74F` on the dev project at 10:30:** IN_TRANSIT, 777 readings, 733 courier confirmations (one renewal
+  per new head), the newest reading received 2.6 s after it was made. One gap over 90 s in the whole run: 125 s at
+  seq 49, the reinstall of 26 Nov
+- **The overnight run, from the S24's battery history** (`dumpsys batterystats --history`, reset 26 Nov 22:47:34,
+  on battery from then until 27 Nov 10:26:39): screen off from 22:59:51; deep Doze (`device_idle=full`) from
+  23:01:51, with maintenance windows at 00:01, 02:02 and 06:03 (Doze's intervals growing to 4 hours); screen woke at
+  08:53:46. The 582 readings made in that window (seq 101 to 682) are all on the server, contiguous, at most 61 s
+  apart, received 3.7 s after they were made on average and 8 s at most. Readings 73 to 777 (11.7 hours) all
+  arrived within 8 s
+
+```text
+select ... from readings where shipment_id='SHIP-49A74F' and logger_ts between 23:01:51 and 08:53:46 IST
+  count 582 | seq 101..682 | max_delay_s 8 | avg_delay_s 3.7 | max_gap_s 61
+```
+
+### The honesty pass stash: `done` (partly; the rest is listed below)
+
+- [x] `stash@{0}` applied (`git stash apply`, the stash kept), full proof, committed `9b40ab2`
+- [x] Found while checking it: the new "Last reading: …" line formatted the simulator's clock, which is set to the
+  moment recording starts, so before any reading it named a time no reading was made. Fixed test-first (`ddfbb38`):
+  `TemperatureCardTest.theLineUnderTheTemperatureNamesTheNewestStoredReadingOrSaysThereIsNone` failed first
+  (unresolved `lastReadingLine`), then 5/5; release compiles
+- [ ] Still to do (seen on the emulator today): "Room Local Database" on Transit's log, a hash prefix (`#6380742e`) on
+  every reading on Transit and Handover, the sender's account UUID as "Worker: …" on Handover, wrapped labels
+  (CONTINUE Step 4). "Checked every few seconds" and "while this screen is open" become false with finding 11 and
+  GPS, and change in those commits
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+  BUILD SUCCESSFUL in 11m 42s | core-domain 122 failed 0 | debug 524 failed 0 | release 467 failed 0 | lint 0 errors (22 warnings)
+./gradlew :app:testDebugUnitTest --tests '*TemperatureCardTest*'   before: Unresolved reference 'lastReadingLine'
+                                                                   after:  tests=5 failures=0 errors=0
+```
+
+### Device: the receiver's PASS on `SHIP-49A74F` (PROGRESS item 2, first half): `done`
+
+Debug APK of `9b40ab2` (BuildConfig: dev ref 1, demo ref 0, `sb_secret_` 0) installed over the receiver's app on
+the emulator with `adb install -r` (still signed in). The S24 kept the build of `229cefc`.
+
+- [x] Transit, opened by ID: 792 readings downloaded, temperature and status from data
+- [x] Handover: verdict PASS over 793 readings (4.5 to 5.5 °C, no time out of range); vial monitor stage 1, shake
+  test passed, Pass, Record PASS handover at 10:51:04
+- [x] **The server (MCP):** ACCEPTED at 10:51:06. The receiver's PASS (`STAGE_1`, `PASSED`) and the courier's renewal
+  at 10:50:47 are on the same head `a662c58f` (seq 797), from two devices (`88017876` the S24, `1241f8d4` the
+  emulator); custody TRANSFER to the receiver as leg 2. Afterwards no new confirmation (754) and no reading after
+  seq 797 (last received 10:50:46)
+- [x] **The S24 stopped by itself:** `RecordingService` gone from `dumpsys activity services` 40 s later; its
+  notification only in `mArchive` (removed)
+- [x] **The receiver's history is complete:** its Room database (copied with `run-as`) holds 797 readings, seq 1 to
+  797, no gap, equal to the server; shipment ACCEPTED; handover PASS, SYNCED
+- **Found, a layout jump on Handover:** twice a tap landed ~170 px below its target (once on the FAIL option, once in
+  the Reason field), both within 2 s of a new reading reaching the server (10:47:40, 10:49:44). The app refused the
+  accidental FAIL locally ("A FAIL handover needs a reason"), so nothing wrong was sent. To fix test-first
+- **Found, request rates (dev project's edge logs, per user):** the receiver watching on Transit about 89 requests a
+  minute (custody twice, GPS, readings, head and shipment every ~4 s); on Handover about 45 a minute; the courier's
+  phone waiting in the background about 48 a minute, with 77 of its 87 `confirm_handover` calls in 10 minutes refused
+  as already confirmed (CC008), because it confirms again every 5 s on an unchanged head. Finding 11's baseline
+
 ## Session of 26 Nov 2026
 
 ### Status at session start
