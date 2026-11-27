@@ -31,6 +31,96 @@ End of every session: push the branch, make a verified bundle on D:.
 
 Status words: `done`, `doing`, `blocked` (with the reason), or blank for not started.
 
+## Session of 27 Nov 2026, evening
+
+### Status at session start (~16:40)
+
+- **Git:** `rebuild/trust-core`, HEAD `2674949`, clean. Tags `gate-0` to `gate-3`. One stash (the honesty pass of
+  26 Nov, applied and committed as `9b40ab2`; kept, never dropped)
+- **Owner's message:** continue PROGRESS's next action through to Gate 6. Before tagging Gate 5: the signed release
+  APK on a device under R8, signed in, with one handover step; the IN_TRANSIT finding fixed test-first; the
+  watcher's note if small; STATUS, the Gates line and PROGRESS's phase checklists brought up to date; Gate 5's
+  reviewer does the manual security review of `gate-3..HEAD`. Multi-leg on devices: yes, with
+  `you+courier2@gmail.com` as the second courier. `PHONE = present`, the owner at the laptop at the start. The owner
+  has backed up `D:\cch-keys`. Edit and Write only for files (no shell or Python edits)
+- **Devices:** the S24 (`RZCY820AG0F`) connected. No emulator running. Free RAM 7.3 GB of 15.6 GB
+- **Device plan (3 email codes):** courier2 signs up on the emulator's release app; the receiver signs in on the
+  S24's release app; the sender signs in on the emulator's debug app after `pm clear`. Courier A stays on the S24's
+  debug app. Release and debug are separate installs with their own device keys, and each handover pair
+  (A → B on S24 → emulator, B → receiver on emulator → S24) crosses two physical devices
+
+### 5.6 release build under R8 on devices: `done`
+
+- [x] Signed `assembleRelease` (`CCH_RELEASE_KEYS` set): `apksigner verify -v` → Verifies, v2 scheme. The release dex
+  holds the dev ref once, the demo ref 0 times; `sb_secret_` appears once as a bare prefix constant next to `sb_temp_`
+  in the dex string table (a library's key-type check, no key after it); `app/build.gradle` refuses a secret key
+- [x] **Found on the S24 at the first start of the release app:** `ComponentDiscovery: Could not instantiate
+  com.google.mlkit…CommonComponentRegistrar` (and `BarcodeRegistrar`, `VisionCommonRegistrar`):
+  `NoSuchMethodException …<init> []`. firebase-components 16.1.0 keeps the registrars, but R8's full mode drops
+  their no-argument constructors (developer.android.com, "R8 full mode: retain the default constructor"). The QR
+  scanner's ML Kit couldn't start. Fixed test-first (`55bc5c9`): `checkReleaseKeepRules` reads R8's `seeds.txt` and
+  fails `assembleRelease` when a kept `*Registrar` lost its constructor; it failed naming all three, then the keep
+  rule, then it passed and the warnings were gone on the S24 and the emulator (the camera scanner opened under R8)
+- [x] **Signed in under R8:** courier2 signed up on the emulator's release app (code, profile "Courier Two", Courier);
+  the receiver signed in on the S24's release app. No `NoSuchMethod`, `ClassNotFound`, `Serializ…` or `FATAL` in
+  either app's log during the whole run. `mapping.txt` of `2674949` kept in the scratchpad for retracing
+- [x] **Found: a new person's phone wasn't registered** until the app opened again (dev project's edge logs: courier2's
+  `verify`, `complete_profile`, `profiles`, then no `register_device`; after a relaunch, device `1ead62c6` at
+  15:15:25 UTC). The About-you form's scope is cancelled as the person becomes Ready. Not R8: the same code in debug.
+  Fixed test-first (`4ec5177`): `SupabaseAccountRepositoryTest.completingAProfileRegistersThePhoneEvenWhenTheFormLeavesAtOnce`
+  timed out first (no device), passes after
+
+```text
+CCH_RELEASE_KEYS=… ./gradlew checkReleaseKeepRules   before: R8 kept these without their no-argument constructor:
+  …BarcodeRegistrar, …VisionCommonRegistrar, …CommonComponentRegistrar   BUILD FAILED
+after the rule: seeds.txt …CommonComponentRegistrar: CommonComponentRegistrar() (and the other two)   BUILD SUCCESSFUL
+```
+
+### The IN_TRANSIT finding and the watcher's note: `done`
+
+- [x] Before the fix, on the S24 (debug app's Room, read with `run-as`): `SHIP-49A74F` IN_TRANSIT, which the server
+  has held ACCEPTED since 10:51 today
+- [x] `36d0bf0`, test-first: `RecordingLoopTest.whenTheReceiverPassesWhileTheCourierWaitsThisPhoneHoldsTheShipmentAsAccepted`,
+  `whenTheLoopsOwnCustodyReadFindsItMovedThisPhoneTakesTheServersStatus`, `afterARestartAShipmentHandedOverMeanwhileTakesTheServersStatus`
+  failed first (IN_TRANSIT where the server had ACCEPTED or QUARANTINED); `handedToAnotherCourierTheShipmentStaysInTransitHere`
+  guards the courier-to-courier leg. RecordingLoop refreshes the shipment from the server once custody moves
+- [x] The watcher's note (`8a9630d`), test-first: while watching, Transit says "No reading made after HH:MM had
+  reached the server when this phone checked at HH:MM (N min)…" past the product's silence limit, and "This phone
+  last reached the server at HH:MM…" when it is the watcher that is cut off; a watcher's line says readings are
+  simulated on the courier's phone. `TemperatureCardTest` +2, `TransitViewModelTest.whileWatchingTheScreenKnowsWhenItLastReachedTheServerAndWhenItCannot`
+  failed first (unresolved), pass after
+
+```text
+./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug --continue
+  (CCH_RELEASE_KEYS set) BUILD SUCCESSFUL in 9m 22s | core-domain 127 failed 0 | debug 571 failed 0 | release 513 failed 0
+  | lint 0 errors, 22 warnings | checkReleaseKeepRules passed        (at 8a9630d; then ./gradlew --stop)
+```
+
+### Multi-leg custody on devices, `SHIP-2DE57A`, partly under R8: `done` (21:10 to 21:29)
+
+- Sender (emulator, debug app after `pm clear`) created it with "courier, courier2" in the couriers field and the
+  receiver, and dispatched it. Server: members sender, Gate3 Courier, Courier Two, Gate3 Receiver
+- [x] **Courier A** (S24, debug, device `88017876`) took custody at 21:11:18; service `connectedDevice|location`
+  (`0x18`); readings 1 to 11 reached the server at most 6 s after they were made, GPS each minute
+- [x] **Courier B** (emulator, **release under R8**, device `1ead62c6`) opened it by ID and watched: readings
+  downloaded and checked, the courier's location shown. A named Courier Two and confirmed; B recorded PASS (stage
+  1, shake test passed). Server: leg 2 TRANSFER to Courier Two at 15:51:40 UTC. **A's service stopped by itself**
+- [x] **B recorded under R8:** readings 12 to 17, signed by `1ead62c6`, on the same chain, at most 4 s late
+- [x] **The receiver** (S24, **release under R8**, device `ed74d252`) watched and recorded PASS after B confirmed;
+  server: **ACCEPTED**, leg 3 TRANSFER to the receiver at 15:58:11 UTC; B's last confirmation and the receiver's PASS
+  on the same head `548ee049` (seq 17), from two physical devices. B's recording service stopped by itself
+- [x] **The IN_TRANSIT fix on a device, under R8:** B's phone, reopened on the shipment, showed `Status: ACCEPTED`
+  straight away. A's phone holds it as IN_TRANSIT: the server's status when A handed over to B; A no longer follows
+  it, and opening it brings it up to date
+- **Found: B was never asked for Nearby devices or location.** Taking over on Handover doesn't ask (only Take
+  Custody on Transit does), so B's service ran as a plain started service, recording only while the app was open,
+  and Transit's banner offered "Open Settings" although nothing had been refused. Fixed test-first (`687e62a`):
+  `HandoverScreenTest.aCourierTakingOverIsAskedForWhatRecordingNeedsBeforeConfirming` failed against the old wiring
+  (nothing asked), passes after; `aReceiverTakingOverIsAskedForNothing`; `RecordingPermissionsTest` 4. Not yet
+  seen on a device
+- Rule slip, recorded: Gradle ran for 34 s (`checkReleaseKeepRules`) while the emulator was booting at 20:27; the
+  emulator was stopped at once and restarted after the builds
+
 ## Session of 27 Nov 2026
 
 ### Status at session start (10:28)
