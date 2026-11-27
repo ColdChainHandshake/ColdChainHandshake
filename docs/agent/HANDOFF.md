@@ -5,7 +5,13 @@ don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
 ## Questions for you
 
-None open.
+- **Q5 (28 Nov, ~01:42): may Claude run the full proof again?** The full proof at `001b0bb`
+  (`./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug
+  --continue`, about 25 minutes) was stopped by Claude Code itself because the PC ran critically low on memory while
+  it ran in the background (no emulator was running; the S24 was connected). Claude Code says not to start it again
+  without you. Every change since the last full proof (`67b034e`) passed its own targeted tests. `gate-5` needs that
+  full proof and the reviewer's re-check, so it is **not tagged yet**. Reply "run the proof" (or run it yourself and
+  paste the last lines), and close other programs first if you can.
 
 - Q1, write access to the dev project: done (24 Nov).
 - Q2, tag `gate-1`: settled, tagged on 24 Nov on the dev project's own advisors.

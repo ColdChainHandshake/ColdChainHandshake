@@ -76,14 +76,16 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
 
 - **The phone's signing key (23 Nov):** `KeystoreDeviceSignerTest`, 3 of 3 on each. The key is made in the Android
   Keystore, stays the same between uses, and its signatures verify with the public key the server is given.
-- **Screens on the S24 (23 and 24 Nov):** the app starts in 1.1 to 1.2 s with no stall. Sign-in shows clear of the
-  status bar; a typed email survives rotation, going to the background, and the process being killed with the
-  return from Recents. Debug local mode creates, dispatches and records. Killed while on Handover or Alerts, the app
-  comes back on the same shipment with the inspection answers still selected (fixed on 24 Nov; before, it came back
-  empty). No crash or ANR in the logs. Read from the layout dump; no phone screenshots kept, because the phone
-  showed personal data.
-- **Screens on the emulator (23 and 24 Nov):** the same sign-in checks; local mode records through rotation and a
-  kill; the alert worker is built by Hilt's factory and runs. Screenshots in `docs/agent/evidence/`.
+- **Screens on the S24 (23 and 24 Nov, builds up to `gate-3`, before the recording service):** the app starts in 1.1
+  to 1.2 s with no stall. Sign-in shows clear of the status bar; a typed email survives rotation, going to the
+  background, and the process being killed with the return from Recents. Debug local mode creates, dispatches and
+  records. Killed while on Handover or Alerts, the app comes back on the same shipment with the inspection answers
+  still selected (fixed on 24 Nov; checked in debug local mode only, not with a server shipment). No crash or ANR in
+  the logs then. Read from the layout dump; no phone screenshots kept, because the phone showed personal data.
+- **Screens on the emulator (23 and 24 Nov, same builds):** the same sign-in checks; local mode records through
+  rotation and a kill; the alert worker is built by Hilt's factory and runs. Screenshots in `docs/agent/evidence/`.
+  On 27 Nov the release build raised one ANR on the emulator ("Waited 5001ms for FocusEvent") with the camera open
+  under software rendering, while system apps had ANRs too; the cause is not proven and it wasn't seen on the S24.
 - **A whole handover through the app's own screens against the local Docker stack (23 Nov),** one emulator playing
   each person in turn after clearing its storage: email-code sign-in (codes from the local mail catcher), create
   and dispatch, take custody, signed readings, both confirmations from two device IDs, custody moved, ACCEPTED. A
