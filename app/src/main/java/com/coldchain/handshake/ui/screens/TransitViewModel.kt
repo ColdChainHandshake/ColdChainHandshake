@@ -110,7 +110,6 @@ class TransitViewModel @Inject constructor(
     val latestTemperature: StateFlow<Double?> = simulator.latestTemperature
     val isRecording: StateFlow<Boolean> = simulator.isRunning
     val isHeatSpikeMode: StateFlow<Boolean> = simulator.isHeatSpikeMode
-    val simulatedTimestamp: StateFlow<Long> = simulator.simulatedTimestamp
     val lastPersistenceError: StateFlow<String?> = simulator.lastPersistenceError
 
     private val me: String? get() = (account.state.value as? AccountState.Ready)?.userId

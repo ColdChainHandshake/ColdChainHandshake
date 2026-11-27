@@ -118,7 +118,6 @@ fun TransitScreen(
     val latestTemperature by viewModel.latestTemperature.collectAsStateWithLifecycle()
     val isRunning by viewModel.isRecording.collectAsStateWithLifecycle()
     val isHeatSpikeMode by viewModel.isHeatSpikeMode.collectAsStateWithLifecycle()
-    val simulatedTimestamp by viewModel.simulatedTimestamp.collectAsStateWithLifecycle()
     val lastPersistenceError by viewModel.lastPersistenceError.collectAsStateWithLifecycle()
 
     // Mode: Transporter (Phone A) vs Shipment Monitor (Phone B)
@@ -884,7 +883,9 @@ fun TransitScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Last reading: ${timeFormatter.format(Date(simulatedTimestamp))} (simulated on this phone, one a minute)",
+                        text = TemperatureCard.lastReadingLine(sortedEvents.firstOrNull()?.timestamp) {
+                            timeFormatter.format(Date(it))
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

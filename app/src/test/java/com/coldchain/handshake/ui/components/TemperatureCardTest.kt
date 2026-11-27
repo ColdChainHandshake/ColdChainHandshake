@@ -38,6 +38,19 @@ class TemperatureCardTest {
         assertTrue(TemperatureCard.of(vaccine.maxC + 0.1, vaccine).status.contains("OUTSIDE"))
     }
 
+    // Found in the honesty pass (27 Nov): the line under the temperature showed the simulator's clock as "Last
+    // reading", which is the moment recording started when nothing has been recorded yet.
+    @Test
+    fun theLineUnderTheTemperatureNamesTheNewestStoredReadingOrSaysThereIsNone() {
+        val none = TemperatureCard.lastReadingLine(null) { "10:00:00" }
+        assertFalse(none, none.contains("10:00:00"))
+        assertTrue(none, none.startsWith("No reading yet"))
+
+        val newest = TemperatureCard.lastReadingLine(1_700_000_000_000L) { at -> if (at == 1_700_000_000_000L) "09:13:20" else "?" }
+        assertTrue(newest, newest.startsWith("Last reading: 09:13:20"))
+        assertTrue(newest, newest.contains("simulated"))
+    }
+
     // Security review S5: a value that isn't a number must never read as within range.
     @Test
     fun aValueThatIsNotANumberIsNeverWithinRange() {

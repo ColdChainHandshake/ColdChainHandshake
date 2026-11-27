@@ -18,6 +18,11 @@ data class TemperatureCard(val value: String, val status: String, val level: Lev
             else -> TemperatureCard(format(celsius), "OUTSIDE PRODUCT RANGE", Level.OUT_OF_RANGE)
         }
 
+        /** The line under the temperature: when the newest stored reading was made, or that there is none yet. */
+        fun lastReadingLine(newestReadingAt: Long?, formatTime: (Long) -> String): String =
+            if (newestReadingAt == null) "No reading yet. Readings are simulated on this phone, one a minute."
+            else "Last reading: ${formatTime(newestReadingAt)} (simulated on this phone, one a minute)"
+
         private fun format(celsius: Double) = String.format(java.util.Locale.US, "%.1f°C", celsius)
     }
 }
