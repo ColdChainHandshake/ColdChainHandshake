@@ -209,14 +209,15 @@ fun AlertsScreen(modifier: Modifier = Modifier, viewModel: AlertsViewModel = hil
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "NO ALERTS RECORDED FOR THIS SHIPMENT",
+                        text = "NO ALERTS ON THIS PHONE",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = StatusGreen
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    // Only this phone's own alerts are kept here: another phone's aren't downloaded (Gate 5 review S4b).
                     Text(
-                        text = "Nothing to show.",
+                        text = "None raised on this phone for this shipment. Alerts raised on another phone aren't shown here.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

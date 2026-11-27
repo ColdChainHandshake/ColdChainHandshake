@@ -278,8 +278,8 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val eval = ShipmentIntegrityEvaluator.evaluate(validChain, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.VERIFIED, eval.state)
-        assertEquals("✓ READINGS VERIFIED", eval.title)
-        assertTrue(eval.message.contains("4 readings form one unbroken chain"))
+        assertEquals(ShipmentIntegrityEvaluator.RECORD_UNBROKEN, eval.title)
+        assertTrue(eval.message.contains("4 readings link up with none missing, changed or out of order"))
         assertTrue(eval.isEligibleForHandover)
         assertNotNull(eval.integrityResult)
         assertTrue(eval.integrityResult!!.valid)
@@ -306,8 +306,8 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val eval = ShipmentIntegrityEvaluator.evaluate(tamperedChain, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.TAMPER_DETECTED, eval.state)
-        assertEquals("✗ TAMPER DETECTED", eval.title)
-        assertTrue(eval.message.contains("CURRENT_HASH_MISMATCH"))
+        assertEquals(ShipmentIntegrityEvaluator.RECORD_DOES_NOT_ADD_UP, eval.title)
+        assertTrue(eval.message, eval.message.contains("was changed after it was recorded"))
         assertTrue(eval.message.contains("TE-03"))
         assertFalse(eval.isEligibleForHandover)
     }
@@ -340,7 +340,7 @@ class HandoverTripInspectionAndIntegrityTest {
         assertEquals(IntegrityVerificationState.PENDING_SYNC, eval.state)
         assertFalse("Must never report TAMPER_DETECTED on incomplete suffix", eval.state == IntegrityVerificationState.TAMPER_DETECTED)
         assertEquals("HISTORY SYNCING", eval.title)
-        assertTrue(eval.message.contains("Waiting for complete telemetry history"))
+        assertTrue(eval.message, eval.message.contains("Waiting for every reading"))
         assertFalse(eval.isEligibleForHandover)
     }
 
@@ -367,7 +367,7 @@ class HandoverTripInspectionAndIntegrityTest {
         val completeImported = (fullChain.take(2) + partialSuffix).sortedBy { it.timestamp }
         val readyEval = ShipmentIntegrityEvaluator.evaluate(completeImported, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.VERIFIED, readyEval.state)
-        assertEquals("✓ READINGS VERIFIED", readyEval.title)
+        assertEquals(ShipmentIntegrityEvaluator.RECORD_UNBROKEN, readyEval.title)
         assertTrue(readyEval.isEligibleForHandover)
     }
 
@@ -537,7 +537,7 @@ class HandoverTripInspectionAndIntegrityTest {
 
         val evalReady = ShipmentIntegrityEvaluator.evaluate(chain, isSyncComplete = true)
         assertEquals(IntegrityVerificationState.VERIFIED, evalReady.state)
-        assertEquals("✓ READINGS VERIFIED", evalReady.title)
+        assertEquals(ShipmentIntegrityEvaluator.RECORD_UNBROKEN, evalReady.title)
     }
 
     /**

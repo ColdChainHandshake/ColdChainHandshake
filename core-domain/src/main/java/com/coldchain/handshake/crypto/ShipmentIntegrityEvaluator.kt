@@ -76,7 +76,7 @@ object ShipmentIntegrityEvaluator {
             }
             return pending(
                 title = "HISTORY SYNCING",
-                message = "Waiting for complete telemetry history before integrity verification…"
+                message = "Waiting for every reading before the record can be checked…"
             )
         }
 
@@ -85,8 +85,8 @@ object ShipmentIntegrityEvaluator {
                 return tampered(null, "The server holds ${serverHead.count} readings and this device has none.")
             }
             return pending(
-                title = "INTEGRITY VERIFICATION PENDING",
-                message = "Waiting for telemetry history before integrity verification…"
+                title = RECORD_CHECK_WAITING,
+                message = "Waiting for the readings before the record can be checked…"
             )
         }
 
@@ -115,17 +115,32 @@ object ShipmentIntegrityEvaluator {
         return IntegrityEvaluation(
             state = IntegrityVerificationState.VERIFIED,
             integrityResult = result,
-            title = "✓ READINGS VERIFIED",
+            title = RECORD_UNBROKEN,
             message = if (serverHead == null) {
-                "${events.size} readings form one unbroken chain. Not yet compared with the server."
+                "${events.size} readings link up with none missing, changed or out of order. Not yet compared with " +
+                    "the server."
             } else {
-                "${events.size} readings form one unbroken chain and match the server."
+                "${events.size} readings link up with none missing, changed or out of order, and end where the " +
+                    "server's record ends."
             },
             isEligibleForHandover = true
         )
     }
 
-    private fun describe(result: IntegrityResult) = "${result.reason?.name ?: "CORRUPTION"}: ${result.corruptedEventId ?: result.message}"
+    /** What went wrong, in plain words rather than the check's own names. */
+    private fun describe(result: IntegrityResult): String {
+        val at = result.corruptedEventId ?: "one reading"
+        return when (result.reason) {
+            IntegrityFailureReason.EMPTY_CHAIN -> "There are no readings."
+            IntegrityFailureReason.ORDER_VIOLATION -> "The readings are out of order at $at."
+            IntegrityFailureReason.INVALID_GENESIS -> "The first reading doesn't belong to this shipment."
+            IntegrityFailureReason.SEQUENCE_GAP -> "A reading is missing before $at."
+            IntegrityFailureReason.PREVIOUS_HASH_MISMATCH ->
+                "The readings don't link up at $at: one before it is missing or was changed."
+            IntegrityFailureReason.CURRENT_HASH_MISMATCH -> "Reading $at was changed after it was recorded."
+            null -> result.message
+        }
+    }
 
     private fun pending(title: String, message: String) = IntegrityEvaluation(
         state = IntegrityVerificationState.PENDING_SYNC,
@@ -138,8 +153,16 @@ object ShipmentIntegrityEvaluator {
     private fun tampered(result: IntegrityResult?, message: String) = IntegrityEvaluation(
         state = IntegrityVerificationState.TAMPER_DETECTED,
         integrityResult = result,
-        title = "✗ TAMPER DETECTED",
+        title = RECORD_DOES_NOT_ADD_UP,
         message = message,
         isEligibleForHandover = false
     )
+
+    /**
+     * What the check shows, in words that claim no more than it checks: that the readings link up and end where the
+     * server's record ends. Not "verified" or "tamper": readings are simulated on a phone (Gate 5 review C8).
+     */
+    const val RECORD_UNBROKEN = "✓ RECORD UNBROKEN"
+    const val RECORD_DOES_NOT_ADD_UP = "✗ RECORD DOESN'T ADD UP"
+    const val RECORD_CHECK_WAITING = "RECORD CHECK WAITING"
 }

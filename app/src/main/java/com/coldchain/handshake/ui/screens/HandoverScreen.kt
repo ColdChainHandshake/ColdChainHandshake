@@ -555,7 +555,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 5. INTEGRITY VERIFICATION
+        // 5. The record check: do the readings link up and end where the server's record ends
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -564,7 +564,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "INTEGRITY VERIFICATION",
+                    text = "RECORD CHECK",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -632,7 +632,8 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "✓ No alerts recorded during trip",
+                            // Only this phone's own alerts are kept here (Gate 5 review S4b).
+                            text = "✓ No alerts raised on this phone",
                             fontSize = 12.sp,
                             color = StatusGreen,
                             fontWeight = FontWeight.Medium
@@ -787,11 +788,11 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
             else -> Icons.Default.Cancel
         }
         val verdictTitle = when {
-            isPendingSync -> "INTEGRITY VERIFICATION PENDING"
+            isPendingSync -> ShipmentIntegrityEvaluator.RECORD_CHECK_WAITING
             else -> "FINAL VERDICT: ${preliminaryVerdict.name}"
         }
         val verdictSubtitle = when {
-            isPendingSync -> "Waiting for complete telemetry history before integrity verification"
+            isPendingSync -> "Waiting for every reading before the record can be checked"
             preliminaryVerdict == HandoverVerdict.PASS -> "Eligible for Acceptance"
             preliminaryVerdict == HandoverVerdict.UNKNOWN -> "The readings have a gap, so the shipment is held"
             integrityEvaluation.state == IntegrityVerificationState.TAMPER_DETECTED -> "Ineligible / Tamper Detected"
