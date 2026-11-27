@@ -62,6 +62,10 @@ class ShipmentHistorySyncCoordinator(
      * Fetches whatever this device doesn't hold. A reading it holds already is never replaced: if that
      * copy differs from the server's, comparing with the server's head has to show it.
      */
+    /** The hash of the newest reading this phone holds for [shipmentId], or null if it holds none. */
+    suspend fun newestHeldHash(shipmentId: String): String? =
+        telemetryRepository.getTemperatures(shipmentId).firstOrNull()?.maxByOrNull { it.seq }?.currentHash
+
     suspend fun hydrateHistory(shipmentId: String): Result<Int> {
         if (shipmentId.isBlank()) return Result.success(0)
 
@@ -77,9 +81,19 @@ class ShipmentHistorySyncCoordinator(
                 return@withLock Result.failure(it)
             }
 
-            val held = telemetryRepository.getTemperatures(shipmentId).firstOrNull().orEmpty()
-                .map { it.seq }.toSet()
+            val heldBySeq = telemetryRepository.getTemperatures(shipmentId).firstOrNull().orEmpty().associateBy { it.seq }
+            val held = heldBySeq.keys
             val firstMissing = generateSequence(1L) { it + 1 }.first { it !in held }
+
+            // Finding 11: most fetches find nothing new. A history here that runs unbroken up to the server's head and
+            // ends on the same hash needs no readings asked for.
+            val upToDate = head != null && firstMissing - 1 == head.count &&
+                (head.count == 0L || heldBySeq[head.count]?.currentHash == head.headHash)
+            if (upToDate) {
+                headFor(shipmentId).value = head
+                state.value = HistorySyncState.HISTORY_READY
+                return@withLock Result.success(0)
+            }
 
             val missing = remote.getReadingsAfter(shipmentId, firstMissing - 1)
                 .getOrElse {

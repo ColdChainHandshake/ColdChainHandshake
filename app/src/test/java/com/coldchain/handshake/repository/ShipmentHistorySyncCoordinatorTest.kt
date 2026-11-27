@@ -94,6 +94,31 @@ class ShipmentHistorySyncCoordinatorTest {
         assertEquals(3, coordinator.hydrateHistory("SHIP-1").getOrThrow())
     }
 
+    // Finding 11: a watcher asks again and again, and most times nothing is new. Then the head alone says so, and the
+    // readings aren't asked for.
+    @Test
+    fun aFetchWithNothingNewAsksOnlyForTheHead() = runBlocking {
+        serverHas(chain)
+        coordinator.hydrateHistory("SHIP-1").getOrThrow()
+        val readsBefore = server.readCalls
+
+        assertEquals(0, coordinator.hydrateHistory("SHIP-1").getOrThrow())
+
+        assertEquals(readsBefore, server.readCalls)
+        assertEquals(HistorySyncState.HISTORY_READY, coordinator.getSyncState("SHIP-1").first())
+    }
+
+    @Test
+    fun aHeadThatMovedOnStillFetchesTheNewReadings() = runBlocking {
+        serverHas(chain.take(3))
+        coordinator.hydrateHistory("SHIP-1").getOrThrow()
+        server.currentUser = "courier"
+        server.appendReadings("SHIP-1", chain.drop(3), chain[2].currentHash, "phone", "signature").getOrThrow()
+
+        assertEquals(2, coordinator.hydrateHistory("SHIP-1").getOrThrow())
+        assertEquals(5, stored().size)
+    }
+
     @Test
     fun aGapHereIsFilled() = runBlocking {
         serverHas(chain)

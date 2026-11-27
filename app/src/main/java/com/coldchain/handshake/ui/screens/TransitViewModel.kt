@@ -15,6 +15,8 @@ import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.recording.RecordedLocation
 import com.coldchain.handshake.recording.RecordedLocations
+import com.coldchain.handshake.repository.CustodyState
+import com.coldchain.handshake.repository.PollBackoff
 import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.navigation.ActiveShipmentRestorer
@@ -27,8 +29,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -62,9 +66,9 @@ data class TransitUiState(
 /**
  * The Transit screen: take custody and record, or open a shipment by its code and watch it. Only the server says
  * who holds custody. Recording, and sending what is recorded, run in the background through [CourierRecorder] and
- * the recording service, so they go on with the screen off. What this screen polls (custody while recording, the
- * courier's position and readings while watching) runs only inside [runWhileVisible], which the screen runs while
- * it is shown.
+ * the recording service, so they go on with the screen off; the service also says when custody moved away. What this
+ * screen fetches while watching (the readings, custody, the shipment and the courier's position) runs only inside
+ * [runWhileVisible], which the screen runs while it is shown, and backs off while nothing changes.
  *
  * The shipment on screen and the mode are kept in [SavedStateHandle]. After the process was killed the shipment comes
  * back attached to the simulator, as the custodian's or a watcher's as the server says, and recording resumes if it
@@ -135,6 +139,15 @@ class TransitViewModel @Inject constructor(
         viewModelScope.launch {
             account.state.collect { s -> _state.update { it.copy(signedInAs = (s as? AccountState.Ready)?.userId) } }
         }
+        // While recording, custody moving to someone else ends recording on this phone: the recording service reads
+        // custody and says so, and this screen tells the person, even if it was away when it happened.
+        viewModelScope.launch {
+            simulator.handedOver.filterNotNull().collect { id ->
+                simulator.reset()
+                simulator.handOverShown()
+                _state.update { it.copy(handedOverShipmentId = id, isCustodian = false) }
+            }
+        }
         // Who holds custody, read once for each shipment and person.
         viewModelScope.launch {
             combine(simulator.activeShipment, account.state) { shipment, _ -> shipment to me }
@@ -143,14 +156,16 @@ class TransitViewModel @Inject constructor(
         }
     }
 
-    /** Runs the screen's polling until the caller is cancelled. */
+    /**
+     * Runs the screen's polling until the caller is cancelled: only while watching. While this phone records, the
+     * recording service already reads custody and says when it moved ([TemperatureSimulator.handedOver]).
+     */
     suspend fun runWhileVisible(): Unit = coroutineScope {
         launch {
             _state.map { Triple(it.shipment?.id, it.shipment?.genesisHash != null, it.watching) }
                 .distinctUntilChanged()
-                .collect { (id, onServer, watching) ->
-                    if (id == null || !onServer) return@collect
-                    if (watching) watch(id) else watchForHandover(id)
+                .collectLatest { (id, onServer, watching) ->
+                    if (id != null && onServer && watching) watch(id)
                 }
         }
     }
@@ -210,43 +225,40 @@ class TransitViewModel @Inject constructor(
         if (!mine) setWatching(true)
     }
 
-    /** While recording: custody moving to someone else ends recording on this phone. */
-    private suspend fun watchForHandover(shipmentId: String) {
-        while (true) {
-            delay(CUSTODY_POLL_MS)
-            val custody = remote.getCustody(shipmentId).getOrNull()
-            val user = me
-            if (custody != null && user != null && custody.custodianId != user) {
-                simulator.reset()
-                _state.update { it.copy(handedOverShipmentId = shipmentId, isCustodian = false) }
-                return
-            }
-        }
-    }
-
-    /** While watching: the custodian's location, the readings, the shipment, and whether custody came here. */
+    /**
+     * While watching: the readings and custody each round, and the shipment and the custodian's location whenever either
+     * moved (the courier's phone sends its location with its readings). Quick while things change, and less often each
+     * round nothing does, up to every 30 s (finding 11; [PollBackoff]).
+     */
     private suspend fun watch(shipmentId: String) {
+        val backoff = PollBackoff()
+        var lastCustody: CustodyState? = null
+        var firstRound = true
         while (true) {
-            remote.getLatestGpsPoint(shipmentId).getOrNull()?.let { point ->
-                _state.update {
-                    it.copy(remoteGps = GpsLocationData(point.latitude, point.longitude, point.accuracyMeters, point.deviceTimestamp))
-                }
-            }
-            history.hydrateHistory(shipmentId)
-            workflow.open(shipmentId)
+            val newReadings = history.hydrateHistory(shipmentId).getOrNull() ?: 0
             val custody = remote.getCustody(shipmentId).getOrNull()
+            val custodyMoved = custody != null && custody != lastCustody
+            if (custody != null) lastCustody = custody
+            val changed = firstRound || newReadings > 0 || custodyMoved
+            if (changed) {
+                remote.getLatestGpsPoint(shipmentId).getOrNull()?.let { point ->
+                    _state.update {
+                        it.copy(remoteGps = GpsLocationData(point.latitude, point.longitude, point.accuracyMeters, point.deviceTimestamp))
+                    }
+                }
+                workflow.open(shipmentId)
+            }
             val user = me
             if (custody != null && user != null && custody.custodianId == user) {
                 _state.update { it.copy(isCustodian = true) }
                 setWatching(false)
             }
-            delay(WATCH_POLL_MS)
+            firstRound = false
+            delay(backoff.after(changed))
         }
     }
 
     companion object {
-        const val CUSTODY_POLL_MS = 3_500L
-        const val WATCH_POLL_MS = 3_000L
         private const val STOP_SHARING_MS = 5_000L
         private const val KEY_SHIPMENT_ID = "shipmentId"
         private const val KEY_WATCHING = "watching"

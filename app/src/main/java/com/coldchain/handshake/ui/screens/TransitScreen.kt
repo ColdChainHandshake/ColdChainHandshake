@@ -481,7 +481,7 @@ fun TransitScreen(
                         }
 
                         Text(
-                            text = "Checked every few seconds",
+                            text = "Checked every 3 to 30 s",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

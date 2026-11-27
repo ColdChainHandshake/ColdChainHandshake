@@ -12,6 +12,8 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.CustodyState
+import com.coldchain.handshake.repository.HandoverConfirmation
+import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.repository.FakeAccountRepository
 import com.coldchain.handshake.repository.FakeColdChainServer
 import com.coldchain.handshake.repository.FakeNetworkMonitor
@@ -162,6 +164,64 @@ class RecordingLoopTest {
         }
         assertEquals(2, server.confirmations.count { it.userId == "courier" })
         assertTrue("recording goes on", simulator.isRunning.value)
+    }
+
+    // Finding 11, the courier's side. On the dev project on 27 Nov the courier's phone, waiting for the receiver, made
+    // about 48 requests a minute in the background, and 77 of its 87 confirmations in 10 minutes were refused as
+    // already made (CC008): it confirmed again every 5 s on a head that hadn't moved. Only this phone, the custodian,
+    // adds to the head, so with nothing new recorded there is nothing to confirm again.
+    @Test
+    fun whileWaitingWithNothingNewRecordedTheCourierDoesNotConfirmAgain() = runBlocking {
+        recorder.start(opened())
+        running.async { loop.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+        serverHandover.release("SHIP-1", "receiver").getOrThrow()
+        val confirmsAfterRelease = server.confirmCalls
+
+        delay(400) // twenty rounds, and no new reading: the clock doesn't move
+
+        assertEquals(confirmsAfterRelease, server.confirmCalls)
+    }
+
+    // With the loop's own custody read now once a minute, the renewal is what notices the receiver confirming.
+    @Test
+    fun whenTheReceiverConfirmsWhileTheCourierWaitsRecordingStopsAtOnce() = runBlocking {
+        // The loop's own custody read is switched off here, so only the renewal can notice.
+        val renewalsOnly = RecordingLoop(
+            simulator, recorder, sync, serverHandover, server, account, shipments, store, { syncRequests++ },
+            loopMs = 20L, accountWaitMs = 500L, custodyEveryRounds = Long.MAX_VALUE
+        )
+        recorder.start(opened())
+        val ended = running.async { renewalsOnly.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+        serverHandover.release("SHIP-1", "receiver").getOrThrow()
+
+        server.currentUser = "receiver"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "receiver-phone", server.heads.getValue("SHIP-1").headHash, verdict = HandoverVerdict.PASS)
+        ).getOrThrow()
+        server.currentUser = "courier"
+        assertEquals("receiver", server.custody.getValue("SHIP-1").custodianId)
+
+        withTimeout(1_000) { ended.await() }
+        assertFalse(simulator.isRunning.value)
+        assertEquals("SHIP-1", simulator.handedOver.value)
+    }
+
+    // Custody can only move away with this phone's own confirmation, so with no handover waiting it is read now and
+    // then, as a safety net, rather than every other round.
+    @Test
+    fun withNoHandoverWaitingCustodyIsReadOnlyNowAndThen() = runBlocking {
+        recorder.start(opened())
+        running.async { loop.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+        delay(100)
+        val before = server.requests
+
+        delay(400) // twenty rounds, nothing new to send
+
+        val made = server.requests - before
+        assertTrue("$made requests in twenty quiet rounds", made <= 3)
     }
 
     @Test

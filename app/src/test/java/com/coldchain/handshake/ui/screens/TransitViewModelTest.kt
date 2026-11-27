@@ -1,8 +1,10 @@
 package com.coldchain.handshake.ui.screens
 
 import androidx.lifecycle.SavedStateHandle
+import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
+import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.AccountState
 import com.coldchain.handshake.repository.CustodyState
 import com.coldchain.handshake.repository.FakeAccountRepository
@@ -180,8 +182,12 @@ class TransitViewModelTest {
         vm.takeCustody().join()
         val visible = backgroundScope.launch { vm.runWhileVisible() }
 
+        // Since 27 Nov (finding 11) the recording service notices custody move, as RecordingLoopTest shows, and says
+        // so through the simulator; this screen no longer reads custody every 3.5 s itself. Before, this test moved
+        // custody on the server and waited for the screen's own poll.
         server.custody["SHIP-1"] = CustodyState(2, "receiver")
-        advanceTimeBy(4_000)
+        simulator.onHandedOver(simulator.activeShipment.value!!)
+        advanceTimeBy(100)
 
         assertEquals("SHIP-1", vm.state.value.handedOverShipmentId)
         assertFalse(simulator.isRunning.value)
@@ -200,10 +206,73 @@ class TransitViewModelTest {
         assertFalse(vm.state.value.isCustodian)
 
         server.custody["SHIP-1"] = CustodyState(2, "receiver")
-        advanceTimeBy(3_500)
+        // Within the watcher's longest wait (30 s since finding 11; it was one 3 s round before).
+        advanceTimeBy(31_000)
 
         assertTrue(vm.state.value.isCustodian)
         assertFalse(vm.state.value.watching)
+        visible.cancel()
+    }
+
+    /** The courier's phone sends reading [seq] of SHIP-1, a minute after the one before. */
+    private fun courierSends(genesis: String, seq: Int) {
+        val chain = HashChainService.buildChain(
+            (1..seq).map {
+                TemperatureEvent("TE-$it", "SHIP-1", "LOG-1", 1_700_000_000_000L + it * 60_000L, 5.0, "", "", SyncStatus.PENDING)
+            },
+            genesis
+        )
+        val watcher = server.currentUser
+        server.currentUser = "courier"
+        kotlinx.coroutines.runBlocking {
+            server.appendReadings("SHIP-1", listOf(chain.last()), chain.getOrNull(seq - 2)?.currentHash ?: genesis, "courier-phone", "s")
+                .getOrThrow()
+        }
+        server.currentUser = watcher
+    }
+
+    // Finding 11. On the dev project on 27 Nov one phone watching a shipment made about 89 requests a minute: custody
+    // twice, the location, the head, the readings and the shipment, every ~4 s. While nothing changes it now asks
+    // only for the head and custody, less and less often, up to every 30 s.
+    @Test
+    fun whileWatchingAndNothingChangesTheServerIsAskedLessAndLess() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+
+        advanceTimeBy(120_000)
+        val before = server.requests
+        advanceTimeBy(60_000)
+        val inTheThirdMinute = server.requests - before
+
+        visible.cancel()
+        assertTrue("$inTheThirdMinute requests in the third minute", inTheThirdMinute <= 6)
+    }
+
+    @Test
+    fun aReadingArrivingWhileWatchingIsFetchedAndTheWatcherAsksQuicklyAgain() = runTest {
+        val genesis = server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(120_000)
+
+        // Backed off to 30 s by now, so the first new reading is fetched within 30 s...
+        courierSends(genesis, 1)
+        var waited = 0L
+        while (telemetry.getTemperatures("SHIP-1").first().isEmpty() && waited <= 30_000) {
+            advanceTimeBy(500)
+            waited += 500
+        }
+        assertTrue("fetched after $waited ms", waited <= 30_000)
+
+        // ...and having found it, the watcher asks again 3 s later.
+        courierSends(genesis, 2)
+        advanceTimeBy(3_500)
+        assertEquals(2, telemetry.getTemperatures("SHIP-1").first().size)
         visible.cancel()
     }
 

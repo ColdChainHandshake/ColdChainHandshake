@@ -105,11 +105,24 @@ class TemperatureSimulator(
         _lastPersistenceError.value = null
     }
 
+    private val _handedOver = MutableStateFlow<String?>(null)
+
+    /** The shipment whose custody moved away while this phone recorded it, until a screen has said so. */
+    val handedOver: StateFlow<String?> = _handedOver.asStateFlow()
+
     /**
      * A shipment that has been handed over has stopped moving, so nothing more is recorded for it.
      */
     fun onHandedOver(shipment: Shipment) {
-        if (_activeShipment.value?.id == shipment.id) attachShipmentForMonitoring(shipment)
+        if (_activeShipment.value?.id == shipment.id) {
+            attachShipmentForMonitoring(shipment)
+            _handedOver.value = shipment.id
+        }
+    }
+
+    /** A screen has told the person that custody moved. */
+    fun handOverShown() {
+        _handedOver.value = null
     }
 
     /**

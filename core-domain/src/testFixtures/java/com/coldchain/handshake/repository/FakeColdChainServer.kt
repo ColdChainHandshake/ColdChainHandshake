@@ -82,7 +82,13 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         return genesis
     }
 
+    /** Every request made, answered or not, as the server's request log would count them. */
+    var requests = 0
+    /** Every `confirm_handover` made, refused or not. */
+    var confirmCalls = 0
+
     private inline fun <T> call(block: () -> T): Result<T> {
+        requests++
         offlineError?.let { return Result.failure(it) }
         return runCatching(block)
     }
@@ -216,6 +222,7 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
     }
 
     override suspend fun confirmHandover(confirmation: HandoverConfirmation): Result<HandoverOutcome> {
+        confirmCalls++
         beforeNextConfirm?.let {
             beforeNextConfirm = null
             val caller = currentUser

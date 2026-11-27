@@ -15,6 +15,7 @@ import com.coldchain.handshake.repository.RemoteRejection
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentRepository
 import kotlinx.coroutines.flow.firstOrNull
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * What became of the person's confirmation.
@@ -60,8 +61,11 @@ class ServerHandover(
             ?: return Result.failure(IllegalStateException("The server has no record of this shipment."))
 
         return confirm(HandoverConfirmation(shipmentId, 0, deviceId(), head.headHash, toUserId = toUserId))
-            .onSuccess { outcome -> remember(shipmentId, toUserId, outcome) }
+            .onSuccess { outcome -> remember(shipmentId, toUserId, outcome, head.headHash) }
     }
+
+    /** True while this phone's confirmation waits for the other person's: custody can then move at any moment. */
+    fun isWaiting(shipmentId: String): Boolean = pendingReleases.get(shipmentId) != null
 
     /**
      * Sends what was recorded since, then confirms the same handover again on the server's new head, so a receiver
@@ -72,6 +76,20 @@ class ServerHandover(
      */
     suspend fun renewRelease(shipmentId: String): Result<HandoverOutcome?> {
         val toUserId = pendingReleases.get(shipmentId) ?: return Result.success(null)
+        // Only this phone, the custodian, adds to the head. With nothing recorded since its last confirmation, the head
+        // hasn't moved and the server already has this confirmation on it, so only custody needs asking: one request,
+        // not three (finding 11: on the dev project the courier confirmed again every 5 s, and nearly every call was
+        // refused as already made).
+        lastConfirmed[shipmentId]?.let { (head, outcome) ->
+            if (history.newestHeldHash(shipmentId) == head) {
+                val custody = remote.getCustody(shipmentId).getOrElse { return Result.failure(it) }
+                if (custody?.custodianId == toUserId) {
+                    forget(shipmentId)
+                    return Result.success(null)
+                }
+                return Result.success(outcome)
+            }
+        }
         uploadPending(shipmentId).getOrElse { return Result.failure(it) }
 
         val head = remote.getChainHead(shipmentId).getOrElse { return Result.failure(it) }
@@ -79,15 +97,16 @@ class ServerHandover(
 
         val renewed = confirm(HandoverConfirmation(shipmentId, 0, deviceId(), head.headHash, toUserId = toUserId))
         val failure = renewed.exceptionOrNull()
-            ?: return renewed.onSuccess { outcome -> remember(shipmentId, toUserId, outcome) }
+            ?: return renewed.onSuccess { outcome -> remember(shipmentId, toUserId, outcome, head.headHash) }
 
         return when {
             failure is RemoteRejection && failure.code == RemoteRejection.ALREADY_CONFIRMED ->
                 remote.getShipment(shipmentId).map { found ->
                     HandoverOutcome(HandoverState.WAITING, found?.status ?: ShipmentStatus.IN_TRANSIT)
+                        .also { waiting -> lastConfirmed[shipmentId] = head.headHash to waiting }
                 }
             custodyMovedOn(shipmentId) -> {
-                pendingReleases.remove(shipmentId)
+                forget(shipmentId)
                 Result.success(null)
             }
             else -> Result.failure(failure)
@@ -100,9 +119,24 @@ class ServerHandover(
         return failures.firstOrNull()?.let { Result.failure(it) } ?: Result.success(Unit)
     }
 
-    private fun remember(shipmentId: String, toUserId: String, outcome: HandoverOutcome) {
-        if (outcome.state == HandoverState.WAITING) pendingReleases.put(shipmentId, toUserId)
-        else pendingReleases.remove(shipmentId)
+    /**
+     * The head this phone last confirmed a waiting handover on, and the server's answer, kept for this process only:
+     * after a restart the first renewal asks the server again.
+     */
+    private val lastConfirmed = ConcurrentHashMap<String, Pair<String, HandoverOutcome>>()
+
+    private fun remember(shipmentId: String, toUserId: String, outcome: HandoverOutcome, head: String) {
+        if (outcome.state == HandoverState.WAITING) {
+            pendingReleases.put(shipmentId, toUserId)
+            lastConfirmed[shipmentId] = head to outcome
+        } else {
+            forget(shipmentId)
+        }
+    }
+
+    private fun forget(shipmentId: String) {
+        pendingReleases.remove(shipmentId)
+        lastConfirmed.remove(shipmentId)
     }
 
     /**

@@ -39,7 +39,8 @@ class RecordingLoop(
     private val store: RecordingStore,
     private val syncRequests: SyncRequests,
     private val loopMs: Long = LOOP_MS,
-    private val accountWaitMs: Long = ACCOUNT_WAIT_MS
+    private val accountWaitMs: Long = ACCOUNT_WAIT_MS,
+    private val custodyEveryRounds: Long = CUSTODY_EVERY
 ) {
     /** This phone is recording a shipment right now. */
     fun isRecording(): Boolean =
@@ -74,7 +75,9 @@ class RecordingLoop(
         while (isRecording()) {
             val shipment = simulator.activeShipment.value ?: break
             onTick()
-            if (shipment.genesisHash != null && sendAndCheck(shipment, checkCustody = round % CUSTODY_EVERY == 0L)) {
+            // Custody can move away only once this phone has confirmed a handover, and while one waits each renewal
+            // asks. Otherwise it is read once a minute, as a safety net (finding 11).
+            if (shipment.genesisHash != null && sendAndCheck(shipment, checkCustody = round % custodyEveryRounds == 0L)) {
                 simulator.onHandedOver(shipment)
                 break
             }
@@ -92,11 +95,14 @@ class RecordingLoop(
         val me = (account.state.value as? AccountState.Ready)?.userId ?: return false
 
         val sent = sync.syncPendingData()
+        val waiting = handover.isWaiting(shipment.id)
         val renewed = handover.renewRelease(shipment.id)
         val failed = sent.isFailure || renewed.isFailure
         if (failed && !syncBooked) syncRequests.request()
         syncBooked = failed
         if (renewed.getOrNull()?.state == HandoverState.TRANSFERRED) return true
+        // A handover that was waiting and is now gone: the renewal found custody with the person named.
+        if (waiting && renewed.isSuccess && renewed.getOrNull() == null) return true
 
         if (!checkCustody) return false
         val custody = remote.getCustody(shipment.id).getOrNull() ?: return false
@@ -111,7 +117,7 @@ class RecordingLoop(
     companion object {
         const val LOOP_MS = 5_000L
         const val ACCOUNT_WAIT_MS = 30_000L
-        /** Custody is read every few rounds, not every round. */
-        private const val CUSTODY_EVERY = 2L
+        /** Custody is read once a minute; while a handover waits, each renewal reads it as well. */
+        private const val CUSTODY_EVERY = 12L
     }
 }

@@ -27,6 +27,7 @@ import com.coldchain.handshake.repository.HandoverOutcome
 import com.coldchain.handshake.repository.HandoverRepository
 import com.coldchain.handshake.repository.HandoverState
 import com.coldchain.handshake.repository.HistorySyncState
+import com.coldchain.handshake.repository.PollBackoff
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.repository.TelemetryRepository
@@ -184,8 +185,9 @@ class HandoverViewModel @Inject constructor(
 
     /** Fetches what the screen shows from the server, until the caller is cancelled. */
     suspend fun runWhileVisible(): Unit = coroutineScope {
-        // The history, again every few seconds: the courier keeps recording until custody moves, so the verdict on
-        // screen must keep up with what reaches the server. One kept on this phone alone has nothing to fetch.
+        // The history, again and again: the courier keeps recording until custody moves, so the verdict on screen must
+        // keep up with what reaches the server. Every 3 s while readings arrive, less often while none do, up to every
+        // 30 s (finding 11); confirming fetches it again first anyway. One kept on this phone alone has nothing to fetch.
         launch {
             simulator.activeShipment.map { s -> s?.let { it.id to (it.genesisHash != null) } }
                 .distinctUntilChanged()
@@ -195,9 +197,10 @@ class HandoverViewModel @Inject constructor(
                         history.markReady(id)
                         return@collectLatest
                     }
+                    val backoff = PollBackoff()
                     while (true) {
-                        history.hydrateHistory(id)
-                        delay(HISTORY_POLL_MS)
+                        val arrived = history.hydrateHistory(id).getOrNull() ?: 0
+                        delay(backoff.after(changed = arrived > 0))
                     }
                 }
         }
@@ -358,7 +361,6 @@ class HandoverViewModel @Inject constructor(
     companion object {
         /** How long a new server head waits for the readings saved with it to reach the screen. */
         const val CATCH_UP_MS = 2_000L
-        const val HISTORY_POLL_MS = 3_000L
         const val RELEASED_NOTICE = "Confirmed. This phone keeps recording until custody moves. Waiting for the " +
             "other person to confirm on their own phone."
         const val OVERTAKEN_NOTICE = "New readings arrived after you confirmed, so your confirmation no longer " +
