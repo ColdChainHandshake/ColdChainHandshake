@@ -286,11 +286,15 @@ class TransitViewModel @Inject constructor(
 
     /**
      * Custody has come to this person. A courier (5.3, a later leg) records from now on, on a history complete up to
-     * the server's head, so their phone carries the same chain on; a receiver has nothing to record. False if the history
-     * couldn't be fetched, so the next round tries again.
+     * the server's head, so their phone carries the same chain on; a receiver has nothing to record. False if the
+     * members or the history couldn't be fetched, so the next round tries again.
      */
     private suspend fun takeOverRecording(shipmentId: String): Boolean {
-        if ((account.state.value as? AccountState.Ready)?.profile?.role != MemberRole.COURIER) return true
+        // Their role on this shipment decides, not their profile's: a receiver's FAIL leaves the shipment QUARANTINED,
+        // which counts as on the move (Gate 5 review S6).
+        val user = me ?: return true
+        val members = remote.getMembers(shipmentId).getOrElse { return false }
+        if (members.firstOrNull { it.userId == user }?.role != MemberRole.COURIER) return true
         history.hydrateHistory(shipmentId).getOrElse { return false }
         val shipment = shipments.getShipment(shipmentId).firstOrNull() ?: return false
         if (shipment.status in CourierRecorder.ON_THE_MOVE && !simulator.isRunning.value) recorder.start(shipment)

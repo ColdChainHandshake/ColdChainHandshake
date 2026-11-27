@@ -12,6 +12,7 @@ import com.coldchain.handshake.repository.FakeColdChainServer
 import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.recording.RecordedLocation
 import com.coldchain.handshake.recording.RecordedLocations
@@ -340,9 +341,34 @@ class TransitViewModelTest {
 
     // 5.3, multi-leg custody: a second courier watching on Transit when custody comes to them starts recording, after
     // fetching the history so their phone carries the same chain on.
+    // Gate 5 review, mutant 23 and S6 (28 Nov): custody reaching the shipment's receiver after a FAIL leaves it
+    // QUARANTINED, which counts as on the move. Someone whose profile says courier but who is this shipment's receiver
+    // must not start recording it: their role on the shipment decides.
+    @Test
+    fun whileWatchingCustodyComingToTheShipmentsReceiverRecordsNothingWhateverTheirProfileSays() = runTest {
+        val genesis = server.seedShipment("SHIP-1", custodian = "courier")
+        courierSends(genesis, 1)
+        signInAs("receiver", MemberRole.COURIER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(3_500)
+
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(status = ShipmentStatus.QUARANTINED)
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+        advanceTimeBy(31_000)
+
+        assertTrue(vm.state.value.isCustodian)
+        assertFalse("nothing recorded on the receiver's phone", simulator.isRunning.value)
+        assertEquals(0, backgroundStarts)
+        visible.cancel()
+    }
+
     @Test
     fun whileWatchingCustodyComingToMeAsACourierStartsRecordingHere() = runTest {
         val genesis = server.seedShipment("SHIP-1", custodian = "courier")
+        // The server lets only the shipment's own people take custody.
+        server.members.getValue("SHIP-1") += ShipmentMember("courier-b", MemberRole.COURIER, "Bea")
         courierSends(genesis, 1)
         courierSends(genesis, 2)
         signInAs("courier-b", MemberRole.COURIER)

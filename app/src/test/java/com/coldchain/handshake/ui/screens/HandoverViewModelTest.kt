@@ -147,6 +147,27 @@ class HandoverViewModelTest {
         assertEquals(0, backgroundStarts)
     }
 
+    // Gate 5 review, mutant 20 and S6 (28 Nov): a receiver's FAIL leaves the shipment QUARANTINED, which counts as on
+    // the move, and the take-over read the person's profile role. Someone whose profile says courier but who is this
+    // shipment's receiver started recording a shipment that had arrived. Their role on the shipment decides.
+    @Test
+    fun theShipmentsReceiverRecordsNothingAfterAFailWhateverTheirProfileSays() = runBlocking {
+        openOnServer("receiver", MemberRole.COURIER)
+        server.currentUser = "courier"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = "receiver")
+        ).getOrThrow()
+        server.currentUser = "receiver"
+        val vm = viewModel()
+
+        vm.record(HandoverVerdict.FAIL, "Box crushed").join()
+
+        assertEquals("receiver", server.custody.getValue("SHIP-1").custodianId)
+        assertEquals(ShipmentStatus.QUARANTINED, server.shipments.getValue("SHIP-1").status)
+        assertFalse(simulator.isRunning.value)
+        assertEquals(0, backgroundStarts)
+    }
+
     private fun readings(count: Int = 10, genesisHash: String = genesis) = HashChainService.buildChain(
         (count - 1 downTo 0).map { back ->
             TemperatureEvent("TE-$back", "SHIP-1", "LOG-1", now - minute - back * minute, 5.0, "", "", SyncStatus.PENDING)

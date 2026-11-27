@@ -313,10 +313,12 @@ class HandoverViewModel @Inject constructor(
                     _state.update { it.copy(notice = notice, confirmedHead = waitingOn) }
                     serverRefresh.update { it + 1 }
                     // A courier taking over from another courier (5.3) records from now on: the one before stops as
-                    // soon as their phone sees custody move. The history was fetched just before confirming.
+                    // soon as their phone sees custody move. The history was fetched just before confirming. Their
+                    // role on this shipment decides, not their profile's: a receiver's FAIL leaves it QUARANTINED,
+                    // which counts as on the move (Gate 5 review S6).
                     val taken = (result as? HandoverResult.Confirmed)?.outcome
                     if (taken?.state == HandoverState.TRANSFERRED && taken.status in CourierRecorder.ON_THE_MOVE &&
-                        current.me?.profile?.role == MemberRole.COURIER
+                        roleOnShipment(shipment.id, current.me?.userId) == MemberRole.COURIER
                     ) {
                         recorder.start(shipment.copy(status = taken.status))
                     }
@@ -360,6 +362,13 @@ class HandoverViewModel @Inject constructor(
         } finally {
             _state.update { it.copy(processing = false) }
         }
+    }
+
+    /** [userId]'s role on the shipment as the server has it; the screen's copy of the members is used without an answer. */
+    private suspend fun roleOnShipment(shipmentId: String, userId: String?): MemberRole? {
+        if (userId == null) return null
+        val members = remote.getMembers(shipmentId).getOrNull() ?: _state.value.members
+        return members.firstOrNull { it.userId == userId }?.role
     }
 
     private suspend fun loadServerView(shipmentId: String, events: List<TemperatureEvent>) {
