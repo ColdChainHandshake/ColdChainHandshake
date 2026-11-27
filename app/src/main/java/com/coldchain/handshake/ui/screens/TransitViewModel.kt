@@ -286,7 +286,8 @@ class TransitViewModel @Inject constructor(
             val user = me
             if (custody != null && user != null && custody.custodianId == user && takeOverRecording(shipmentId)) {
                 _state.update { it.copy(isCustodian = true) }
-                setWatching(false)
+                // Only a courier who now records leaves watching; a receiver has nothing recorded here to show.
+                if (simulator.isRunning.value && !simulator.isMonitorOnly.value) setWatching(false)
             }
             firstRound = false
             delay(backoff.after(changed))

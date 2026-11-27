@@ -248,7 +248,9 @@ class TransitViewModelTest {
         advanceTimeBy(31_000)
 
         assertTrue(vm.state.value.isCustodian)
-        assertFalse(vm.state.value.watching)
+        // Before 28 Nov this asserted the receiver stopped watching, which showed the recording card with no reading
+        // on a receiver's phone (seen on the S24). A receiver records nothing, so they keep watching.
+        assertTrue(vm.state.value.watching)
         visible.cancel()
     }
 
@@ -390,6 +392,9 @@ class TransitViewModelTest {
         assertTrue(vm.state.value.isCustodian)
         assertFalse("nothing recorded on the receiver's phone", simulator.isRunning.value)
         assertEquals(0, backgroundStarts)
+        // Found on the S24 (28 Nov): the receiver's Transit switched to the recording card, "NO READING YET … simulated
+        // on this phone", for a shipment with 14 readings that this phone never recorded. It keeps watching.
+        assertTrue("still watching", vm.state.value.watching)
         visible.cancel()
     }
 
