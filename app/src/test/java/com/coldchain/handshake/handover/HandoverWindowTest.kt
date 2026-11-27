@@ -22,6 +22,7 @@ import com.coldchain.handshake.repository.HandoverState
 import com.coldchain.handshake.repository.MemberRole
 import com.coldchain.handshake.repository.ReadingUploader
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
+import com.coldchain.handshake.repository.ShipmentMember
 import com.coldchain.handshake.repository.ShipmentRepositoryImpl
 import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.SyncServiceImpl
@@ -197,6 +198,50 @@ class HandoverWindowTest {
         assertNull("nothing was renewed", renewed.getOrThrow())
         assertEquals(confirmationsBefore, server.confirmations.size)
         assertNull("the release is forgotten", courier.pendingReleases.get("SHIP-1"))
+    }
+
+    // Gate 5 review, mutant 10 (28 Nov): since finding 11's shortcut, no test reached the check that custody went to the
+    // person named. It matters after a restart: the waiting release is kept on the phone, the last confirmation isn't,
+    // so the first renewal confirms again and is refused. Handed to another courier, the shipment stays IN_TRANSIT,
+    // so only "custody is with the person named" tells the courier's phone the handover is done.
+    @Test
+    fun afterARestartTheCourierSeesCustodyWithTheNextCourierAndStopsRenewing() {
+        server.members.getValue("SHIP-1") += ShipmentMember("courier-b", MemberRole.COURIER, "Bea")
+        val courierB = Phone("courier-b", MemberRole.COURIER, "courier-b-phone")
+        try {
+            courier.open()
+            (1..5).forEach { courier.record(it) }
+            courier.now = trip[4].timestamp + minute / 2
+            courier.act { handover.release("SHIP-1", "courier-b").getOrThrow() }
+            courierB.open()
+            courierB.now = trip[4].timestamp + minute
+            courierB.act {
+                handover.receive("SHIP-1", HandoverVerdict.PASS, null, VvmStage.NOT_RECORDED, ShakeTestResult.NOT_DONE)
+            }.getOrThrow()
+            assertEquals("courier-b", server.custody.getValue("SHIP-1").custodianId)
+            assertEquals(ShipmentStatus.IN_TRANSIT, serverStatus())
+
+            val restarted = ServerHandover(
+                remote = server,
+                orchestrator = HandoverOrchestrator(
+                    courier.shipments, courier.telemetry, courier.handovers, RoomTransactionRunner(courier.db)
+                ),
+                shipments = courier.shipments,
+                handovers = courier.handovers,
+                history = ShipmentHistorySyncCoordinator(courier.telemetry, server),
+                uploadPending = { courier.sync.uploadReadings(it) },
+                deviceId = { courier.deviceId },
+                clock = { courier.now },
+                pendingReleases = courier.pendingReleases
+            )
+            val renewed = courier.act { restarted.renewRelease("SHIP-1") }
+
+            assertTrue("$renewed", renewed.isSuccess)
+            assertNull("nothing was renewed", renewed.getOrThrow())
+            assertNull("the release is forgotten", courier.pendingReleases.get("SHIP-1"))
+        } finally {
+            courierB.db.close()
+        }
     }
 
     @Test
