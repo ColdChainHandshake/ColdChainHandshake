@@ -84,6 +84,17 @@ class TemperatureCardTest {
         assertNull(TemperatureCard.watcherNote(null, newest, checkFailing = false, maxSilenceMs = limit, formatTime = time))
     }
 
+    // Gate 5 review S4 (28 Nov): a finished trip opened later said "The courier's phone may be offline".
+    @Test
+    fun onceTheTripHasEndedTheWatcherIsToldNothingAboutTheCourier() {
+        val newest = 1_700_000_000_000L
+        val note = TemperatureCard.watcherNote(
+            newest, newest + 120 * 60_000L, checkFailing = false, maxSilenceMs = vaccine.maxSilenceMs,
+            tripEnded = true
+        ) { "09:13" }
+        assertNull(note)
+    }
+
     // Security review S5: a value that isn't a number must never read as within range.
     @Test
     fun aValueThatIsNotANumberIsNeverWithinRange() {

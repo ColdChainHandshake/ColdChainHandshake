@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.coldchain.handshake.alerts.AlertChecks
 import com.coldchain.handshake.models.Shipment
+import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.TemperatureEvent
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.AccountState
@@ -55,6 +56,7 @@ import javax.inject.Inject
  * @property locating The recording service records location right now (allowed is not enough: Android may refuse it).
  * @property serverCheckedAt While watching, when this phone last fetched the shipment's readings from the server.
  * @property serverUnreachable While watching, the last fetch failed: what is shown may be out of date.
+ * @property tripEnded While watching, the trip is over: a receiver holds the shipment, or it is past the road.
  */
 data class TransitUiState(
     val shipment: Shipment? = null,
@@ -67,7 +69,8 @@ data class TransitUiState(
     val myLocation: RecordedLocation? = null,
     val locating: Boolean = false,
     val serverCheckedAt: Long? = null,
-    val serverUnreachable: Boolean = false
+    val serverUnreachable: Boolean = false,
+    val tripEnded: Boolean = false
 )
 
 /**
@@ -134,7 +137,7 @@ class TransitViewModel @Inject constructor(
                     if (shipment?.id == it.shipment?.id) it.copy(shipment = shipment)
                     else it.copy(
                         shipment = shipment, isCustodian = false, remoteGps = null, myLocation = null,
-                        serverCheckedAt = null, serverUnreachable = false
+                        serverCheckedAt = null, serverUnreachable = false, tripEnded = false
                     )
                 }
                 saved[KEY_SHIPMENT_ID] = shipment?.id
@@ -272,7 +275,13 @@ class TransitViewModel @Inject constructor(
                         it.copy(remoteGps = GpsLocationData(point.latitude, point.longitude, point.accuracyMeters, point.deviceTimestamp))
                     }
                 }
-                workflow.open(shipmentId)
+                val status = workflow.open(shipmentId).getOrNull()?.status
+                // Once the trip is over the silence since isn't the courier's (Gate 5 review S4). Members are read only
+                // when custody moved: the receiver holding it, or a status past the road, ends the trip.
+                val custodianRole = if (custody == null || !(custodyMoved || firstRound)) null
+                else remote.getMembers(shipmentId).getOrNull()?.firstOrNull { it.userId == custody.custodianId }?.role
+                val ended = status in TRIP_OVER || custodianRole == MemberRole.RECEIVER
+                if (custodianRole != null || status in TRIP_OVER) _state.update { it.copy(tripEnded = ended) }
             }
             val user = me
             if (custody != null && user != null && custody.custodianId == user && takeOverRecording(shipmentId)) {
@@ -303,6 +312,10 @@ class TransitViewModel @Inject constructor(
 
     companion object {
         private const val STOP_SHARING_MS = 5_000L
+        /** Statuses past the road: nothing more is recorded once a shipment is in one. */
+        private val TRIP_OVER = setOf(
+            ShipmentStatus.ARRIVED, ShipmentStatus.INSPECTED, ShipmentStatus.ACCEPTED, ShipmentStatus.REPLACEMENT_REQUESTED
+        )
         private const val KEY_SHIPMENT_ID = "shipmentId"
         private const val KEY_WATCHING = "watching"
         /** The worker ID the old two-phone demo gave a phone that only watches. */

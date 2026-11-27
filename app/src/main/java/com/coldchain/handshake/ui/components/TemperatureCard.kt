@@ -32,15 +32,17 @@ data class TemperatureCard(val value: String, val status: String, val level: Lev
          * For a phone watching someone else's shipment: says when no reading newer than the newest one had reached the
          * server at this phone's last check for longer than the product allows, or that this phone itself can't reach
          * the server, so a quiet courier and the watcher's own lost connection don't look alike. Null with nothing
-         * to say.
+         * to say. Once the trip has ended (a receiver holds the shipment), the silence since is not the courier's.
          */
         fun watcherNote(
             newestReadingAt: Long?,
             checkedAt: Long?,
             checkFailing: Boolean,
             maxSilenceMs: Long,
+            tripEnded: Boolean = false,
             formatTime: (Long) -> String
         ): String? = when {
+            tripEnded -> null
             checkFailing && checkedAt == null ->
                 "This phone hasn't reached the server yet, so what you see may not be up to date."
             checkFailing ->

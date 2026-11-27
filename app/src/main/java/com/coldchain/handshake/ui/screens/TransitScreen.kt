@@ -819,6 +819,7 @@ fun TransitScreen(
                         newestReadingAt = sortedEvents.firstOrNull()?.timestamp,
                         checkedAt = ui.serverCheckedAt,
                         checkFailing = ui.serverUnreachable,
+                        tripEnded = ui.tripEnded,
                         maxSilenceMs = ProductProfiles.byId(
                             currentShipment?.productProfileId ?: ProductProfiles.DEFAULT.id
                         ).maxSilenceMs,

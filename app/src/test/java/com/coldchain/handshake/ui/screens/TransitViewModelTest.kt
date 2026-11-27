@@ -289,6 +289,35 @@ class TransitViewModelTest {
         assertTrue("$inTheThirdMinute requests in the third minute", inTheThirdMinute <= 6)
     }
 
+    // Gate 5 review S4 (28 Nov): the watcher's note needs to know the trip is over, so it doesn't blame the courier.
+    @Test
+    fun whileWatchingTheScreenKnowsTheTripEndedOnceTheReceiverHoldsTheShipment() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        server.custody["SHIP-1"] = CustodyState(2, "receiver")
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(status = ShipmentStatus.QUARANTINED)
+        signInAs("sender", MemberRole.SENDER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(1_000)
+
+        assertTrue(vm.state.value.tripEnded)
+        visible.cancel()
+    }
+
+    @Test
+    fun whileWatchingACourierHeldShipmentTheTripGoesOn() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        signInAs("sender", MemberRole.SENDER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+        advanceTimeBy(1_000)
+
+        assertFalse(vm.state.value.tripEnded)
+        visible.cancel()
+    }
+
     // What the watcher's note rests on: when this phone last heard from the server, and whether it can't now. A quiet
     // courier and the watcher's own lost connection must not look alike.
     @Test
