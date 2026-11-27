@@ -6,6 +6,16 @@ plugins {
     id 'com.google.dagger.hilt.android'
 }
 
+// Release signing (5.6): the upload key's settings are read from the properties file CCH_RELEASE_KEYS names
+// (storeFile, storePassword, keyAlias, keyPassword), kept outside the repository. Without it the release APK is
+// built unsigned, as on CI.
+def releaseKeysPath = System.getenv('CCH_RELEASE_KEYS')
+def releaseKeys = new Properties()
+def hasReleaseKeys = releaseKeysPath != null && file(releaseKeysPath).exists()
+if (hasReleaseKeys) {
+    file(releaseKeysPath).withReader('UTF-8') { reader -> releaseKeys.load(reader) }
+}
+
 def localProperties = new Properties()
 def localPropertiesFile = rootProject.file('local.properties')
 if (localPropertiesFile.exists()) {
@@ -67,8 +77,9 @@ android {
         applicationId = "com.coldchain.handshake"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // 0.<phase>.<patch> while a prototype; the code is the same number written as major*10000 + minor*100 + patch.
+        versionCode = 500
+        versionName = "0.5.0"
 
         buildConfigField "String", "SUPABASE_URL", "\"${supabaseUrl}\""
         buildConfigField "String", "SUPABASE_ANON_KEY", "\"${supabaseAnonKey}\""
@@ -79,10 +90,25 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseKeys) {
+            release {
+                storeFile = file(releaseKeys.getProperty('storeFile'))
+                storePassword = releaseKeys.getProperty('storePassword')
+                keyAlias = releaseKeys.getProperty('keyAlias')
+                keyPassword = releaseKeys.getProperty('keyPassword')
+            }
+        }
+    }
+
     buildTypes {
         release {
-            minifyEnabled = false
+            minifyEnabled = true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKeys) {
+                signingConfig = signingConfigs.release
+            }
         }
         debug {
             applicationIdSuffix = ".debug"
