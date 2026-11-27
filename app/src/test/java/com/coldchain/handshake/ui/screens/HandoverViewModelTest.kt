@@ -252,6 +252,21 @@ class HandoverViewModelTest {
         Unit
     }
 
+    // Gate 5 review S3 (28 Nov): the screen judged the record with a "now" read only when data changed, so a courier
+    // going silent never turned PASS into UNKNOWN on screen. Each look at the server, changed or not, moves it on.
+    @Test
+    fun eachLookAtTheServerMovesTheTimeTheRecordIsJudgedAt() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        val vm = viewModel()
+        visible.launch { vm.runWhileVisible() }
+
+        val first = vm.awaitState { it.checkedAt != null }.checkedAt!!
+        val later = withTimeout(10_000) { vm.state.first { (it.checkedAt ?: 0L) > first } }.checkedAt!!
+
+        assertTrue("$first then $later", later > first)
+        assertEquals(10, telemetry.getTemperatures("SHIP-1").first().size)
+    }
+
     // The receiver's verdict covers readings up to their own confirmation, so the courier keeps recording until
     // custody moves (HandoverWindowTest). Before 26 Nov this test asserted that releasing stopped recording.
     @Test

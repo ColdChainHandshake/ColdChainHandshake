@@ -136,9 +136,10 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
     }
 
     // Safety breach evaluation
-    // Up to now while a courier holds it; up to the handover once a receiver does (TripWindow).
+    // Up to now while a courier holds it; up to the handover once a receiver does (TripWindow). Worked out again at each
+    // look at the server (ui.checkedAt), so a courier's silence shows even when nothing new arrives (Gate 5 review S3).
     val custodianRole = ui.members.firstOrNull { it.userId == ui.custody?.custodianId }?.role
-    val breachEvaluation = remember(telemetryEvents, shipment, ui.custody, custodianRole) {
+    val breachEvaluation = remember(telemetryEvents, shipment, ui.custody, custodianRole, ui.checkedAt) {
         shipment?.let {
             BreachDetector.evaluateForHandover(
                 it, telemetryEvents, TripWindow.end(ui.custody, custodianRole, System.currentTimeMillis())

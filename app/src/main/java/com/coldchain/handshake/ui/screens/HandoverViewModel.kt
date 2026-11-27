@@ -76,6 +76,8 @@ data class ShownHistory(
  * @property notice What the server said happened.
  * @property processing An action is running.
  * @property confirmedHead The head this person's confirmation is waiting on, while the other person hasn't confirmed.
+ * @property checkedAt When this phone last fetched the shipment's history from the server, changed or not: the screen
+ *   judges the record as of then, so silence since the newest reading counts even when nothing new arrives.
  */
 data class HandoverUiState(
     val shipment: Shipment? = null,
@@ -90,7 +92,8 @@ data class HandoverUiState(
     val processing: Boolean = false,
     val vvmStage: VvmStage = VvmStage.NOT_RECORDED,
     val shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
-    val confirmedHead: String? = null
+    val confirmedHead: String? = null,
+    val checkedAt: Long? = null
 ) {
     /** A shipment on the server is only ever confirmed there, by someone signed in. */
     val onServer: Boolean get() = me != null && shipment?.genesisHash != null
@@ -202,7 +205,9 @@ class HandoverViewModel @Inject constructor(
                     }
                     val backoff = PollBackoff()
                     while (true) {
-                        val arrived = history.hydrateHistory(id).getOrNull() ?: 0
+                        val fetched = history.hydrateHistory(id)
+                        if (fetched.isSuccess) _state.update { it.copy(checkedAt = System.currentTimeMillis()) }
+                        val arrived = fetched.getOrNull() ?: 0
                         delay(backoff.after(changed = arrived > 0))
                     }
                 }
