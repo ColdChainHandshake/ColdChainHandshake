@@ -200,6 +200,78 @@ class LiveSupabaseIntegrationTest {
         assertEquals(RemoteRejection.NOT_ALLOWED, (afterwards.exceptionOrNull() as RemoteRejection).code)
     }
 
+    // 5.3, multi-leg custody (finding 14) through the real server: courier A, then courier B, then the receiver. Each
+    // transfer moves custody one leg; the shipment stays on the move until a receiver takes it; each courier can add
+    // readings only while they hold it, and the receiver's download checks out across both couriers' uploads.
+    @Test
+    fun aShipmentGoesThroughTwoCouriersBeforeTheReceiver() = runBlocking {
+        val sender = Person("sender", MemberRole.SENDER)
+        val courierA = Person("couriera", MemberRole.COURIER)
+        val courierB = Person("courierb", MemberRole.COURIER)
+        val receiver = Person("receiver", MemberRole.RECEIVER)
+        listOf(sender, courierA, courierB, receiver).forEach { it.join() }
+        val shipmentId = "SHIP-$run"
+
+        val created = sender.remote.createShipment(
+            shipmentId, ProductProfiles.DEFAULT.id, "LOG-$run", "Depot", "Clinic"
+        ).getOrThrow()
+        sender.remote.addMember(shipmentId, courierA.email, MemberRole.COURIER).getOrThrow()
+        sender.remote.addMember(shipmentId, courierB.email, MemberRole.COURIER).getOrThrow()
+        sender.remote.addMember(shipmentId, receiver.email, MemberRole.RECEIVER).getOrThrow()
+        sender.remote.dispatchShipment(shipmentId).getOrThrow()
+        courierA.remote.startCustody(shipmentId, courierA.deviceId).getOrThrow()
+
+        // Courier A records the first five readings and hands over to courier B.
+        val trip = chain(created.genesisHash, shipmentId, 8)
+        val firstLeg = ReadingUploader(courierA.remote, courierA.signer, { courierA.deviceId })
+            .upload(shipmentId, trip.take(5)).getOrThrow()
+        val atFive = firstLeg.head.headHash
+        assertEquals(HandoverState.WAITING, courierA.remote.confirmHandover(
+            HandoverConfirmation(shipmentId, 1, courierA.deviceId, atFive, toUserId = courierB.userId)
+        ).getOrThrow().state)
+        val toCourierB = courierB.remote.confirmHandover(
+            HandoverConfirmation(shipmentId, 1, courierB.deviceId, atFive, verdict = HandoverVerdict.PASS)
+        ).getOrThrow()
+        assertEquals(HandoverState.TRANSFERRED, toCourierB.state)
+        assertEquals(ShipmentStatus.IN_TRANSIT, toCourierB.status)
+        val second = sender.remote.getCustody(shipmentId).getOrThrow()!!
+        assertEquals(courierB.userId, second.custodianId)
+        assertEquals(2, second.leg)
+
+        // Courier A can no longer add readings; courier B carries the same chain on.
+        val late = courierA.remote.appendReadings(shipmentId, listOf(trip[5]), atFive, courierA.deviceId, "s")
+        assertEquals(RemoteRejection.NOT_ALLOWED, (late.exceptionOrNull() as RemoteRejection).code)
+        val secondLeg = ReadingUploader(courierB.remote, courierB.signer, { courierB.deviceId })
+            .upload(shipmentId, trip.drop(5)).getOrThrow()
+        assertEquals(8L, secondLeg.head.count)
+
+        // Courier B hands over to the receiver, who accepts it.
+        val atEight = secondLeg.head.headHash
+        assertEquals(HandoverState.WAITING, courierB.remote.confirmHandover(
+            HandoverConfirmation(shipmentId, 2, courierB.deviceId, atEight, toUserId = receiver.userId)
+        ).getOrThrow().state)
+        val accepted = receiver.remote.confirmHandover(
+            HandoverConfirmation(shipmentId, 2, receiver.deviceId, atEight, verdict = HandoverVerdict.PASS)
+        ).getOrThrow()
+        assertEquals(HandoverState.TRANSFERRED, accepted.state)
+        assertEquals(ShipmentStatus.ACCEPTED, sender.remote.getShipment(shipmentId).getOrThrow()?.status)
+        val third = sender.remote.getCustody(shipmentId).getOrThrow()!!
+        assertEquals(receiver.userId, third.custodianId)
+        assertEquals(3, third.leg)
+
+        // The receiver's download is one chain across both couriers' uploads, every batch signed and in place.
+        val receiverPhone = InMemoryTelemetryRepository()
+        val history = ShipmentHistorySyncCoordinator(receiverPhone, receiver.remote)
+        history.hydrateHistory(shipmentId).getOrThrow()
+        val events = receiverPhone.getTemperatures(shipmentId).first()
+        assertEquals(8, events.size)
+        val integrity = ShipmentIntegrityEvaluator.evaluate(events, true, created.genesisHash, history.getServerHead(shipmentId).value)
+        assertEquals(IntegrityVerificationState.VERIFIED, integrity.state)
+        val batches = receiver.remote.getBatches(shipmentId).getOrThrow()
+        assertEquals(setOf(courierA.deviceId, courierB.deviceId), batches.map { it.deviceId }.toSet())
+        assertTrue(UploadAudit.check(shipmentId, batches, events).isEmpty())
+    }
+
     @Test
     fun someoneNotSignedInSeesNothing() = runBlocking {
         val anonymous = client()
