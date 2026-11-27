@@ -17,6 +17,7 @@ import com.coldchain.handshake.recording.RecordedLocation
 import com.coldchain.handshake.recording.RecordedLocations
 import com.coldchain.handshake.recording.RecordingStore
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.repository.impl.InMemoryShipmentRepository
@@ -65,8 +66,9 @@ class TransitViewModelTest {
     /** Which shipment is recording, kept on the phone; and how often the background recording was started. */
     private val recordingStore = RecordingStore.inMemory()
     private var backgroundStarts = 0
-    /** The newest location the recording service queued for SHIP-1. */
+    /** The newest location the recording service queued for SHIP-1, and whether it records location right now. */
     private val recorded = MutableStateFlow<RecordedLocation?>(null)
+    private val locating = MutableStateFlow(false)
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -81,7 +83,11 @@ class TransitViewModelTest {
         val recorder = CourierRecorder(simulator, recordingStore) { backgroundStarts++ }
         return TransitViewModel(
             account, shipments, workflow, simulator, history, server, telemetry, recorder,
-            RecordedLocations { id -> if (id == "SHIP-1") recorded else flowOf(null) }, { alertChecks++ },
+            object : RecordedLocations {
+                override val active: StateFlow<Boolean> = locating
+                override fun latest(shipmentId: String) = if (shipmentId == "SHIP-1") recorded else flowOf(null)
+            },
+            { alertChecks++ },
             ActiveShipmentRestorer(simulator, shipments, server, account, recorder), saved
         )
     }
@@ -345,6 +351,20 @@ class TransitViewModelTest {
 
         recorded.value = recorded.value!!.copy(sent = true)
         assertEquals(true, vm.state.value.myLocation?.sent)
+    }
+
+    // The location card says location is recorded only while the service really records it. Allowed is not enough:
+    // after a restart in the background, or with location turned off on the phone, Android refuses it.
+    @Test
+    fun theScreenSaysLocationIsRecordedOnlyWhileTheServiceRecordsIt() = runTest {
+        val vm = viewModel()
+        assertFalse(vm.state.value.locating)
+
+        locating.value = true
+        assertTrue(vm.state.value.locating)
+
+        locating.value = false
+        assertFalse(vm.state.value.locating)
     }
 
     @Test

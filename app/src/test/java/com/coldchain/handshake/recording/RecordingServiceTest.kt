@@ -76,6 +76,7 @@ class RecordingServiceTest {
     @Inject lateinit var shipments: ShipmentRepository
     @Inject lateinit var store: RecordingStore
     @Inject lateinit var database: ColdChainDatabase
+    @Inject lateinit var locations: LocationRecorder
 
     private val fakeLocations = FakeLocationSource()
 
@@ -197,6 +198,7 @@ class RecordingServiceTest {
 
         assertEquals(CONNECTED_DEVICE or LOCATION, service.foregroundServiceType)
         assertTrue(fakeLocations.running)
+        assertTrue("the screens are told location is recorded", locations.active.value)
     }
 
     @Test
@@ -228,6 +230,8 @@ class RecordingServiceTest {
         assertFalse(fakeLocations.running)
         assertFalse(shadowOf(service).isStoppedBySelf)
         assertTrue(simulator.isRunning.value)
+        // Location is allowed, but not recorded: the screens must not say it is.
+        assertFalse(locations.active.value)
     }
 
     // A courier who refused location at Take Custody and allows it later, from the Transit screen, gets it on the
@@ -257,6 +261,7 @@ class RecordingServiceTest {
 
         eventually("the service stops itself") { shadowOf(service).isStoppedBySelf }
         assertFalse(fakeLocations.running)
+        assertFalse(locations.active.value)
     }
 
     @Test

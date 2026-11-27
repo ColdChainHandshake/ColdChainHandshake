@@ -71,6 +71,7 @@ class RecordingService : Service() {
             if (types != null && types and LOCATION_TYPE != 0 && !locating) {
                 locating = true
                 locationSource.start { fix -> scope.launch { locations.record(fix) } }
+                locations.setActive(true)
             }
         }
         // The system restarting the service (no intent) can't keep it alive outside the foreground, so record nothing.
@@ -85,7 +86,7 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
-        locationSource.stop()
+        stopLocating()
         scope.cancel()
         releaseWakeLock()
         super.onDestroy()
@@ -96,9 +97,14 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun finish() {
+    private fun stopLocating() {
         locationSource.stop()
         locating = false
+        locations.setActive(false)
+    }
+
+    private fun finish() {
+        stopLocating()
         releaseWakeLock()
         if (inForeground) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         inForeground = false

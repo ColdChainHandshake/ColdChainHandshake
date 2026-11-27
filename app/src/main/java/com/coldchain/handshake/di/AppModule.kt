@@ -259,8 +259,10 @@ object AppModule {
         LocationRecorder(simulator, db.gpsPointDao())
 
     @Provides
-    fun recordedLocations(db: ColdChainDatabase): RecordedLocations =
-        RecordedLocations { id -> db.gpsPointDao().latest(id).map { it?.toRecordedLocation() } }
+    fun recordedLocations(db: ColdChainDatabase, recorder: LocationRecorder): RecordedLocations = object : RecordedLocations {
+        override val active = recorder.active
+        override fun latest(shipmentId: String) = db.gpsPointDao().latest(shipmentId).map { it?.toRecordedLocation() }
+    }
 }
 
 /** Where the recording service's fixes come from, apart from the rest so tests can replace it. */

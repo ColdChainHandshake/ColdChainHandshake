@@ -69,6 +69,15 @@ class CourierRecorder(
         if (store.shipmentId != null && simulator.isRunning.value) background.keepRunning()
     }
 
+    /**
+     * The app has opened. A remembered recording that isn't running is handed to the background; one already running
+     * is asked again, because after a restart in the background it runs without location, which Android lets start
+     * only while the app is open.
+     */
+    fun onAppOpened() {
+        if (simulator.isRunning.value) refreshBackground() else resumeInBackgroundIfRemembered()
+    }
+
     companion object {
         /** How often the simulator looks at the clock. It records at most one reading a minute. */
         const val TICK_MS = 1_500L

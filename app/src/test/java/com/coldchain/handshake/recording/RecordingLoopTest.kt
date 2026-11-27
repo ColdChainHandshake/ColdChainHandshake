@@ -343,6 +343,29 @@ class RecordingLoopTest {
         assertEquals("only the start itself", 1, backgroundStarts)
     }
 
+    // A restart in the background (Android restarting the service after its process was killed) brings recording back
+    // without location, because Android lets a location service start only while the app is open. Opening the app
+    // then asks the recording already running to add it: a new start of the service, not a second recording.
+    @Test
+    fun openingTheAppWhileRecordingAsksTheServiceAgainSoItCanAddLocation() {
+        recorder.start(opened())
+
+        recorder.onAppOpened()
+
+        assertEquals(2, backgroundStarts)
+        assertTrue(simulator.isRunning.value)
+    }
+
+    @Test
+    fun openingTheAppWithNothingRecordingResumesOnlyARememberedShipment() {
+        recorder.onAppOpened()
+        assertEquals(0, backgroundStarts)
+
+        store.shipmentId = "SHIP-1"
+        recorder.onAppOpened()
+        assertEquals(1, backgroundStarts)
+    }
+
     @Test
     fun openingTheAppAgainResumesNothingForAShipmentNoLongerOnTheMove() {
         val accepted = opened().copy(status = ShipmentStatus.ACCEPTED)

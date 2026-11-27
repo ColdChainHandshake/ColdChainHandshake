@@ -35,7 +35,7 @@ class AppStartup @Inject constructor(
     fun start() {
         if (jobs.isNotEmpty()) return
         jobs = listOf(session.watch(scope), watchLoggerDisconnect())
-        recorder.resumeInBackgroundIfRemembered()
+        recorder.onAppOpened()
     }
 
     private fun watchLoggerDisconnect(): Job = scope.launch {

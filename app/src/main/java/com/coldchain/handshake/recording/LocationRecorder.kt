@@ -5,6 +5,9 @@ import com.coldchain.handshake.data.local.entities.toEntity
 import com.coldchain.handshake.repository.GpsPoint
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
 /** One location from the phone: where it was, how sure, and when (the phone's clock). */
@@ -19,8 +22,12 @@ data class RecordedLocation(
     val sent: Boolean
 )
 
-/** This phone's newest recorded location for a shipment, as the queue holds it. */
-fun interface RecordedLocations {
+/** What the screens show about location: whether it is being recorded now, and the newest point recorded. */
+interface RecordedLocations {
+    /** The recording service records location right now; allowed alone is not enough (Android may refuse it). */
+    val active: StateFlow<Boolean>
+
+    /** This phone's newest recorded location for a shipment, as the queue holds it. */
     fun latest(shipmentId: String): Flow<RecordedLocation?>
 }
 
@@ -43,6 +50,15 @@ class LocationRecorder(
     private val points: GpsPointDao,
     private val newId: () -> String = { UUID.randomUUID().toString() }
 ) {
+    private val _active = MutableStateFlow(false)
+
+    /** The recording service asks for fixes right now. Set by the service as it starts and stops them. */
+    val active: StateFlow<Boolean> = _active.asStateFlow()
+
+    fun setActive(active: Boolean) {
+        _active.value = active
+    }
+
     /** True if [fix] was queued. */
     suspend fun record(fix: LocationFix): Boolean {
         val shipment = simulator.activeShipment.value ?: return false

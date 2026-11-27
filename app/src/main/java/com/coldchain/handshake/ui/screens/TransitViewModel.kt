@@ -51,6 +51,7 @@ import javax.inject.Inject
  * @property handedOverShipmentId Set when custody moved away from this phone while it was recording.
  * @property remoteGps The custodian's last reported location, while watching.
  * @property myLocation The newest location this phone recorded for the shipment, and whether the server has it.
+ * @property locating The recording service records location right now (allowed is not enough: Android may refuse it).
  */
 data class TransitUiState(
     val shipment: Shipment? = null,
@@ -60,7 +61,8 @@ data class TransitUiState(
     val notice: String? = null,
     val handedOverShipmentId: String? = null,
     val remoteGps: GpsLocationData? = null,
-    val myLocation: RecordedLocation? = null
+    val myLocation: RecordedLocation? = null,
+    val locating: Boolean = false
 )
 
 /**
@@ -135,6 +137,9 @@ class TransitViewModel @Inject constructor(
             simulator.activeShipment.map { it?.id }.distinctUntilChanged()
                 .flatMapLatest { id -> if (id == null) flowOf(null) else recordedLocations.latest(id) }
                 .collect { location -> _state.update { it.copy(myLocation = location) } }
+        }
+        viewModelScope.launch {
+            recordedLocations.active.collect { on -> _state.update { it.copy(locating = on) } }
         }
         viewModelScope.launch {
             account.state.collect { s -> _state.update { it.copy(signedInAs = (s as? AccountState.Ready)?.userId) } }

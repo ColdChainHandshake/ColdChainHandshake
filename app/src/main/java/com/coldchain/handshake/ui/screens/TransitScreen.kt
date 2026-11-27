@@ -2,7 +2,9 @@ package com.coldchain.handshake.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Build
+import androidx.core.location.LocationManagerCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -862,6 +864,31 @@ fun TransitScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = StatusAmber)
                         ) {
                             Text("Allow Location", fontSize = 12.sp)
+                        }
+                    } else if (!ui.locating) {
+                        // Allowed, but the recording service isn't recording it: not recording at all, restarted in the
+                        // background (Android lets location start only while the app is open), or location turned off.
+                        val locationOn = remember(ui.locating) {
+                            context.getSystemService(LocationManager::class.java)?.let(LocationManagerCompat::isLocationEnabled) ?: false
+                        }
+                        Text(
+                            text = when {
+                                !isRunning -> "Location is recorded while this phone records the shipment."
+                                !locationOn -> "Location isn't being recorded: it is turned off on this phone."
+                                else -> "Location isn't being recorded right now. Android lets it start only while " +
+                                    "this app is open."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isRunning) StatusAmber else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (isRunning) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Button(
+                                onClick = viewModel::keepRecordingInBackground,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            ) {
+                                Text("Record Location", fontSize = 12.sp)
+                            }
                         }
                     } else {
                         Text(
