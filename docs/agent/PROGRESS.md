@@ -38,7 +38,9 @@ CCH_RELEASE_KEYS=… ./gradlew lintDebug assembleRelease assembleDebug   (at 9f5
   | checkReleaseKeepRules passed | apksigner verify: no error; then ./gradlew --stop
 ```
 
-The gate's commit moved from the pinned `9d49a8d` to `9f54987`: it adds the reviewed wording, the 4.3 migration (local
+CI then passed every job (android: unit tests, lint, release build; database: pgTAP; firmware) at `9eca5b5`, which is
+`9f54987` plus docs: https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/46100511408 (and at
+`c015294`). The gate's commit moved from the pinned `9d49a8d` to `9f54987`: it adds the reviewed wording, the 4.3 migration (local
 only, pgTAP 252/252, not on the dev project) and the test fixes above. The owner's message allowed a tag past
 `9d49a8d` (it named `8edf1f5`, which holds 4.3).
 
