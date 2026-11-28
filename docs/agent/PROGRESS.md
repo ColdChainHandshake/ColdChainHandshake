@@ -1,5 +1,24 @@
 # Progress
 
+**Phase 6 step 1, S8 location privacy (28 Nov, evening): `done`.** `6ebd3da` (SQL), `7e938d7` (app), DECISIONS 28 Nov.
+Local stack with only db, auth, rest and kong:
+
+```text
+npx supabase test db (before 0005)   0006_location_privacy: failed tests 3-14, 16-...; "NaN" latitude and infinite
+                                     accuracy were stored; purge_expired_location() does not exist
+npx supabase db reset; npx supabase test db   Files=6, Tests=279, Result: PASS
+npx supabase db advisors --local              No issues found
+LiveSupabaseIntegrationTest, HEAD against this schema      tests 4 failures 0
+LiveSupabaseIntegrationTest, 05b342e worktree              tests 3 failures 0
+MCP apply_migration 0005_location_privacy on dev: success (list_migrations before: 0000-0004)
+  grants: can_see_location authenticated only; trip_ended_at, location_retention, purge_expired_location no client role;
+  policy gps_points_read = private.can_see_location(shipment_id, device_id)
+  get_advisors security: no errors; the same 13 allow-listed RPC WARNs, 6 legacy INFOs, leaked-password WARN
+App: :core-domain:test plus SyncServiceTest, RecordingLoopTest, TransitViewModelTest, HandoverScreenTest,
+  TransitScreenTest, HandoverViewModelTest, ColdChainRemoteContractTest, SyncWorkerTest    tests 287 failures 0
+  mutants: loop call removed, DAO delete removed, Transit flag never set, Handover branch removed: all 4 killed
+```
+
 **`gate-4` tagged on `e179af3` (28 Nov, evening): met without hardware.** The re-check's "Re-check 2" (same reviewer,
 bounded) found R4-1 to R4-8 closed: X3, X5 and X6 killed by the new tests; targeted classes green at HEAD; CI run
 46158092337 on `e179af3` green (android, firmware, database). Next: Phase 6 (MASTER 5.6), starting with S8.
