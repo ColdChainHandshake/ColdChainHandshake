@@ -174,6 +174,42 @@ class ColdChainRemoteContractTest {
         assertEquals(setOf("id", "lat", "lon", "accuracy_m", "device_ts"), sent.keys)
     }
 
+    // 4.1: the receiver checks the logger against the key the sender enrolled (0004_logger_enrolment.sql).
+    @Test
+    fun aShipmentIsReadWithItsEnrolledLogger() = runBlocking {
+        val key = "04" + "6b".repeat(64)
+        respond = { request ->
+            if (request.url.encodedPath.endsWith("/shipments")) ok(
+                """[{"id":"SHIP-1","sender_id":"s","product_profile_id":"vaccine-2-8-freeze-sensitive",
+                   "logger_id":"LOG-1","origin":"A","destination":"B","status":"IN_TRANSIT",
+                   "created_at":"2026-11-28T03:00:00+00:00","logger_public_key":"$key","logger_start_seq":120}]"""
+            ) else ok("[]")
+        }
+
+        val shipment = remote.getShipment("SHIP-1").getOrThrow()!!
+
+        assertEquals(key, shipment.loggerPublicKeyHex)
+        assertEquals(120L, shipment.loggerStartSeq)
+        assertEquals(65, shipment.enrolledLoggerKey?.size)
+        assertEquals(0x04.toByte(), shipment.enrolledLoggerKey?.first())
+    }
+
+    @Test
+    fun aShipmentWithNoLoggerEnrolledHasNone() = runBlocking {
+        respond = { request ->
+            if (request.url.encodedPath.endsWith("/shipments")) ok(
+                """[{"id":"SHIP-1","sender_id":"s","product_profile_id":"vaccine-2-8-freeze-sensitive",
+                   "logger_id":"LOG-1","origin":"A","destination":"B","status":"IN_TRANSIT",
+                   "created_at":"2026-11-28T03:00:00+00:00","logger_public_key":null,"logger_start_seq":null}]"""
+            ) else ok("[]")
+        }
+
+        val shipment = remote.getShipment("SHIP-1").getOrThrow()!!
+
+        assertNull(shipment.enrolledLoggerKey)
+        assertNull(shipment.loggerStartSeq)
+    }
+
     // The time custody moved ends a finished trip's record (TripWindow), in the form PostgREST writes a timestamptz.
     @Test
     fun custodyIsReadWithWhenItMoved() = runBlocking {

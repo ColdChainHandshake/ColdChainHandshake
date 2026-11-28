@@ -126,7 +126,9 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
             destination = row.destination,
             status = ShipmentStatus.valueOf(row.status),
             createdAtMs = row.createdAt.toEpochMillis(),
-            journeyStartedAt = started?.serverTime?.toEpochMillis()
+            journeyStartedAt = started?.serverTime?.toEpochMillis(),
+            loggerPublicKeyHex = row.loggerPublicKey,
+            loggerStartSeq = row.loggerStartSeq
         )
     }
 
@@ -348,7 +350,9 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
         val origin: String,
         val destination: String,
         val status: String,
-        @SerialName("created_at") val createdAt: String
+        @SerialName("created_at") val createdAt: String,
+        @SerialName("logger_public_key") val loggerPublicKey: String? = null,
+        @SerialName("logger_start_seq") val loggerStartSeq: Long? = null
     )
 
     @Serializable

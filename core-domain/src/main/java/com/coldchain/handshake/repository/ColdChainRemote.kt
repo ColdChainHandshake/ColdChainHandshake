@@ -38,8 +38,25 @@ data class RemoteShipment(
     val destination: String,
     val status: ShipmentStatus,
     val createdAtMs: Long,
-    val journeyStartedAt: Long?
+    val journeyStartedAt: Long?,
+    /** The logger the sender enrolled (4.3): its uncompressed P-256 key in hex, or null if none was. */
+    val loggerPublicKeyHex: String? = null,
+    /** The logger's newest record when the trip started, enrolled with the key. */
+    val loggerStartSeq: Long? = null
 ) {
+
+    /**
+     * The enrolled key as the logger check takes it, 65 bytes. A key on record that can't be read is still a key on
+     * record: it comes back as an empty array, so the check treats the logger as enrolled and can't verify it.
+     */
+    val enrolledLoggerKey: ByteArray?
+        get() = loggerPublicKeyHex?.let { hex ->
+            if (hex.length == 130 && hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                ByteArray(65) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+            } else {
+                ByteArray(0)
+            }
+        }
 
     /**
      * Derived from the manifest, so a member never has to take the server's word for where the chain

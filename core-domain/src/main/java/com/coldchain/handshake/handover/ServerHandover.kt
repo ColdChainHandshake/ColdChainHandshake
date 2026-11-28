@@ -1,6 +1,10 @@
 package com.coldchain.handshake.handover
 
 import com.coldchain.handshake.crypto.ServerChainHead
+import com.coldchain.handshake.logger.LoggerCheckOutcome
+import com.coldchain.handshake.logger.LoggerCheckResult
+import com.coldchain.handshake.logger.LoggerHandoverCheck
+import com.coldchain.handshake.logger.LoggerLink
 import com.coldchain.handshake.models.Handover
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ShakeTestResult
@@ -44,8 +48,29 @@ class ServerHandover(
     private val deviceId: () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
     private val pendingReleases: PendingReleases = PendingReleases.inMemory(),
-    private val onQueuedOffline: () -> Unit = {}
+    private val onQueuedOffline: () -> Unit = {},
+    /** The shipment's logger as this phone reaches it; none today (no hardware logger, `HARDWARE = none`). */
+    private val loggerLink: suspend (shipmentId: String) -> LoggerLink? = { null },
+    private val loggerHandoverCheck: LoggerHandoverCheck = LoggerHandoverCheck()
 ) {
+
+    /**
+     * Reads the shipment's logger against the key the sender enrolled (4.1, 4.3). The one outcome both the Handover
+     * screen shows and the receiver's confirmation records: it can only lower the verdict. With no server answer the
+     * enrolment is unknown, and the logger can't be verified.
+     */
+    suspend fun loggerCheck(shipmentId: String): LoggerCheckResult {
+        val found = remote.getShipment(shipmentId).getOrElse {
+            return LoggerCheckResult(LoggerCheckOutcome.UNKNOWN, listOf("The shipment's logger enrolment couldn't be read."))
+        } ?: return LoggerCheckResult(LoggerCheckOutcome.UNKNOWN, listOf("No shipment with that code."))
+        return loggerHandoverCheck.check(
+            link = loggerLink(shipmentId),
+            loggerId = found.loggerId,
+            enrolledKey = found.enrolledLoggerKey,
+            startSeq = found.loggerStartSeq ?: 0L,
+            readings = history.heldReadings(shipmentId)
+        )
+    }
 
     /**
      * For the current custodian, who names who takes over. The server compares both people's confirmations
@@ -177,6 +202,8 @@ class ServerHandover(
         val synced = history.hydrateHistory(shipmentId).isSuccess
         val head = if (synced) history.currentHead(shipmentId) else null
         val now = clock()
+        // The same check the Handover screen shows, so what is recorded is what the person saw.
+        val logger = loggerCheck(shipmentId).outcome
 
         val assessment = orchestrator.assess(
             shipmentId = shipmentId,
@@ -188,7 +215,8 @@ class ServerHandover(
             shakeTest = shakeTest,
             historySynced = synced && head != null,
             serverHead = head,
-            timestamp = now
+            timestamp = now,
+            loggerCheck = logger
         ).getOrElse { return Result.failure(it) }
 
         val queueOffline: suspend () -> Result<HandoverResult> = {
@@ -201,7 +229,8 @@ class ServerHandover(
                 vvmStage = vvmStage,
                 shakeTest = shakeTest,
                 historySynced = false,
-                timestamp = now
+                timestamp = now,
+                loggerCheck = logger
             ).map { HandoverResult.QueuedOffline(it.handover) }
                 .onSuccess { onQueuedOffline() }
         }

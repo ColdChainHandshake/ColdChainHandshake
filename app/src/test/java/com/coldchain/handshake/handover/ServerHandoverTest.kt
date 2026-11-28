@@ -7,6 +7,7 @@ import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.local.RoomTransactionRunner
 import com.coldchain.handshake.models.HandoverVerdict
+import com.coldchain.handshake.logger.LoggerCheckOutcome
 import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
@@ -144,6 +145,40 @@ class ServerHandoverTest {
         courierReleases()
         handover.refresh("SHIP-1").getOrThrow()
 
+        assertEquals(ShipmentStatus.ACCEPTED, localStatus())
+    }
+
+    // 4.1: one logger outcome decides both what the screen shows and what is recorded. A logger enrolled on the
+    // shipment's record that this phone can't reach leaves the record unconfirmed, so no PASS is recorded over it.
+    @Test
+    fun anEnrolledLoggerThisPhoneCannotReachKeepsTheHandoverFromPassing() = runBlocking {
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(
+            loggerPublicKeyHex = "04" + "6b".repeat(64), loggerStartSeq = 0
+        )
+        courierUploaded(chain(10))
+        courierReleases()
+        openAsReceiver()
+
+        assertEquals(LoggerCheckOutcome.UNKNOWN, handover.loggerCheck("SHIP-1").outcome)
+        val declaredPass = receive(HandoverVerdict.PASS)
+        assertTrue("a PASS isn't recorded over an unread logger: $declaredPass", declaredPass.isFailure)
+
+        val result = receive().getOrThrow() as HandoverResult.Confirmed
+        assertEquals(HandoverVerdict.UNKNOWN, server.confirmations.last().details.verdict)
+        assertTrue(ShipmentStatus.ACCEPTED != localStatus())
+        assertEquals(HandoverState.TRANSFERRED, result.outcome.state)
+    }
+
+    @Test
+    fun withNoLoggerEnrolledTheLoggerIsNotCheckedAndThePassStands() = runBlocking {
+        courierUploaded(chain(10))
+        courierReleases()
+        openAsReceiver()
+
+        assertEquals(LoggerCheckOutcome.NOT_CHECKED, handover.loggerCheck("SHIP-1").outcome)
+        receive(HandoverVerdict.PASS).getOrThrow()
+
+        assertEquals(HandoverVerdict.PASS, server.confirmations.last().details.verdict)
         assertEquals(ShipmentStatus.ACCEPTED, localStatus())
     }
 

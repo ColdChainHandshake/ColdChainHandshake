@@ -1,6 +1,7 @@
 package com.coldchain.handshake.repository
 
 import com.coldchain.handshake.crypto.ServerChainHead
+import com.coldchain.handshake.models.TemperatureEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,14 +59,18 @@ class ShipmentHistorySyncCoordinator(
         stateFor(shipmentId).value = HistorySyncState.HISTORY_READY
     }
 
-    /**
-     * Fetches whatever this device doesn't hold. A reading it holds already is never replaced: if that
-     * copy differs from the server's, comparing with the server's head has to show it.
-     */
     /** The hash of the newest reading this phone holds for [shipmentId], or null if it holds none. */
     suspend fun newestHeldHash(shipmentId: String): String? =
         telemetryRepository.getTemperatures(shipmentId).firstOrNull()?.maxByOrNull { it.seq }?.currentHash
 
+    /** The readings this phone holds for [shipmentId], oldest first. */
+    suspend fun heldReadings(shipmentId: String): List<TemperatureEvent> =
+        telemetryRepository.getTemperatures(shipmentId).firstOrNull().orEmpty().sortedBy { it.seq }
+
+    /**
+     * Fetches whatever this device doesn't hold. A reading it holds already is never replaced: if that
+     * copy differs from the server's, comparing with the server's head has to show it.
+     */
     suspend fun hydrateHistory(shipmentId: String): Result<Int> {
         if (shipmentId.isBlank()) return Result.success(0)
 
