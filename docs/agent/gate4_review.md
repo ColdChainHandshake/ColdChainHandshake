@@ -273,3 +273,190 @@ No High findings.
 After the last mutant was reverted, and before this file was written: `git status --short` printed nothing, and
 `git diff --stat` printed nothing. The firmware build directory was rebuilt from HEAD's sources (39/39). The only
 change this review leaves is this untracked file, `docs/agent/gate4_review.md`.
+
+---
+
+# Re-check (independent, 28 Nov 2026, HEAD `f306333`, branch `rebuild/trust-core`)
+
+**VERDICT: GATE 4 MET WITH RESERVATIONS (without hardware). The `gate-4` tag is blocked until the full proof and CI
+pass on the new code.**
+
+The finding that failed the gate (G4-1) is closed. A reachable logger now decides the recorded verdict, through
+`ServerHandover` (fake server) and through the debug app's local mode (`HandoverViewModel`). Mutant A1 and its
+local-mode twin X2 are both killed. `VirtualLogger` itself is now checked against the shared vectors. G4-2 to G4-10,
+A2 and A3 are closed or documented. The reservations: three guards on the new screen and local-mode code have no
+test (X3, X5 and X6 survived). Each one affects only what the screen shows; the recorded verdict always reads the
+logger again. Of the three, only X5 guards something reachable in today's app. One design change is not recorded in
+DECISIONS (R4-4).
+
+What blocks the tag: main sources changed in `54bfeac`, `5a3a11b` and `35928b7`. The last full proof, lint and CI
+are at `3dfd25a`, and PROGRESS line 3 lists "the full proof, CI" before `gate-4`. My rules forbid full suites, so
+I could not run them.
+
+Method: I read the documents named in the brief, `git diff 5054ce2..HEAD`, and every new or changed main and test
+file. I ran targeted Gradle tests, one call at a time, and 9 mutants. I ran no device, emulator, adb, Docker,
+Supabase, MCP, live test or network. I read no `local.properties`, keystore or `.env` file.
+
+## R1. Commands run
+
+The `-q` runs print nothing when they pass. The last lines below are the per-class results from the JUnit XML
+(tests/failures/errors), read with a small script after each run.
+
+```text
+git log --oneline 5054ce2..HEAD   -> 9 commits: f2eb4c7 (the earlier review) plus 8 fix commits, 99e0bb2 .. f306333
+git diff --stat 5054ce2..HEAD     -> 25 files changed, 1255 insertions(+), 34 deletions(-)
+
+Baseline at HEAD:
+./gradlew :core-domain:test --tests '*logger*' --tests '*LoggerCheckVerdictTest*' --rerun \
+  :app:testDebugUnitTest --tests '*ServerHandoverTest*' --tests '*HandoverScreenTest*' \
+  --tests '*HandoverViewModelTest*' --tests '*LocalLoggersTest*' --rerun --continue -q        EXIT=0
+  LoggerCheckVerdictTest 5/0/0, LoggerHandoverCheckTest 23/0/0, LoggerHistoryForkTest 4/0/0,
+  LoggerVectorsTest 5/0/0, RecordsRunExactlyTest 2/0/0, TestLoggerKeyTest 7/0/0,
+  VirtualLoggerVectorsTest 3/0/0, BleLoggerLinkTest 15/0/0, LoggerGattVectorsTest 7/0/0,
+  ServerHandoverTest 22/0/0, LocalLoggersTest 2/0/0, HandoverScreenTest 24/0/0, HandoverViewModelTest 19/0/0
+  (138 tests, 0 failures, timestamps 2026-11-28T14:33-14:34Z)
+
+./gradlew :app:testReleaseUnitTest --tests '*ReleaseHasNoDebugToolsTest*' --rerun -q
+  ReleaseHasNoDebugToolsTest 3/0/0  2026-11-28T14:45:17Z
+
+Per mutant (section R2): the named classes with --rerun --continue -q, then `git diff --stat` (empty after
+each revert) and `git status --short` (empty).
+```
+
+## R2. Mutants (9)
+
+I applied each mutant with Edit, ran the named classes, and reverted it with Edit to the exact original. After
+each revert, `git diff --stat` and `git status --short` printed nothing. Every run compiled; each result comes from
+that run's XML timestamp.
+
+| # | Where | Change | Classes run | Result |
+|---|---|---|---|---|
+| A1 | `ServerHandover.kt:80` | `readings = history.heldReadings(id)` → `emptyList()` | `ServerHandoverTest`, `HandoverScreenTest`, `HandoverViewModelTest` | **Killed** (4): `anHonestLoggerHistoryLetsThePassBeRecorded`, `aReadingThatDiffersFromTheLoggersRecordIsRecordedAsAFail`, `HandoverScreenTest.aLoggerWhoseHistoryDiffersFromTheReadingsIsShownAsAFail`, `theScreenReadsTheLoggerOncePerHeadNotOnEachRefresh` |
+| A3 | `ColdChainRemote.kt:57` | malformed key `ByteArray(0)` → `null` | `ServerHandoverTest`, `ColdChainRemoteContractTest`, `HandoverScreenTest` | **Killed**: `ServerHandoverTest.aMalformedKeyOnRecordIsUnknownNotNotChecked` |
+| M6 | `LoggerHistoryVerifier.kt:136` | drop the `headSeq != expectedSeq - 1` half | `*logger*`, `LoggerCheckVerdictTest`, `ServerHandoverTest` | **Killed**: `LoggerHandoverCheckTest.aLoggerThatWithholdsItsWholeHistoryFails`. `ServerHandoverTest` alone doesn't kill it (start 0 lets the hash half catch it), as PROGRESS says |
+| M7 | `LoggerHistoryVerifier.kt:136` | drop the `headHash != expectedStart` half | `*logger*`, `LoggerCheckVerdictTest` | **Killed**: `LoggerHistoryForkTest.aHeadFromTheOtherForkDoesNotMatchTheHistory` |
+| M8 | `LoggerHistoryVerifier.kt:99-100` | drop the batch start/join check | `*logger*`, `LoggerCheckVerdictTest` | **Killed**: `LoggerHistoryForkTest.batchesSplicedFromTwoForksDoNotJoin`, `aFirstBatchThatDoesNotStartAtTheLoggersGenesisDoesNotJoin` |
+| X2 | `HandoverViewModel.kt:375` | local `record()` passes `NOT_CHECKED`, not `logger.outcome` | `HandoverViewModelTest`, `HandoverScreenTest` | **Killed**: `HandoverViewModelTest.aRewrittenLocalHistoryThatStillChainsIsCaughtByTheLoggerAndRecordedAsAFail` |
+| X3 | `HandoverViewModel.kt:421` | logger cache keyed per shipment, not per head | `HandoverViewModelTest`, `HandoverScreenTest` | **SURVIVED** (R4-1) |
+| X5 | `TemperatureSimulator.kt:177` | `betweenReadings` runs without the tick lock | `HandoverViewModelTest`, `HandoverScreenTest`, `LocalLoggersTest` | **SURVIVED** (R4-3) |
+| X6 | `HandoverViewModel.kt:225` | the local check runs once (`first().let`) instead of on every change to the readings | `HandoverViewModelTest`, `HandoverScreenTest` | **SURVIVED** (R4-2) |
+
+That makes 6 killed and 3 survived. All three survivors affect only what the screen shows. Recording reads the logger
+again: `ServerHandover.receiveOnce` recomputes `loggerCheck`, and the local `record()` calls `localLoggerCheck`
+again.
+
+I did not run a mutant for "key from the local shipment's record, not from the logger". It would be an equivalent
+mutant, because in local mode `LocalLoggers.enrolledKey(id)` and the logger's own key are the same bytes and no test
+can swap the logger. I checked by reading instead (R3, Q2).
+
+## R3. The brief's questions
+
+### Q1. Are the earlier findings closed?
+
+| Earlier finding | Now | Evidence |
+|---|---|---|
+| **G4-1** (no logger reaches the handover; A1 survived) | **Closed** | `ServerHandoverTest` with `loggerLink = { virtualLogger }` and a non-test key enrolled on the fake server. Honest history → PASS recorded (`anHonestLoggerHistoryLetsThePassBeRecorded`). Reading edited on the server → FAIL (`aReadingThatDiffersFromTheLoggersRecordIsRecordedAsAFail`). History cut short → FAIL (`aLoggerHistoryCutShortOfItsHeadIsRecordedAsAFail`). Replayed head → FAIL (`aReplayedLoggerHeadIsRecordedAsAFail`). Each one asserts `server.confirmations.last().details.verdict`. A1 is killed by 4 tests. One caveat: the cut-short test would also FAIL from its NOT_FROM_LOGGER readings 9 and 10, so it doesn't isolate HEAD_MISMATCH. The domain's M5 kill covers that (earlier review; I did not rerun M5) |
+| **MASTER 5.4 item 2** (virtual logger in the debug app, driven by the chaos lab) | **Closed, with a recorded narrowing and one unrecorded change** (R4-4) | `LocalLoggers` gives each local shipment a `VirtualLogger` that records every reading in `tickOnce`. `HandoverViewModel` reads it at handover, on screen and in `record()`. The chaos lab's "Scenario 4b: Rewrite the history and recompute the chain" (`DebugTools.rewriteHistoryFrom`) drives it. Tests: `HandoverScreenTest.anHonestLocalTripShowsTheLoggerCheckPassed`, `aChaosLabRewriteThatKeepsTheChainAddingUpIsCaughtByTheLoggerOnScreen` (calls the real `DebugTools` function), `HandoverViewModelTest.aLocalTripIsCheckedAgainstItsVirtualLoggerAndCanPass`, `aRewrittenLocalHistory…RecordedAsAFail`, `aLocalShipmentWithNoLoggerHereIsNotChecked`, `LocalLoggersTest` (2). X2 is killed. Not checked on a device: DECISIONS moves the S24 check to after 6.2 |
+| VirtualLogger against the vectors (PARTIAL) | **Closed, with a stated remainder** | `VirtualLoggerVectorsTest` (3/0) builds `VirtualLogger` with the vectors' key and records. It asserts each record's seq and bytes, each batch's first/last seq, start/end hash and payload, the head's seq, hash and payload, and verifies every signature. That matches firmware `Step2RecordLog.KeepsTheRunningHashesOfTheVectors`, `Step4Batch.SignsTheVectorBatches` and `Step4Challenge.AnswersAsTheVectors`. Bluetooth pages come from `LoggerGatt`, pinned by `LoggerGattVectorsTest`. Ring-buffer overwrite is exercised (`LoggerHandoverCheckTest`, capacity 6) but not against vectors (`Step2RecordLog.Overwrites…`, `KnowsTheHashJustBeforeItsOldestRecord`). STATUS says exactly this |
+| G4-2 (M6) | Closed | Killed by `aLoggerThatWithholdsItsWholeHistoryFails` |
+| G4-3 (M7, M8) | Closed | `LoggerHistoryForkTest`, two loggers sharing one key. Both mutants killed |
+| G4-4 | Closed (documented) | THREAT_MODEL row "Someone with rights to the database swaps a shipment's enrolled logger key … **Not detected by the receiver**" |
+| G4-5 (A2, A3) | Closed | A3 killed (above). A2's test exists (`anEnrolmentThatCannotBeReadIsUnknownNotNotChecked`); its kill is from PROGRESS, I did not rerun it |
+| G4-6 | Closed (documented) | THREAT_MODEL row "A replayed head over Bluetooth … worded as 'a signature doesn't match'" |
+| G4-7 | Closed | One 60 s deadline (`LoggerHandoverCheck.kt:73`, `aLoggerTooSlowToFinishIsStoppedByOneDeadlineAndIsUnknown`). The screen reads the logger once per head; that guard is untested in one direction (R4-1) |
+| G4-8 | Closed | `ServerHandover.kt:66-74`: key without start → UNKNOWN. `aKeyOnRecordWithoutItsStartSequenceIsUnknown` |
+| G4-9 | Closed | `firmware/WALKTHROUGH.md:123-125`, HANDOFF item 5 |
+| G4-10 | Closed | `RecordsRunExactlyTest.aRangeThatWrapsPastTheLargestSequenceIsRefused` (2/0). M13's kill is from PROGRESS |
+| Screen NOT_CHECKED fallback | Closed | `HandoverScreen.kt:770-783`: a null check is "waiting", the verdict is held, the button is disabled, and the fallback is UNKNOWN. `beforeTheLoggerCheckComesBackNothingIsJudgedOrOffered` |
+| Section 7: THREAT_MODEL:81, STATUS | Closed | THREAT_MODEL's logger rows and the "lost or swapped logger" line now say a logger is read only in debug local mode, and two-phone handovers are "not checked". STATUS is dated 28 Nov, mentions 4.3 and the debug local-mode logger, and separates protocol-code agreement from `VirtualLogger` |
+
+### Q2. The new code, read critically
+
+- **Can the local check show PASSED or record PASS over a tampered history?**
+  - **Recorded verdict: no, while the logger exists.** `record()` re-reads the logger under the tick lock and passes
+    `logger.outcome` to `processHandover` (X2 killed). The comparison uses `loggerTs` and `tempCentiC`
+    (`LoggerHistoryVerifier.kt:164`), so a rewritten temperature is DIFFERENT, which is FAIL. A deleted tail is
+    MISSING past the newest reading, which is UNKNOWN, which still holds the verdict.
+  - **On screen: not reachable in today's app, but the guards that keep it so are untested** (X3, X6).
+    - X6 (R4-2): the chaos lab is another tab. `runWhileVisible` runs from `LaunchedEffect` (`HandoverScreen.kt:112`),
+      so a rewrite can't be made with Handover open, and coming back starts a fresh check at once.
+    - X3 (R4-1): a server shipment's screen check is always NOT_CHECKED today, because `AppModule` gives
+      `ServerHandover` no `loggerLink`. The per-head cache only matters once a real link exists.
+  - **After a process restart:** `LocalLoggers` is in memory, so the check is NOT_CHECKED and PASS can be recorded
+    over a rewrite done after the restart. This is debug only and documented (R4-5).
+- **Can an honest recording phone flash FAILED?**
+  - Not by reading the code. `tickOnce` saves the reading and records it in the logger inside `tickMutex`. The local
+    check reads the readings and the logger inside the same mutex. `tickOnce` is the only writer of readings
+    (grep `saveTemperature`).
+  - Nothing tests that lock: X5 survived (R4-3).
+  - After about 3.4 h of continuous local recording, the honest outcome becomes UNKNOWN, not FAILED (R4-6).
+- **Is the key taken from the local shipment's record, not from the logger?**
+  - Yes, by construction. `LocalLoggers.startFor` copies the public key into `enrolled` once, when the logger starts.
+    The check is given `localLoggers.enrolledKey(id)`.
+  - `LoggerHandoverCheck` never calls `link.publicKey()` (grep: no match).
+  - The key is kept in memory, not in Room. DECISIONS (28 Nov, evening) records that.
+- **Does anything leak into release builds?**
+  - Debug tools: no. `rewriteHistoryFrom` and the 4b card are in `src/debug`. The release `DebugTools` has neither.
+    `ReleaseHasNoDebugToolsTest` passes 3/0.
+  - `LocalLoggers` (`src/main`) and `VirtualLogger` (`:core-domain`) do ship in release, by design (DECISIONS). They
+    are reached only for a shipment with `genesisHash == null`. Release cannot make one: `useWithoutAccount` is
+    offered only when `DebugTools.ENABLED`, and `screenFor` sends any account that isn't Ready away from Main.
+  - No test pins that (R4-7). Info.
+
+### Q3. Do the documents claim only what the evidence shows?
+
+**Yes, with one small exception.**
+
+- STATUS and THREAT_MODEL say plainly that no physical logger was used and that two-phone handovers are "not
+  checked".
+- They say the virtual logger's key is in the app and proves nothing about temperature.
+- They say the local mode is debug only and that the S24 check is deferred.
+- THREAT_MODEL's "PASS isn't offered on screen" over a failed check holds in today's app. Only a regression that
+  X3 or X6 would let through could break it (R4-1, R4-2).
+- The exception: MASTER 5.4 item 2 says "in place of the simulator", and DECISIONS (23 Nov) planned `LoggerLink` →
+  `LoggerIngestor` → `TelemetryRepository` in debug. What was built is a mirror: the simulator still makes each
+  reading, and the logger records the same value. STATUS describes the mirror honestly, but DECISIONS doesn't record
+  it as a change of plan (R4-4).
+- PROGRESS does not claim `gate-4`. Its top entry lists the full proof, CI and this re-check as still to do.
+
+### Q4. Verdict
+
+| Gate 4 criterion | Verdict |
+|---|---|
+| "the virtual logger passes the same protocol tests the firmware library uses" | **Met**, apart from overwrite-against-vectors and signature bytes, which can't be compared because the JVM's ECDSA isn't deterministic. Both are stated in STATUS |
+| "a tampered or truncated logger history is detected at handover" | **Met.** Detected in the recorded confirmation (`ServerHandoverTest`, fake server) and in the debug app (`HandoverViewModelTest`, `HandoverScreenTest`). A1 and X2 killed |
+| "with hardware, one real reading reaches the receiver's phone" | Waived (`HARDWARE = none`) |
+
+**MET WITH RESERVATIONS (without hardware).**
+
+The reservations:
+- R4-1 to R4-3: three new guards have no test. Each affects only the screen, and only R4-3 is reachable in today's
+  app.
+- R4-4: the mirror design is not recorded in DECISIONS.
+
+None of these lets a PASS be recorded over a tampered or truncated history while the logger is reachable.
+
+**The tag is blocked** until two things are recorded in PROGRESS at a commit that contains `35928b7`:
+- the full proof (`:core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug`,
+  under the owner's memory rule);
+- a green CI run.
+
+## R4. Findings
+
+| ID | Severity | Where | Scenario | Fix |
+|---|---|---|---|---|
+| R4-1 | Low (latent) | `HandoverViewModel.kt:418-422` (X3 survived) | Not reachable today: `AppModule` gives `ServerHandover` no `loggerLink`, so a server shipment's screen check is always NOT_CHECKED. Once a logger link exists (hardware), the check is cached per head, and keying it per shipment instead passes every test. A new server head (more readings) would then leave the old check on screen. A PASSED could stay shown, with "Record PASS" offered, after readings arrive that differ from the logger. Recording refuses it (`receiveOnce` reads afresh). `theScreenReadsTheLoggerOncePerHeadNotOnEachRefresh` says "two heads", but it passed under X3, so it doesn't check that the logger is read again. | A test that uploads a new reading that differs from the logger after the screen shows "LOGGER: PASSED", then awaits "LOGGER: FAILED". Or count reads across two heads |
+| R4-2 | Low (latent) | `HandoverViewModel.kt:224-231` (X6 survived) | Local mode re-checks on every change to the readings, but no test changes them while Handover is open. Every rewrite test rewrites before the screen opens. Not reachable through today's UI: the chaos lab is another tab, `runWhileVisible` is a `LaunchedEffect`, and coming back runs a fresh check at once. Under X6 the screen would keep an honest PASSED while honest readings keep arriving, which is stale but not wrong. A rewrite from outside the screen, such as a future control on the same screen, would leave PASSED shown. `record()` re-checks, so the recorded verdict stays FAIL. | Open the local screen, await PASSED, call `DebugTools.rewriteHistoryFrom`, await "LOGGER: FAILED" |
+| R4-3 | Low | `TemperatureSimulator.kt:177` (X5 survived) | The tick lock is the only thing stopping an honest recording phone from showing FAILED between saving a reading and the logger recording it (DECISIONS 28 Nov). Removing it passes every test, so only reading the code guards it. This one is reachable in today's app: local recording ticks every 1.5 s while Handover is open, and the screen checks on each new reading. | A test whose `TelemetryRepository.saveTemperature` suspends on a gate: start a tick, run the check while the tick waits, and assert the check waits and never returns FAILED |
+| R4-4 | Low (doc) | DECISIONS 23 Nov (`LoggerLink` → `LoggerIngestor` → `TelemetryRepository` in debug) vs `TemperatureSimulator.kt:230-237` | MASTER 5.4 item 2 says "in place of the simulator". The built local mode is a mirror: the simulator is still the source, and the logger records the same values. The 28 Nov entries narrow item 2 to local mode, but none says the logger mirrors the simulator rather than feeding `TelemetryRepository` through `LoggerIngestor`. The earlier review's item 3 row depended on that wiring. It doesn't affect the Gate 4 line, because the comparison is the same either way. | One DECISIONS line recording the mirror, why, and that `LoggerIngestor` still has no source in the app |
+| R4-5 | Info | `LocalLoggers.kt` (in memory) | After the process dies in local mode, the shipment has no logger, the check is NOT_CHECKED, and PASS can be recorded over a rewrite made after the restart. Debug only, documented in the KDoc and DECISIONS. | None needed. Optionally, say on the 4b card that a restart turns the check off |
+| R4-6 | Info | `VirtualLogger.DEFAULT_CAPACITY` 8192, `CourierRecorder.TICK_MS` 1500 | After about 3.4 h of continuous local recording the ring buffer overwrites, and an honest phone shows UNKNOWN (GAP), never FAILED or PASS. | None needed. Optionally note it in LocalLoggers' KDoc |
+| R4-7 | Info | `LocalLoggers.kt` in `src/main`; `ReleaseHasNoDebugToolsTest` | `LocalLoggers` and `VirtualLogger` ship in release. Only a shipment with no genesis hash reaches them, and release can't make one (the local-mode entry is behind `DebugTools.ENABLED`). The release test doesn't pin this, and it rests on `DispatchViewModel.create` seeing a Ready account. | Optionally, a release test that the root never offers "use without account" |
+| R4-8 | **Blocks the tag** (process) | PROGRESS line 3 | Main sources changed after the last full proof, lint and CI (`3dfd25a`). Targeted classes are green (R1), but the rest of the app's tests, lint and the release build have not been run on this code. | Run the full proof and CI at HEAD, record them in PROGRESS, then tag `gate-4` |
+
+No High or Medium findings.
+
+## R5. Working tree
+
+After the last revert, `git diff --stat` and `git status --short` printed nothing. The only change this re-check
+leaves is this appended section in `docs/agent/gate4_review.md`. Nothing is committed.
