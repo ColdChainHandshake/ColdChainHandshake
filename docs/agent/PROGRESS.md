@@ -1,6 +1,30 @@
 # Progress
 
-**Next action (28 Nov, ~02:45): tag `gate-5` on `9d49a8d` once the full proof passes there** (if Phase 4 commits
+**Gate 5's full proof (28 Nov, morning, the owner's answer to Q5): `done`, `gate-5` tagged on `9f54987`.** The owner
+asked to accept CI if it covered everything. It didn't pass: CI at `9d49a8d`
+(https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/46095456691) failed the android job with two
+tests, and `16cd683` had failed the same way on 27 Nov. Both were test races, fixed (`c015294`, `9f54987`), and two
+more were found by running the full debug suite repeatedly:
+`SupabaseAccountRepositoryTest` asserted the refresh request before it was sent; simulator ticks on
+`Dispatchers.Default` outlived the database in four test classes; `RecordingServiceTest` didn't wait for a service job
+finishing after `destroy`; `HandoverViewModelTest` reset Dispatchers.Main while a cancelled ViewModel still used it.
+No app behaviour changed (the service gained a test-only `awaitStopped`). Then the full proof locally, in the
+foreground in the owner's four pieces, nothing else running (no emulator, Docker down, no other Java, 7.8 GB free):
+
+```text
+./gradlew :core-domain:test --rerun                       (at c015294; core-domain unchanged since)  tests 131 failures 0
+./gradlew testDebugUnitTest --rerun                       (at 9f54987, twice in a row)  BUILD SUCCESSFUL | tests 599 failures 0
+./gradlew testReleaseUnitTest --rerun                     (at 9f54987)  BUILD SUCCESSFUL in 1m 57s | tests 534 failures 0
+CCH_RELEASE_KEYS=… ./gradlew lintDebug assembleRelease assembleDebug   (at 9f54987)  BUILD SUCCESSFUL in 3m 47s
+  | lint 0 errors, 12 warnings (UseKtx 10, AndroidGradlePluginVersion 1, ObsoleteSdkInt 1; audit_5_5.md)
+  | checkReleaseKeepRules passed | apksigner verify: no error; then ./gradlew --stop
+```
+
+The gate's commit moved from the pinned `9d49a8d` to `9f54987`: it adds the reviewed wording, the 4.3 migration (local
+only, pgTAP 252/252, not on the dev project) and the test fixes above. The owner's message allowed a tag past
+`9d49a8d` (it named `8edf1f5`, which holds 4.3).
+
+**Earlier next action (28 Nov, ~02:45): tag `gate-5` on `9d49a8d` once the full proof passes there** (if Phase 4 commits
 land first, run the proof in a `git worktree` at `9d49a8d` and tag that commit; run it in the foreground in pieces:
 `:core-domain:test`, `testDebugUnitTest`, `testReleaseUnitTest`, `lintDebug assembleRelease assembleDebug`, with no
 emulator, Docker or other Gradle running). The reviewer's re-check at
