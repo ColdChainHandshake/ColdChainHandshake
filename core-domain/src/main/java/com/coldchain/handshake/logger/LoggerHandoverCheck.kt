@@ -65,7 +65,15 @@ class LoggerHandoverCheck(
         startSeq: Long,
         readings: List<TemperatureEvent>
     ): LoggerCheckResult {
-        if (link == null) return result(NOT_CHECKED, "No logger reachable from this phone, so it wasn't read.")
+        if (link == null) {
+            // A logger enrolled on the record is a real one the receiver is meant to read: not reaching it leaves the
+            // record unconfirmed. With none enrolled there is nothing to read (a debug virtual logger is never enrolled).
+            return if (enrolledKey != null) {
+                result(UNKNOWN, "The shipment's logger is on record, but this phone can't reach it, so it wasn't read.")
+            } else {
+                result(NOT_CHECKED, "No logger reachable from this phone, so it wasn't read.")
+            }
+        }
         if (enrolledKey == null) {
             return result(UNKNOWN, "The shipment has no logger key on record, so the logger can't be verified.")
         }

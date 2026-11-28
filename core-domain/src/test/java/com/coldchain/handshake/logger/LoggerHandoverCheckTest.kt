@@ -55,9 +55,20 @@ class LoggerHandoverCheckTest {
         assertEquals(12L, result.newestSeq)
     }
 
+    // The carry-forward rule (PROGRESS, 4.1): a logger enrolled on the shipment's record is a real one the receiver is
+    // meant to read, so not reaching it leaves the record unconfirmed: UNKNOWN. Until 28 Nov this case was NOT_CHECKED.
     @Test
-    fun noLoggerReachableIsNotCheckedAndSaysSo() = runTest {
+    fun anEnrolledLoggerThisPhoneCannotReachIsUnknownAndSaysSo() = runTest {
         val result = run(null, logger().publicKeyUncompressed, emptyList())
+        assertEquals(UNKNOWN, result.outcome)
+        assertTrue(result.reasons.toString(), result.reasons.single().contains("can't reach"))
+    }
+
+    // No logger enrolled (today every shipment, and a debug virtual logger, which is never enrolled) and none reachable:
+    // there is nothing to read, and the other checks decide.
+    @Test
+    fun noLoggerEnrolledAndNoneReachableIsNotChecked() = runTest {
+        val result = run(null, null, emptyList())
         assertEquals(NOT_CHECKED, result.outcome)
         assertTrue(result.reasons.single().contains("No logger"))
     }
