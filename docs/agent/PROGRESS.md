@@ -12,6 +12,13 @@ Phase 4 (4.3 test-first in SQL, `05b342e`-compatible; 4.1), Gate 4 "met without 
 leftovers kept for Phase 6: a screen test for S3 (mutant 28), mutant 26 (the 30 s retry, a second safety net), R2
 to R4 (fail safe or display only), C7 (only S1 is scripted).
 
+**Phase 4, 4.3 server side (28 Nov, ~07:45): `done` on the local stack, not on the dev project** (`6c1c3d1`):
+migration `0004_logger_enrolment.sql`, tests `0005_logger_enrolment.test.sql` (14, failed first: no such column);
+`npx supabase test db` Files=5, Tests=252, PASS; `db advisors`: no issues. Before applying it to the dev project
+(MCP `apply_migration`, then `get_advisors`): run the `05b342e` worktree's `LiveSupabaseIntegrationTest` against the
+new local schema (full local stack plus Gradle: do it alone, with nothing else running). Then 4.1 (the app enrols
+the key; the virtual logger in debug; the Handover wiring of `LoggerHandoverCheck`), Gate 4, Phase 6.
+
 **Update (28 Nov, 01:45):** done since the review, each test-first and committed: S1 (`2e73ea1`: reproduced with the
 real client, an offline restart turned the courier SignedOut or left Loading), S6 with mutants 20 and 23 (`3caf5f3`),
 mutant 10 (`3382063`), C8 and S4b (`a405bb4`), S4 (`d18c53b`), S7 (`0a1d3e4`), S3 (`bd0f1ea`), S12 (`001b0bb`),
