@@ -10,6 +10,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityOptionsCompat
 import com.coldchain.handshake.repository.ShipmentMember
+import com.coldchain.handshake.logger.LoggerLink
+import com.coldchain.handshake.logger.VirtualLogger
 import com.coldchain.handshake.repository.CustodyState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -139,8 +141,12 @@ class HandoverScreenTest {
         handovers = handovers,
         history = history,
         uploadPending = { shipmentId -> sync.uploadReadings(shipmentId) },
-        deviceId = { "this-phone" }
+        deviceId = { "this-phone" },
+        loggerLink = { reachableLogger }
     )
+
+    /** The shipment's logger, when a test lets this phone reach it. */
+    private var reachableLogger: LoggerLink? = null
 
     /** Signed out until a test opens a shipment from the server as someone. */
     private var screenAccount: AccountRepository = AccountRepository.NONE
@@ -522,6 +528,26 @@ class HandoverScreenTest {
 
         await("The shipment's logger is on record, but this phone can't reach it, so it wasn't read.")
         await("FINAL VERDICT: UNKNOWN")
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
+    // Gate 4 review (28 Nov): a logger whose records differ from the readings is shown, and holds the verdict at FAIL.
+    @Test
+    fun aLoggerWhoseHistoryDiffersFromTheReadingsIsShownAsAFail() {
+        val uploaded = readings(genesisHash = genesis)
+        val logger = VirtualLogger("LOG-1").apply {
+            uploaded.forEach { record(it.timestamp, if (it.seq == 5L) 900 else (it.temperature * 100).toInt()) }
+        }
+        reachableLogger = logger
+        showOnServer("receiver", MemberRole.RECEIVER, uploaded = uploaded, courierReleased = true) {
+            server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(
+                loggerPublicKeyHex = logger.publicKeyUncompressed.joinToString("") { "%02x".format(it) },
+                loggerStartSeq = 0
+            )
+        }
+
+        await("LOGGER: FAILED")
+        await("FINAL VERDICT: FAIL")
         assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
     }
 
