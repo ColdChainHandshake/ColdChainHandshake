@@ -62,7 +62,9 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
         productProfileId: String,
         loggerId: String,
         origin: String,
-        destination: String
+        destination: String,
+        loggerPublicKeyHex: String?,
+        loggerStartSeq: Long?
     ) = call {
         val created = rpcReturning<CreatedShipmentRow>("create_shipment") {
             put("p_id", id)
@@ -70,6 +72,9 @@ class SupabaseColdChainRemote(private val client: SupabaseClient) : ColdChainRem
             put("p_logger_id", loggerId)
             put("p_origin", origin)
             put("p_destination", destination)
+            // Sent only when there is a logger to enrol, so the call stays the five-argument one otherwise.
+            if (loggerPublicKeyHex != null) put("p_logger_public_key", loggerPublicKeyHex)
+            if (loggerStartSeq != null) put("p_logger_start_seq", loggerStartSeq)
         }
         CreatedShipment(created.genesisHash, created.createdAtMs, created.senderId)
     }

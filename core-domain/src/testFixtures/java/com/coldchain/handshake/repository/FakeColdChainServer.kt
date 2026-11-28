@@ -108,10 +108,14 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         productProfileId: String,
         loggerId: String,
         origin: String,
-        destination: String
+        destination: String,
+        loggerPublicKeyHex: String?,
+        loggerStartSeq: Long?
     ) = call {
         val genesis = seedShipment(id, currentUser, loggerId)
         shipments[id] = shipments.getValue(id).copy(
+            loggerPublicKeyHex = loggerPublicKeyHex?.lowercase(),
+            loggerStartSeq = loggerStartSeq,
             productProfileId = productProfileId,
             origin = origin,
             destination = destination,

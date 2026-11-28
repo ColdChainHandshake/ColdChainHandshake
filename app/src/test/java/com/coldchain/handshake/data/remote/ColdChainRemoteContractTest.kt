@@ -49,9 +49,12 @@ class ColdChainRemoteContractTest {
     private data class SqlFunction(val required: Set<String>, val optional: Set<String>)
 
     private val sqlFunctions: Map<String, SqlFunction> by lazy {
-        val migration = listOf(File("../supabase/migrations/0002_trust_core.sql"), File("supabase/migrations/0002_trust_core.sql"))
-            .first { it.exists() }
-            .readText()
+        // Every migration in order, so a later one that redefines a function (0004 for create_shipment) wins.
+        val migration = listOf(File("../supabase/migrations"), File("supabase/migrations"))
+            .first { it.isDirectory }
+            .listFiles { file -> file.name.endsWith(".sql") }!!
+            .sortedBy { it.name }
+            .joinToString("\n") { it.readText() }
 
         Regex("""create function public\.(\w+)\((.*?)\)\s*returns""", RegexOption.DOT_MATCHES_ALL)
             .findAll(migration)
@@ -172,6 +175,29 @@ class ColdChainRemoteContractTest {
 
         val sent = calls.single().second.getValue("p_points").jsonArray.single().jsonObject
         assertEquals(setOf("id", "lat", "lon", "accuracy_m", "device_ts"), sent.keys)
+    }
+
+    // 4.3: a shipment can be created with its logger enrolled, the parameters named as 0004_logger_enrolment.sql has them.
+    @Test
+    fun aShipmentIsCreatedWithItsLoggerEnrolled() = runBlocking {
+        answerWith("""{"genesis_hash":"g","created_at_ms":1,"sender_id":"s"}""")
+
+        remote.createShipment("SHIP-1", "profile", "LOG-1", "A", "B", "04" + "6b".repeat(64), 120L).getOrThrow()
+
+        assertMatchesTheSql()
+        val body = calls.single { it.first == "create_shipment" }.second
+        assertEquals("04" + "6b".repeat(64), body["p_logger_public_key"]?.jsonPrimitive?.content)
+        assertEquals("120", body["p_logger_start_seq"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun aShipmentWithNoLoggerEnrolledSendsNeither() = runBlocking {
+        answerWith("""{"genesis_hash":"g","created_at_ms":1,"sender_id":"s"}""")
+
+        remote.createShipment("SHIP-1", "profile", "LOG-1", "A", "B").getOrThrow()
+
+        val body = calls.single { it.first == "create_shipment" }.second
+        assertTrue(body.toString(), "p_logger_public_key" !in body && "p_logger_start_seq" !in body)
     }
 
     // 4.1: the receiver checks the logger against the key the sender enrolled (0004_logger_enrolment.sql).

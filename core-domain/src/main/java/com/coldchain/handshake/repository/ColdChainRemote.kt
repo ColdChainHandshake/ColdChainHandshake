@@ -151,12 +151,19 @@ interface ColdChainRemote {
     suspend fun completeProfile(displayName: String, role: MemberRole): Result<Unit>
     suspend fun registerDevice(deviceId: String, publicKey: String): Result<Unit>
 
+    /**
+     * @param loggerPublicKeyHex The logger's uncompressed P-256 key in hex, read from the logger when it is paired;
+     *   null enrols no logger (4.3). Pairing a real logger waits for hardware.
+     * @param loggerStartSeq The logger's newest record when the trip starts, with the key.
+     */
     suspend fun createShipment(
         id: String,
         productProfileId: String,
         loggerId: String,
         origin: String,
-        destination: String
+        destination: String,
+        loggerPublicKeyHex: String? = null,
+        loggerStartSeq: Long? = null
     ): Result<CreatedShipment>
     suspend fun addMember(shipmentId: String, email: String, role: MemberRole): Result<Unit>
     suspend fun dispatchShipment(shipmentId: String): Result<Unit>
