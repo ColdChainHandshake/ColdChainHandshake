@@ -1,5 +1,23 @@
 # Progress
 
+**4.3 on the dev project (28 Nov, ~08:40): `done`.** MCP `apply_migration` `0004_logger_enrolment` with the file's
+SQL: success; `list_migrations` before it showed `0000` to `0003`. Grants checked by query: `create_shipment(text,text,
+text,text,text,text,bigint)` executable by `authenticated` only; `private.is_published_test_key` by no client role.
+`get_advisors security`: no errors. WARN "authenticated can execute SECURITY DEFINER" for the 13 allow-listed RPCs
+(the design: every client write goes through a checked function, as at Gate 1), INFO "RLS enabled, no policy" for
+the six `legacy_*` tables (locked by design), WARN leaked-password protection (HANDOFF item 2).
+
+**4.3, the `05b342e` compatibility check (28 Nov, ~08:30): `done`.** Local stack with only database, auth, REST and
+kong (`npx supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor`),
+`db reset` to the five migrations including `0004_logger_enrolment.sql`. The pinned Gate 3 build's own live test, in
+the worktree `D:\cch-tools\wt-gate3-05b342e`, and HEAD's, both against that schema:
+
+```text
+05b342e: CCH_LIVE_SUPABASE_URL=http://127.0.0.1:54321 CCH_LIVE_SUPABASE_KEY=<local anon key> ./gradlew :app:testDebugUnitTest
+  LiveSupabaseIntegrationTest tests=3 failures=0 (timestamp 2026-11-28T03:00:11Z, run just then)
+HEAD 38a1fcf: same, --rerun   LiveSupabaseIntegrationTest tests=4 failures=0 (timestamp 2026-11-28T03:01:02Z)
+```
+
 **Gate 5's full proof (28 Nov, morning, the owner's answer to Q5): `done`, `gate-5` tagged on `9f54987`.** The owner
 asked to accept CI if it covered everything. It didn't pass: CI at `9d49a8d`
 (https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/46095456691) failed the android job with two
