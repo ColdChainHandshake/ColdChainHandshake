@@ -133,8 +133,9 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
 ## Gates
 
 `gate-0`, `gate-1` (24 Nov, on the dev project's own advisors and a fresh clone's build), `gate-2` and `gate-3`
-(24 Nov, the two-device handover on the dev project) are tagged. Gate 5 (Phase 5) and Gate 4 (Phase 4 with the
-firmware, closing as "met without hardware") are next.
+(24 Nov, the two-device handover on the dev project) and `gate-5` (28 Nov, on `9f54987`: the reviewer's re-check
+met with reservations, and the full proof passed after four test races CI exposed were fixed) are tagged. Gate 4
+(Phase 4 with the firmware, closing as "met without hardware") and Gate 6 are next.
 
 ## The 16 findings
 

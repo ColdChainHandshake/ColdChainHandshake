@@ -5,6 +5,11 @@ don't block. `docs/agent/STATUS.md` says what is proven and on what.
 
 ## Questions for you
 
+None open.
+
+- Q5, the full proof: settled on 28 Nov. You asked to accept CI if it covered everything; it had failed on two test
+  races, which were fixed, then the full proof passed locally in four pieces and `gate-5` was tagged on `9f54987`
+  (PROGRESS). The question as it stood:
 - **Q5 (28 Nov, ~01:42): may Claude run the full proof again?** The full proof at `001b0bb`
   (`./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug
   --continue`, about 25 minutes) was stopped by Claude Code itself because the PC ran critically low on memory while
