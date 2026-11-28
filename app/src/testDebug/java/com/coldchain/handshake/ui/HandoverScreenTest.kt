@@ -604,6 +604,43 @@ class HandoverScreenTest {
         assertEquals(readsAtTheHead, reads)
     }
 
+    // Gate 4 re-check R4-1: the screen keeps a logger check per head, not per shipment. A reading the logger never made
+    // reaching the server after an honest check must turn the PASSED it showed into FAILED.
+    @Test
+    fun aNewHeadWithAReadingTheLoggerNeverMadeTurnsThePassIntoAFail() {
+        val uploaded = readings(genesisHash = genesis)
+        val logger = VirtualLogger("LOG-1").apply { uploaded.forEach { record(it.timestamp, it.tempCentiC) } }
+        reachableLogger = logger
+        showOnServer("receiver", MemberRole.RECEIVER, uploaded = uploaded) { enrol(logger) }
+        await("LOGGER: PASSED")
+
+        // The courier's phone sends an 11th reading that its logger has no record of.
+        val eleven = readings(lastAt = now, count = 11, genesisHash = genesis)
+        server.currentUser = "courier"
+        runBlocking {
+            // readings() names events by how far back they are, so the 11th needs an ID of its own.
+            server.appendReadings("SHIP-1", listOf(eleven.last().copy(id = "TE-11")), server.heads.getValue("SHIP-1").headHash, "courier-phone", "s").getOrThrow()
+        }
+        server.currentUser = "receiver"
+        viewModels.last().retryHistory()
+
+        await("LOGGER: FAILED")
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
+    // Gate 4 re-check R4-2: in local mode the check runs again whenever the readings change, so a rewrite made while
+    // Handover is open shows at once.
+    @Test
+    fun aRewriteWhileTheLocalHandoverIsOpenTurnsThePassIntoAFail() {
+        recordLocallyAndShow()
+        await("LOGGER: PASSED")
+
+        runBlocking { DebugTools.rewriteHistoryFrom(db, "SHIP-1", fromSeq = 6, temperature = 4.0) }
+
+        await("LOGGER: FAILED")
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
     /**
      * Debug local mode (4.1, MASTER 5.4 item 2): the simulator makes the readings, so the shipment's virtual logger
      * on this phone recorded them too. [beforeShowing] runs once they are stored.

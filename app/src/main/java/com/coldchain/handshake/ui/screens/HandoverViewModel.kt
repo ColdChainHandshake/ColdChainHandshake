@@ -9,7 +9,7 @@ import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
 import com.coldchain.handshake.logger.LoggerCheckResult
-import com.coldchain.handshake.logger.LoggerHandoverCheck
+import com.coldchain.handshake.simulator.LocalLoggerCheck
 import com.coldchain.handshake.simulator.LocalLoggers
 import com.coldchain.handshake.handover.HandoverResult
 import com.coldchain.handshake.handover.ServerHandover
@@ -54,7 +54,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -129,17 +128,10 @@ class HandoverViewModel @Inject constructor(
     private val saved: SavedStateHandle
 ) : ViewModel() {
 
-    private val localLoggerCheck = LoggerHandoverCheck()
+    /** Debug local mode: the shipment's virtual logger on this phone (here the phone that recorded also receives). */
+    private val localCheck = LocalLoggerCheck(simulator, localLoggers, telemetry)
 
-    /**
-     * Debug local mode: the shipment's virtual logger on this phone, read as a receiver reads a logger, against its own
-     * key (here the phone that recorded is the phone that receives). No logger here (a restart) is NOT_CHECKED.
-     */
-    private suspend fun localLoggerCheck(shipment: Shipment): LoggerCheckResult = simulator.betweenReadings {
-        val logger = localLoggers.of(shipment.id)
-        val readings = telemetry.getTemperatures(shipment.id).first().sortedBy { it.seq }
-        localLoggerCheck.check(logger, shipment.loggerId, localLoggers.enrolledKey(shipment.id), 0L, readings)
-    }
+    private suspend fun localLoggerCheck(shipment: Shipment): LoggerCheckResult = localCheck.check(shipment)
 
     private val _state = MutableStateFlow(
         freshFor(simulator.activeShipment.value).copy(me = account.state.value as? AccountState.Ready)

@@ -4,9 +4,18 @@ import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.repository.impl.InMemoryTelemetryRepository
+import com.coldchain.handshake.logger.LoggerCheckOutcome
+import com.coldchain.handshake.models.TemperatureEvent
+import com.coldchain.handshake.repository.TelemetryRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -46,6 +55,33 @@ class LocalLoggersTest {
         assertEquals(readings.map { it.seq }, records.map { it.seq })
         assertEquals(readings.map { it.timestamp }, records.map { it.loggerTs })
         assertEquals(readings.map { Math.round(it.temperature * 100).toInt() }, records.map { it.tempCentiC })
+    }
+
+    // Gate 4 re-check R4-3: a reading is saved before its logger records it. A check falling between the two would see a
+    // reading "the logger never made" and show FAILED on an honest phone that is recording; it waits instead.
+    @Test
+    fun aCheckNeverFallsBetweenAReadingAndItsLoggerRecord() = runBlocking {
+        val shipment = shipment()
+        recordFive(shipment)
+        val saved = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val gated = object : TelemetryRepository by telemetry {
+            override suspend fun saveTemperature(event: TemperatureEvent): Result<Unit> =
+                telemetry.saveTemperature(event).also { saved.complete(Unit); gate.await() }
+        }
+        val recording = TemperatureSimulator(gated, wallClock = { clock }, localLoggers = loggers)
+        recording.attachShipment(shipment)
+        clock += minute
+
+        val tick = launch(Dispatchers.Default) { recording.tickOnce() }
+        saved.await()
+        val checking = async(Dispatchers.Default) { LocalLoggerCheck(recording, loggers, gated).check(shipment) }
+        delay(300)
+        assertFalse("the check ran between the reading and its record", checking.isCompleted)
+
+        gate.complete(Unit)
+        assertEquals(LoggerCheckOutcome.PASSED, checking.await().outcome)
+        tick.join()
     }
 
     @Test

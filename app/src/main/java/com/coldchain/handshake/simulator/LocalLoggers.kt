@@ -13,7 +13,9 @@ import javax.inject.Singleton
  * A virtual logger's key lives in this app, so it proves nothing about temperature (THREAT_MODEL); it exists so the
  * check runs end to end. It is never enrolled on a server: a server shipment's readings come from the courier's phone,
  * where the receiver can't reach it (DECISIONS, 28 Nov). Kept in memory: after a restart a local shipment has no
- * logger here, and its handover says the logger wasn't checked.
+ * logger here, and its handover says the logger wasn't checked, so a rewrite made after a restart isn't caught. The
+ * ring buffer holds 8,192 records: past about 3.4 hours of local mode's 1.5 s ticks the oldest are overwritten, and an
+ * honest trip shows UNKNOWN (a gap), never PASS over records it can't see.
  *
  * The key the check trusts is the one taken when the logger started, kept apart from the logger, as a server shipment
  * keeps the key enrolled at creation: never one the logger supplies at handover.
