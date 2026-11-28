@@ -2,6 +2,7 @@ package com.coldchain.handshake.recording
 
 import android.Manifest
 import android.annotation.SuppressLint
+import androidx.annotation.VisibleForTesting
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -90,6 +91,15 @@ class RecordingService : Service() {
         scope.cancel()
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    /**
+     * Waits for the recording job to end. Cancelling doesn't wait for a job already finishing, so a test that destroys
+     * the service waits here before its environment goes (CI, 28 Nov: `finish()` ran after a test had ended).
+     */
+    @VisibleForTesting
+    internal suspend fun awaitStopped() {
+        job?.join()
     }
 
     private fun stopNow(): Int {

@@ -38,6 +38,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -95,6 +96,14 @@ class HandoverViewModelTest {
         // A ViewModel is cleared when its screen goes; here nothing clears them, so their work is stopped before the next
         // test sets Dispatchers.Main again (one still emitting meanwhile fails that test).
         created.forEach { it.viewModelScope.cancel() }
+        // Cancelling doesn't wait: a coroutine still finishing on another thread read Dispatchers.Main while it was
+        // being reset ("used concurrently with setting it", 28 Nov). Wait for them all before resetting it.
+        runBlocking {
+            withTimeout(5_000) {
+                visible.coroutineContext.job.children.forEach { it.join() }
+                created.forEach { vm -> vm.viewModelScope.coroutineContext.job.join() }
+            }
+        }
         simulator.stopContinuousSimulation()
         ticker.shutdown()
         ticker.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)

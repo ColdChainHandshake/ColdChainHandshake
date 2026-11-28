@@ -106,6 +106,9 @@ class RecordingServiceTest {
     fun tearDown() {
         simulator.stopContinuousSimulation()
         controllers.forEach { it.destroy() }
+        // Destroying cancels each service's job but doesn't wait for one already finishing; on CI one finished after
+        // the test had ended and failed a later test (28 Nov).
+        runBlocking { withTimeout(5_000) { controllers.forEach { it.get().awaitStopped() } } }
     }
 
     private fun allowNearbyDevices() =
