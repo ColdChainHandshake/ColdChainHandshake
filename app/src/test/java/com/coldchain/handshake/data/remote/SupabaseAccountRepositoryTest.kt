@@ -50,7 +50,8 @@ class SupabaseAccountRepositoryTest {
          "user":{"id":"user-1","email":"ana@example.com","aud":"authenticated"}}
     """.trimIndent()
 
-    private val requests = mutableListOf<Pair<String, String>>()
+    /** Written by the mock engine's threads while tests read it. */
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
     private var profileRows = "[]"
     private var profileFails = false
     private var verifyFails = false
@@ -245,10 +246,20 @@ class SupabaseAccountRepositoryTest {
         profileFails = true
 
         val restarted = restartedWithAStoredSession(secondsLeft = 300)
+        val seen = java.util.concurrent.CopyOnWriteArrayList<AccountState>()
+        val watching = scope.launch { restarted.state.collect { seen += it } }
 
-        val state = withTimeout(RESTORE_WAIT_MS) { restarted.state.first { it !is AccountState.Loading } }
-        assertTrue("the client tried to refresh: $requests, state $state", requests.any { it.first == "/auth/v1/token" })
-        assertEquals(AccountState.Ready("user-1", "ana@example.com", UserProfile("Ana", MemberRole.COURIER)), state)
+        // The client tries the refresh, and it fails for want of a signal: the case this test is about. On CI the
+        // account was Ready before that request went out (28 Nov), so the test waits for it rather than racing it.
+        withTimeout(RESTORE_WAIT_MS) { while (requests.none { it.first == "/auth/v1/token" }) delay(10) }
+        delay(500)
+        watching.cancel()
+
+        assertTrue("never shown as signed out: $seen", seen.none { it is AccountState.SignedOut })
+        assertEquals(
+            AccountState.Ready("user-1", "ana@example.com", UserProfile("Ana", MemberRole.COURIER)),
+            restarted.state.value
+        )
     }
 
     // Gate 5 review, mutant 24: a refresh that fails isn't a sign-out, which would make a restart forget the recording.

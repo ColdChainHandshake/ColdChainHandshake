@@ -67,6 +67,7 @@ import androidx.lifecycle.SavedStateHandle
 import org.robolectric.Shadows.shadowOf
 import androidx.lifecycle.viewModelScope
 import com.coldchain.handshake.ui.screens.HandoverViewModel
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -119,10 +120,13 @@ class HandoverScreenTest {
 
     // What the app's module builds, here from this test's repositories and fake server.
     private val safetyEngine = SafetyEngine(alerts, shipments)
+    /** The simulator's own thread, so tearDown can wait for a reading being made before closing the database. */
+    private val ticker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val simulator = TemperatureSimulator(
         telemetryRepository = telemetry,
         chaosEngineService = DebugTools.createChaosService(),
-        safetyEngine = safetyEngine
+        safetyEngine = safetyEngine,
+        dispatcher = ticker.asCoroutineDispatcher()
     )
     // In one transaction, as the app's module builds it: without it the handover row shows before the shipment's
     // final status, and a check between the two read INSPECTED (seen once in a full run on 26 Nov).
@@ -182,6 +186,8 @@ class HandoverScreenTest {
         viewModels.forEach { it.viewModelScope.cancel() }
         // A courier taking over starts recording, whose ticks write to the database.
         simulator.stopContinuousSimulation()
+        ticker.shutdown()
+        ticker.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
         db.close()
     }
 

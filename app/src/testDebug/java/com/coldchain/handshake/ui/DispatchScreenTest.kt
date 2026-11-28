@@ -31,6 +31,7 @@ import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.screens.DispatchScreen
 import com.coldchain.handshake.ui.screens.DispatchViewModel
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -58,7 +59,15 @@ class DispatchScreenTest {
     // Everything the screen uses is built here, with no global state and no real server client, so the result
     // doesn't depend on which test ran before (the order dependence recorded on 7 Nov).
     private val server = FakeColdChainServer(currentUser = "sender")
-    private val simulator = TemperatureSimulator(telemetry, wallClock = System::currentTimeMillis)
+    /**
+     * The simulator's own thread, so tearDown can wait for a reading being made before closing the database. On CI a
+     * tick still reading the database after it closed failed the next test (`UncaughtExceptionsBeforeTest`, 27 and
+     * 28 Nov).
+     */
+    private val ticker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val simulator = TemperatureSimulator(
+        telemetry, dispatcher = ticker.asCoroutineDispatcher(), wallClock = System::currentTimeMillis
+    )
     private val viewModel = DispatchViewModel(
         account = FakeAccountRepository(),
         shipments = shipments,
@@ -86,6 +95,8 @@ class DispatchScreenTest {
         showing = false
         compose.waitForIdle()
         simulator.stopContinuousSimulation()
+        ticker.shutdown()
+        ticker.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
         db.close()
     }
 

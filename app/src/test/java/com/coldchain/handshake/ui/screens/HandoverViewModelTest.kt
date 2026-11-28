@@ -35,6 +35,7 @@ import com.coldchain.handshake.crypto.HashChainService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -80,7 +81,9 @@ class HandoverViewModelTest {
     private val serverHandover = ServerHandover(
         server, orchestrator, shipments, handovers, history, { Result.success(Unit) }, { "this-phone" }
     )
-    private val simulator = TemperatureSimulator(telemetry, dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis)
+    /** The simulator's own thread, so tearDown can wait for a reading being made before closing the database. */
+    private val ticker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val simulator = TemperatureSimulator(telemetry, dispatcher = ticker.asCoroutineDispatcher(), wallClock = System::currentTimeMillis)
     private val visible = CoroutineScope(Dispatchers.Default)
 
     @Before
@@ -93,6 +96,8 @@ class HandoverViewModelTest {
         // test sets Dispatchers.Main again (one still emitting meanwhile fails that test).
         created.forEach { it.viewModelScope.cancel() }
         simulator.stopContinuousSimulation()
+        ticker.shutdown()
+        ticker.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
         Dispatchers.resetMain()
         db.close()
     }

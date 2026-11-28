@@ -8,7 +8,7 @@ import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
 import com.coldchain.handshake.simulator.TemperatureSimulator
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -30,8 +30,11 @@ class LocationRecorderTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val db = DatabaseProvider.createInMemoryDatabase(context)
+    /** The simulator's own thread, so tearDown can wait for a reading being made before closing the database. */
+    private val ticker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val simulator = TemperatureSimulator(
-        TelemetryRepositoryImpl(db.temperatureEventDao()), dispatcher = Dispatchers.Default, wallClock = System::currentTimeMillis
+        TelemetryRepositoryImpl(db.temperatureEventDao()), dispatcher = ticker.asCoroutineDispatcher(),
+        wallClock = System::currentTimeMillis
     )
     private var ids = 0
     private val recorder = LocationRecorder(simulator, db.gpsPointDao()) { "gps-${++ids}" }
@@ -45,6 +48,8 @@ class LocationRecorderTest {
     @After
     fun tearDown() {
         simulator.stopContinuousSimulation()
+        ticker.shutdown()
+        ticker.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
         db.close()
     }
 
