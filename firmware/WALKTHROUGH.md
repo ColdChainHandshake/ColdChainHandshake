@@ -120,5 +120,8 @@ File: `src/history.cpp`. Turns green: every `Step4*` test (10).
 ## After step 4
 
 - Run the sanitizer and fuzz presets on Linux or WSL.
+- **Before running on a board:** cap `max_records` in a history request and stream the pages as they are built.
+  Today `history_notifications` builds every page of a request in memory first, so one request can ask for about
+  400 KB, far more than a small board has (security review S9, deferred while there is no board).
 - The board project (PlatformIO) waits until a board is chosen (`HARDWARE` in `docs/agent/MASTER_PROMPT.md`).
 - Gate 4 needs the virtual logger and this library to pass the same protocol tests. The vectors are the shared part.

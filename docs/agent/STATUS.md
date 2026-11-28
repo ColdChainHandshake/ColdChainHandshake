@@ -1,6 +1,6 @@
 # Status: what is proven, and on what
 
-Updated 27 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock. No physical
+Updated 28 Nov 2026. This is a prototype. Nothing here makes it fit for real vaccine or medicine stock. No physical
 temperature logger has been used at any point (`HARDWARE = none`): every reading so far is simulated on a phone.
 
 "Real system" means a hosted Supabase project, an emulator or phone, or a real database running in Docker.
@@ -9,6 +9,10 @@ wrong about the world: the first real run found a server rule the fake server di
 
 ## Proven on real systems
 
+- **Logger enrolment on the dev project (28 Nov):** migration `0004_logger_enrolment` applied through MCP;
+  `create_shipment` can take a logger's key and start sequence, executable by signed-in users only; the security
+  advisor shows no errors. The pinned Gate 3 build (`05b342e`) still passes its own live test against that schema on
+  the local stack (3 of 3). No shipment on the dev project has a logger enrolled: there is no hardware logger.
 - **The hosted dev project (24 Nov):** migrations `0000` to `0003` applied. Its schema is the one the local tests
   ran on: definitions, constraints, policies and the privilege matrix hash the same on both. Every deny-by-default
   rule from the tests, run as a query on hosted (including for newly created objects), finds nothing. Supabase's
@@ -114,12 +118,22 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
 - **Reading a logger over Bluetooth:** the protocol side runs against a fake Bluetooth server and the Python
   vectors, including lost and silent notifications, a forged header claiming a huge range, extra records and stray
   callbacks. The Android Bluetooth code compiles but has never talked to a logger, because there isn't one.
-- **Checking the logger at handover:** in tests, a history that was edited, cut short, replayed, signed with the
-  wrong or the test key, or doesn't match the readings fails the handover; one with holes or faults is UNKNOWN.
-  Not on a screen yet.
+- **Checking the logger at handover:** in tests, a history that was edited, cut short, replayed, forked under a
+  copied key, signed with the wrong or the test key, or doesn't match the readings fails the handover; one with holes
+  or faults is UNKNOWN, and so is an enrolled logger the receiver's phone can't reach. The outcome reaches the
+  recorded confirmation (`ServerHandoverTest`, against a fake server) and the Handover screen, which shows the
+  reasons and doesn't offer PASS over a failed or pending check (`HandoverScreenTest`).
+- **The virtual logger in debug local mode (28 Nov):** a shipment kept on one phone gets a virtual logger that
+  records what the simulator measures; Handover reads it and checks the readings against it. The chaos lab's
+  "Rewrite the history and recompute the chain" leaves the phone's own record adding up, and only the logger check
+  catches it (`HandoverScreenTest`, `HandoverViewModelTest`). Its key is in the app, so it proves nothing about
+  temperature. Server shipments don't use it.
 - **Firmware library:** written by Claude on 26 Nov (`FIRMWARE_OWNER = claude`) against the existing tests; all 39
   host tests pass with MSYS2 g++, including the Bluetooth bytes, so the C++, the Python generator and the app's Kotlin
-  agree on `logger_vectors.json` byte for byte. Signing uses mbedTLS 3.6.8. It has never run on a logger board.
+  protocol code agree on `logger_vectors.json` byte for byte. The app's `VirtualLogger` itself is checked against the
+  same vectors (`VirtualLoggerVectorsTest`): record bytes, each batch's start and end hashes, the batch and head
+  payloads and the head; its signatures are verified, not compared, because the JVM's ECDSA isn't deterministic. Its
+  Bluetooth pages and ring-buffer overwrite are not compared with the vectors. Signing uses mbedTLS 3.6.8. It has never run on a logger board.
 
 ## Not proven
 
@@ -127,8 +141,8 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
   seen on the S24 and the emulator, and on the S24 an alert raised offline escalated on WorkManager's real timer
   (27 Nov), but nobody checked the alert's own notification there.
 - GPS in deep Doze. GPS with the screen off and the network on is proven (above).
-- A real logger. None will be used (`HARDWARE = none`); the virtual logger exists in code but the app doesn't use
-  it yet.
+- A real logger. None will be used (`HARDWARE = none`). The virtual logger is read at handover only in debug local
+  mode; a two-phone handover on the dev project has no logger enrolled, so its logger check is "not checked".
 
 ## Gates
 
@@ -148,7 +162,7 @@ met with reservations, and the full proof passed after four test races CI expose
 | 2 | Deleting or rewriting the hash chain went unnoticed | Docker and unit | `0003_trust_core` (stale head CC001, gap or re-order CC003, edit CC004); the live test's stale-head and edit checks; `RegressionTest.finding2_*` |
 | 3 | Freezing was never a breach | Unit | `RegressionTest.finding3_freezingFailsAFreezeSensitiveProduct` |
 | 4 | Two checkboxes on one phone stood in for two signatures | Closed. Docker, and hosted with two real devices (Gate 3: two device IDs, custody moved, ACCEPTED) | `0003_trust_core` "one device cannot confirm for both people"; the live test's borrowed-phone check; `ServerHandoverTest.custodyMovesOnlyOnceBothPeopleHaveConfirmed`; `SHIP-3E4005` on the dev project |
-| 5 | No sensor, simulated readings | Open. Virtual logger written, not in the app; no hardware (`HARDWARE = none`) | `LoggerVectorsTest` covers the protocol only |
+| 5 | No sensor, simulated readings | Open by the owner's switch (`HARDWARE = none`): readings are still simulated. The logger protocol, the virtual logger and the handover check are built; the virtual logger is read at handover in debug local mode only | `VirtualLoggerVectorsTest`, `LoggerHandoverCheckTest`, `ServerHandoverTest` (logger cases), `HandoverScreenTest.aChaosLabRewriteThatKeepsTheChainAddingUpIsCaughtByTheLoggerOnScreen` |
 | 6 | Data gaps counted as safe | Unit | `RegressionTest.finding6_dataGapsAreUnknownNotSafe` |
 | 7 | A new alert every tick, no escalation | Unit | `RegressionTest.finding7_oneExcursionCreatesOneAlert`; `AlertNotificationsTest.theWorkerEscalatesWhatIsDueNotifiesAndBooksTheNextCheck` |
 | 8 | A FAIL handover couldn't be recorded; some statuses never set | Unit | `HandoverDecisionTest.aDeclaredFailureNeedsAReason`; `ShipmentLifecycleTest.everyPairOfStatusesIsEitherLegalOrRejected` |

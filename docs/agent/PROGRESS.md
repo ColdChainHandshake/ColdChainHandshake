@@ -1,5 +1,47 @@
 # Progress
 
+**Gate 4 closing work (28 Nov, evening session): code `done`; next the S24 check (step e), the full proof, CI, the
+fresh re-check, then `gate-4`.** Commits:
+- `54bfeac`: one deadline per logger check (G4-7) and a key without a start is UNKNOWN (G4-8), each failed first; guard
+  tests for forks (G4-3), the overflow guard (G4-10) and a malformed key (A3).
+- `5a3a11b`: MASTER 5.4 item 2 in debug local mode (`LocalLoggers`; the check under the tick lock); the chaos lab's
+  "Rewrite the history and recompute the chain"; the screen holds the verdict until the logger check is back; the
+  screen reads the logger once per head.
+- `35928b7`: Refresh and a confirmation reload the server view (a bug the cache mutant exposed, failed first); M6's guard.
+
+Review item 1's cases all exist in `ServerHandoverTest`. Honest PASS, cut short, replayed head and withholding each
+have their own test. "A reading edited on the server" is `aReadingThatDiffersFromTheLoggersRecordIsRecordedAsAFail`:
+the server copy holds a chained reading the logger never recorded.
+
+Mutants run this session, each applied with Edit, run against the named classes, reverted with Edit, `git diff` checked:
+
+```text
+M7  verifier head-hash half dropped        killed  LoggerHistoryForkTest.aHeadFromTheOtherForkDoesNotMatchTheHistory
+M8  verifier batch join dropped            killed  LoggerHistoryForkTest.batchesSplicedFromTwoForksDoNotJoin, aFirstBatchThatDoesNotStartAtTheLoggersGenesisDoesNotJoin
+M13 overflow guard dropped                 killed  RecordsRunExactlyTest.aRangeThatWrapsPastTheLargestSequenceIsRefused
+D1  overall deadline removed               killed  LoggerHandoverCheckTest.aLoggerTooSlowToFinishIsStoppedByOneDeadlineAndIsUnknown
+M6  verifier head-seq half dropped         SURVIVED ServerHandoverTest (start 0: the hash half catches it) -> new
+                                           LoggerHandoverCheckTest.aLoggerThatWithholdsItsWholeHistoryFails: PASSED under M6, killed
+A1  handover compares no readings          killed  ServerHandoverTest x2, HandoverScreenTest x2
+A2  unreadable enrolment -> NOT_CHECKED    killed  ServerHandoverTest.anEnrolmentThatCannotBeReadIsUnknownNotNotChecked
+A3  malformed key -> null                  killed  ServerHandoverTest.aMalformedKeyOnRecordIsUnknownNotNotChecked
+G8  key without start -> start 0           killed  ServerHandoverTest.aKeyOnRecordWithoutItsStartSequenceIsUnknown (PASSED under the mutant)
+P1  no "waiting" state on screen           killed  HandoverScreenTest.beforeTheLoggerCheckComesBackNothingIsJudgedOrOffered
+L1  local check compares no readings       killed  HandoverViewModelTest x2, HandoverScreenTest x2
+C1  screen cache never used                SURVIVED, because Refresh never reached the view (bug, fixed in 35928b7); then killed
+                                           HandoverScreenTest.theScreenReadsTheLoggerOncePerHeadNotOnEachRefresh
+```
+
+Last targeted run before the commits:
+
+```text
+./gradlew :core-domain:test --tests '*logger*' :app:testDebugUnitTest --tests '*HandoverViewModelTest*'
+  --tests '*HandoverScreenTest*' --tests '*ServerHandoverTest*' --continue      tests 131 failures 0
+```
+
+Docs: THREAT_MODEL (logger rows say what runs today; G4-4 and G4-6 rows; the lost-or-swapped logger line),
+LOGGER_PROTOCOL "Mapping to a shipment" (enrolment at creation), WALKTHROUGH and HANDOFF item 5 (S9), STATUS (28 Nov).
+
 **4.1, the logger check at handover (28 Nov, ~09:30): item 1 `done`, item 2 (the virtual logger in debug local mode)
 next.** Commits `5d457d6` (the carry-forward rule: an enrolled logger this phone can't reach is UNKNOWN, failed first),
 `0a0c637` (`ServerHandover.loggerCheck`, the one outcome the screen shows and `receive` records; `RemoteShipment` reads

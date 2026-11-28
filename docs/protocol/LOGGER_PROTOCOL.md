@@ -148,8 +148,11 @@ any difference, and any reading the logger never made is reported.
 
 ## Mapping to a shipment
 
-A logger's sequence runs across shipments. When custody starts, the server records the logger's newest
-sequence number, so shipment reading `n` is logger record `start_seq + n`. The shipment's own chain,
+A logger's sequence runs across shipments. When the sender creates the shipment, the logger is enrolled
+with it: the server records its public key and its newest sequence number then, once, as part of the locked
+manifest (`create_shipment`, migration `0004`). Shipment reading `n` is logger record `start_seq + n`, on
+every leg: later legs read from the same start, so a receiver checks the whole trip. A key on record without a
+start sequence can't be matched to the readings, and the check reports it as UNKNOWN. The shipment's own chain,
 version 2 in `CANONICAL_ENCODING.md`, is built over the same readings, so the server can keep checking
 order and continuity without verifying ECDSA, which Postgres can't do.
 

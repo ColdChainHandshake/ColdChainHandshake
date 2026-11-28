@@ -61,7 +61,10 @@ current list of what has run where.
 |---|---|---|
 | The courier's phone invents readings | **Not prevented today.** The readings come from a simulator in the courier's own app (finding 5). Each upload is signed by the phone's Keystore key, which proves which phone sent it, not that the temperatures are true | `KeystoreDeviceSignerTest` (real: Galaxy S24, emulator) |
 | A modified courier app confirms, uploads readings dated ahead to cover the time until the receiver confirms, then stops | **Not prevented.** The server accepts a reading dated in the future and only marks it `clock_ahead`; the Handover screen shows the clock warning, but the verdict doesn't use it, so the receiver can see PASS. While readings are simulated on the courier's phone the courier can invent any reading anyway; with a signed logger this needs the logger's key. A fix would give no credit for time past a reading's server arrival (Gate 5 review S2) | Reasoned from `0002_trust_core.sql` and `BreachDetector`; not tested |
-| A logger's history is edited, cut short, replayed or signed with another key | Detected at handover once a logger is read: FAIL | `LoggerHandoverCheckTest` (fakes); not on a screen yet |
+| A logger's history is edited, cut short, replayed, forked under a copied key, or signed with another key; or a reading on the server differs from the logger's record | Detected at handover whenever a logger is read: FAIL, recorded in the receiver's confirmation, and PASS isn't offered on screen. Today a logger is read only in debug local mode, where the shipment's virtual logger is on the same phone; no server shipment has a logger enrolled (no hardware, `HARDWARE = none`) | `LoggerHandoverCheckTest`, `LoggerHistoryForkTest` (domain); `ServerHandoverTest` (recorded verdict, fake server); `HandoverScreenTest.aChaosLabRewriteThatKeepsTheChainAddingUpIsCaughtByTheLoggerOnScreen` (debug local mode) |
+| A logger enrolled on the shipment that the receiver's phone can't reach, or whose key on record can't be read or has no start | UNKNOWN: no PASS is recorded over it | `ServerHandoverTest` (carry-forward, malformed key, no start sequence, enrolment unreadable) |
+| A replayed head over Bluetooth | Detected: FAIL, but worded as "a signature doesn't match the logger's key on record", not as a replay. Over Bluetooth the reader fills in its own nonce (`LoggerGatt`), so an old head's signature no longer verifies; the replay sentence fires only for links that return the nonce themselves (Gate 4 review G4-6) | `BleLoggerLinkTest`; `LoggerHandoverCheckTest.aReplayedHeadFails` |
+| Someone with rights to the database swaps a shipment's enrolled logger key (or disables the manifest trigger as a superuser) and then signs a history with a key they hold | **Not detected by the receiver.** The enrolled key is locked by `private.protect_shipment_manifest`, but it is not part of the genesis hash, so a receiver takes the server's word for it, unlike every other manifest field. Kept this way so the pinned Gate 3 app (`05b342e`) still works; a manifest v2 that includes the key would close it (Gate 4 review G4-4) | `0005_logger_enrolment.test.sql` (the lock); reasoned from `0004_logger_enrolment.sql:7` |
 | A logger presents the published test key | Refused everywhere in the app | `TestLoggerKeyRefusedTest`; `LoggerHandoverCheckTest` |
 | A logger overwrote records since custody started, or reported a sensor fault | Detected: UNKNOWN | `LoggerHandoverCheckTest` (fakes) |
 
@@ -78,8 +81,10 @@ current list of what has run where.
   both sides from one handset across a reinstall. The server would still see two devices.
 - **A compromised phone.** Root access can read the session and use the device key. Key attestation (proving the
   key is hardware-backed) is not done.
-- **A lost or swapped logger.** A different logger's ID or key fails the handover check; a lost logger leaves the
-  receiver with UNKNOWN.
+- **A lost or swapped logger.** When a logger is read, a different logger's ID or key fails the check, and an
+  enrolled logger the receiver's phone can't reach leaves the handover UNKNOWN. Today only debug local mode reads a
+  logger (the virtual one on the same phone), and no server shipment has one enrolled, so on a two-phone handover the
+  logger check is "not checked" and decides nothing.
 - **The old demo project.** The owner found it deleted on 26 Nov 2026 (no longer in their Supabase account, and its
   URL no longer resolves). Claude never contacted it, by rule, so this rests on the owner's check.
 - **Location privacy.** While a courier records, the phone uploads a precise fix every minute. Every member of the

@@ -70,6 +70,12 @@ Advanced, Disk image location, a folder on D:, Apply & Restart. **Check:** `dock
 `scoop install actionlint` lets Claude check the GitHub Actions workflow before pushing. CI on GitHub checks it
 anyway now that the branch is pushed. **Check:** `actionlint --version` prints a version.
 
+### 5. Only if a logger board is ever chosen: firmware memory (security review S9)
+
+Before the firmware runs on a board, cap `max_records` in a history request and send the pages as they are built:
+today one request can make the library build about 400 KB (`firmware/WALKTHROUGH.md`, "After step 4"). Nothing to do
+while `HARDWARE = none`.
+
 ## Done (newest first)
 
 - **26 Nov: the old demo project is gone.** You found `ljqwaqesiszczixbclwg` is no longer in your Supabase account
