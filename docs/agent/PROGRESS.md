@@ -1,5 +1,25 @@
 # Progress
 
+**4.1, the logger check at handover (28 Nov, ~09:30): item 1 `done`, item 2 (the virtual logger in debug local mode)
+next.** Commits `5d457d6` (the carry-forward rule: an enrolled logger this phone can't reach is UNKNOWN, failed first),
+`0a0c637` (`ServerHandover.loggerCheck`, the one outcome the screen shows and `receive` records; `RemoteShipment` reads
+the enrolled key and start sequence; the recorded-verdict test fails when the outcome isn't passed, checked by
+removing it), `25b1a41` (the Handover screen shows the check and its reasons; failed first), `3dfd25a`
+(`createShipment` can enrol a logger; the contract test reads every migration). Shipments with no logger enrolled
+(all of them today) are NOT_CHECKED and reach PASS as before: the existing handover tests are unchanged and green.
+Enrolment from the app waits for hardware; debug virtual loggers are never enrolled (DECISIONS).
+
+```text
+./gradlew :core-domain:test --rerun        (at 3dfd25a)  core-domain 132 failures 0
+./gradlew testDebugUnitTest --rerun        (at 3dfd25a)  debug 606 failures 0
+./gradlew testReleaseUnitTest --rerun      (at 3dfd25a)  release 540 failures 0
+./gradlew lintDebug                        (at 3dfd25a)  BUILD SUCCESSFUL in 5m 51s | 0 errors, 12 warnings (audit_5_5.md)
+CCH_RELEASE_KEYS=… ./gradlew assembleRelease assembleDebug   BUILD SUCCESSFUL in 8m 50s | checkReleaseKeepRules | apksigner OK
+CI at 3dfd25a: android, database, firmware all success  https://github.com/ColdChainHandshake/ColdChainHandshake/actions/runs/46102933789
+  (CI at ed43980 failed only because Robolectric couldn't download its Android jars on the runner: IOException in
+  HttpURLConnection at classMethod for every Robolectric class; the same code is green at 3dfd25a)
+```
+
 **4.3 on the dev project (28 Nov, ~08:40): `done`.** MCP `apply_migration` `0004_logger_enrolment` with the file's
 SQL: success; `list_migrations` before it showed `0000` to `0003`. Grants checked by query: `create_shipment(text,text,
 text,text,text,text,bigint)` executable by `authenticated` only; `private.is_published_test_key` by no client role.
