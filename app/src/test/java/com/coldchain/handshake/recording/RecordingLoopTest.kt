@@ -40,6 +40,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -207,6 +208,34 @@ class RecordingLoopTest {
         withTimeout(1_000) { ended.await() }
         assertFalse(simulator.isRunning.value)
         assertEquals("SHIP-1", simulator.handedOver.value)
+    }
+
+    // Gate 5 review S8: once custody has moved away, the courier's phone deletes the location points it sent.
+    @Test
+    fun whenCustodyMovesAwayThePhoneDeletesTheLocationItSent() = runBlocking {
+        val renewalsOnly = RecordingLoop(
+            simulator, recorder, sync, serverHandover, server, account, shipments, store, { syncRequests++ },
+            loopMs = 20L, accountWaitMs = 500L, custodyEveryRounds = Long.MAX_VALUE
+        )
+        db.gpsPointDao().insert(
+            com.coldchain.handshake.data.local.entities.GpsPointEntity(
+                "gps-sent", "SHIP-1", 9.9, 76.2, 12f, System.currentTimeMillis(), com.coldchain.handshake.models.SyncStatus.SYNCED
+            )
+        )
+        recorder.start(opened())
+        val ended = running.async { renewalsOnly.run() }
+        eventually("the first reading is sent") { serverCount() == 1 }
+        serverHandover.release("SHIP-1", "receiver").getOrThrow()
+        assertNotNull(db.gpsPointDao().latest("SHIP-1").first())
+
+        server.currentUser = "receiver"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "receiver-phone", server.heads.getValue("SHIP-1").headHash, verdict = HandoverVerdict.PASS)
+        ).getOrThrow()
+        server.currentUser = "courier"
+
+        withTimeout(1_000) { ended.await() }
+        assertNull(db.gpsPointDao().latest("SHIP-1").first())
     }
 
     // Found on the S24 (27 Nov): after the handover the courier's phone still held the shipment as IN_TRANSIT. A screen

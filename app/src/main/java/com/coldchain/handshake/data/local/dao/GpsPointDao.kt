@@ -23,6 +23,10 @@ interface GpsPointDao {
     @Query("UPDATE gps_points SET syncStatus = :status WHERE id IN (:ids)")
     suspend fun updateSyncStatuses(ids: List<String>, status: SyncStatus)
 
+    /** Deletes [shipmentId]'s points that are settled: sent, or refused for good. Those still to send stay. */
+    @Query("DELETE FROM gps_points WHERE shipmentId = :shipmentId AND syncStatus IN ('SYNCED', 'REJECTED')")
+    suspend fun deleteSettled(shipmentId: String): Int
+
     /** The newest point this phone recorded for [shipmentId], sent or not. */
     @Query("SELECT * FROM gps_points WHERE shipmentId = :shipmentId ORDER BY deviceTimestamp DESC LIMIT 1")
     fun latest(shipmentId: String): Flow<GpsPointEntity?>

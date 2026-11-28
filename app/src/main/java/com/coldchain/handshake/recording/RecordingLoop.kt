@@ -71,6 +71,7 @@ class RecordingLoop(
             val custody = if (me == null) null else remote.getCustody(id).getOrNull()
             if (custody != null && custody.custodianId != me) {
                 asTheServerHasIt(shipment)
+                sync.forgetSentLocation(shipment.id)
                 return forget()
             }
         }
@@ -89,6 +90,8 @@ class RecordingLoop(
             // asks. Otherwise it is read once a minute, as a safety net (finding 11).
             if (shipment.genesisHash != null && sendAndCheck(shipment, checkCustody = round % custodyEveryRounds == 0L)) {
                 simulator.onHandedOver(asTheServerHasIt(shipment))
+                // The trip is over on this phone: the route it sent isn't kept here (Gate 5 review S8).
+                sync.forgetSentLocation(shipment.id)
                 break
             }
             round++

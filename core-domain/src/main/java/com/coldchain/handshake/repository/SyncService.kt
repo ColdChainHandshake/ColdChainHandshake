@@ -17,4 +17,10 @@ interface SyncService {
 
     /** Why the server last refused something, which retrying can't fix. */
     fun getLastRejection(): Flow<String?> = flowOf(null)
+
+    /**
+     * Deletes from this phone the location points of [shipmentId] that the server has, or refused for good, once the
+     * trip is over here (Gate 5 review S8): a courier's route stays on their phone no longer than it has to.
+     */
+    suspend fun forgetSentLocation(shipmentId: String) {}
 }

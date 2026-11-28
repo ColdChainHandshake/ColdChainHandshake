@@ -140,6 +140,8 @@ class RemoteRejection(val code: String, message: String) : Exception(message) {
         const val WRONG_STATE = "CC007"
         const val ALREADY_CONFIRMED = "CC008"
         const val CLOCK = "CC009"
+        /** A location point a real fix can't have, or more than 500 in one call (`0005_location_privacy.sql`). */
+        const val LOCATION_OUT_OF_RANGE = "CC011"
     }
 }
 

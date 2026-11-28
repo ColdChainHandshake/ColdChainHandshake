@@ -555,6 +555,12 @@ fun TransitScreen(
                                 Text(timeFormatter.format(Date(loc.timestamp)), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                             }
                         }
+                    } else if (ui.locationHidden) {
+                        Text(
+                            text = LocationPrivacy.HIDDEN,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(

@@ -214,6 +214,27 @@ class SyncServiceTest {
         assertNull(sync.getLastRejection().first())
     }
 
+    // Gate 5 review S8: a courier's route is theirs. Once the trip is over on this phone, the points it sent, and those
+    // the server refused, are deleted here; any still waiting to be sent, and other shipments', stay.
+    @Test
+    fun afterTheTripThePointsThisPhoneSentOrHadRefusedAreDeletedHere() = runBlocking {
+        shipmentOnServer()
+        queueLocations(3)
+        val sync = service()
+        sync.syncPendingData().getOrThrow()
+        db.gpsPointDao().insert(GpsPoint("gps-SHIP-1-refused", "SHIP-1", 9.9, 76.2, 12f, 1_700_000_800_000L).toEntity())
+        db.gpsPointDao().updateSyncStatuses(listOf("gps-SHIP-1-refused"), SyncStatus.REJECTED)
+        db.gpsPointDao().insert(GpsPoint("gps-SHIP-1-waiting", "SHIP-1", 9.9, 76.2, 12f, 1_700_000_900_000L).toEntity())
+        queueLocations(1, "SHIP-2")
+
+        sync.forgetSentLocation("SHIP-1")
+
+        val left = db.openHelper.readableDatabase.query("SELECT id FROM gps_points ORDER BY id").use { c ->
+            generateSequence { if (c.moveToNext()) c.getString(0) else null }.toList()
+        }
+        assertEquals(listOf("gps-SHIP-1-waiting", "gps-SHIP-2-1"), left)
+    }
+
     @Test
     fun aLocationForAShipmentKeptOnThisPhoneIsNeverSent() = runBlocking {
         shipments.saveShipment(Shipment("LOCAL-1", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.CREATED)).getOrThrow()

@@ -427,8 +427,27 @@ class TransitViewModelTest {
         visible.cancel()
     }
 
+    // Since S8 (0005) only the sender and the courier whose phone recorded it read the location, so the sender watches.
     @Test
     fun whileWatchingTheCouriersLocationIsFetched() = runTest {
+        server.seedShipment("SHIP-1", custodian = "courier")
+        server.gpsPoints += GpsPoint("G-1", "SHIP-1", 1.5, 2.5, 10f, 1_700_000_100_000)
+        signInAs("sender", MemberRole.SENDER)
+        val vm = viewModel()
+        vm.onCodeScanned("SHIP-1").join()
+        val visible = backgroundScope.launch { vm.runWhileVisible() }
+
+        advanceTimeBy(500)
+
+        assertEquals(1.5, vm.state.value.remoteGps?.latitude ?: 0.0, 0.0)
+        assertFalse(vm.state.value.locationHidden)
+        visible.cancel()
+    }
+
+    // Gate 5 review S8: the receiver can no longer read the courier's location. The screen says so plainly instead of
+    // waiting for updates that will never come.
+    @Test
+    fun aReceiverWatchingIsToldTheLocationIsNotTheirsToSee() = runTest {
         server.seedShipment("SHIP-1", custodian = "courier")
         server.gpsPoints += GpsPoint("G-1", "SHIP-1", 1.5, 2.5, 10f, 1_700_000_100_000)
         signInAs("receiver", MemberRole.RECEIVER)
@@ -438,7 +457,8 @@ class TransitViewModelTest {
 
         advanceTimeBy(500)
 
-        assertEquals(1.5, vm.state.value.remoteGps?.latitude ?: 0.0, 0.0)
+        assertTrue(vm.state.value.locationHidden)
+        assertNull(vm.state.value.remoteGps)
         visible.cancel()
     }
 
@@ -448,7 +468,7 @@ class TransitViewModelTest {
         server.seedShipment("SHIP-1", custodian = "courier")
         server.seedShipment("SHIP-2", custodian = "courier")
         server.gpsPoints += GpsPoint("G-1", "SHIP-1", 1.5, 2.5, 10f, 1_700_000_100_000)
-        signInAs("receiver", MemberRole.RECEIVER)
+        signInAs("sender", MemberRole.SENDER)
         val vm = viewModel()
         vm.onCodeScanned("SHIP-1").join()
         val visible = backgroundScope.launch { vm.runWhileVisible() }

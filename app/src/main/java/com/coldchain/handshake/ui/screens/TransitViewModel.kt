@@ -66,6 +66,8 @@ data class TransitUiState(
     val notice: String? = null,
     val handedOverShipmentId: String? = null,
     val remoteGps: GpsLocationData? = null,
+    /** The server shows the courier's location only to the sender and to the courier whose phone sent it (S8). */
+    val locationHidden: Boolean = false,
     val myLocation: RecordedLocation? = null,
     val locating: Boolean = false,
     val serverCheckedAt: Long? = null,
@@ -136,7 +138,7 @@ class TransitViewModel @Inject constructor(
                 _state.update {
                     if (shipment?.id == it.shipment?.id) it.copy(shipment = shipment)
                     else it.copy(
-                        shipment = shipment, isCustodian = false, remoteGps = null, myLocation = null,
+                        shipment = shipment, isCustodian = false, remoteGps = null, locationHidden = false, myLocation = null,
                         serverCheckedAt = null, serverUnreachable = false, tripEnded = false
                     )
                 }
@@ -270,16 +272,24 @@ class TransitViewModel @Inject constructor(
             if (custody != null) lastCustody = custody
             val changed = firstRound || newReadings > 0 || custodyMoved
             if (changed) {
-                remote.getLatestGpsPoint(shipmentId).getOrNull()?.let { point ->
-                    _state.update {
-                        it.copy(remoteGps = GpsLocationData(point.latitude, point.longitude, point.accuracyMeters, point.deviceTimestamp))
+                // Members are read only when custody moved, or on the first round.
+                val members = if (custody == null || !(custodyMoved || firstRound)) null
+                else remote.getMembers(shipmentId).getOrNull()
+                // Only the sender reads a courier's location as they go (S8); anyone else is told, not kept waiting.
+                members?.firstOrNull { it.userId == me }?.role?.let { mine ->
+                    _state.update { it.copy(locationHidden = mine != MemberRole.SENDER) }
+                }
+                if (!_state.value.locationHidden) {
+                    remote.getLatestGpsPoint(shipmentId).getOrNull()?.let { point ->
+                        _state.update {
+                            it.copy(remoteGps = GpsLocationData(point.latitude, point.longitude, point.accuracyMeters, point.deviceTimestamp))
+                        }
                     }
                 }
                 val status = workflow.open(shipmentId).getOrNull()?.status
-                // Once the trip is over the silence since isn't the courier's (Gate 5 review S4). Members are read only
-                // when custody moved: the receiver holding it, or a status past the road, ends the trip.
-                val custodianRole = if (custody == null || !(custodyMoved || firstRound)) null
-                else remote.getMembers(shipmentId).getOrNull()?.firstOrNull { it.userId == custody.custodianId }?.role
+                // Once the trip is over the silence since isn't the courier's (Gate 5 review S4): the receiver holding
+                // it, or a status past the road, ends the trip.
+                val custodianRole = members?.firstOrNull { it.userId == custody?.custodianId }?.role
                 val ended = status in TRIP_OVER || custodianRole == MemberRole.RECEIVER
                 if (custodianRole != null || status in TRIP_OVER) _state.update { it.copy(tripEnded = ended) }
             }

@@ -70,6 +70,14 @@ Advanced, Disk image location, a folder on D:, Apply & Restart. **Check:** `dock
 `scoop install actionlint` lets Claude check the GitHub Actions workflow before pushing. CI on GitHub checks it
 anyway now that the branch is pushed. **Check:** `actionlint --version` prints a version.
 
+### 5a. Optional: delete expired location points on a schedule (S8)
+
+Since 28 Nov a courier's location points can't be read 30 days after the trip ends, but they stay in the table.
+To delete them, run `select private.purge_expired_location();` in the dashboard's SQL editor now and then. To
+schedule it, enable the `pg_cron` extension (Database, Extensions) and run
+`select cron.schedule('purge-location', '0 3 * * *', 'select private.purge_expired_location()');`. Claude didn't,
+because enabling an extension is a project setting. **Check:** the select returns a number.
+
 ### 5. Only if a logger board is ever chosen: firmware memory (security review S9)
 
 Before the firmware runs on a board, cap `max_records` in a history request and send the pages as they are built:

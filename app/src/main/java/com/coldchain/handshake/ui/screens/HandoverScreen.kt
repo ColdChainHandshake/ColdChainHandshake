@@ -737,6 +737,13 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
                             )
                         }
                     }
+                } else if (onServer && myRole != MemberRole.SENDER) {
+                    // The server may hold fixes this person isn't allowed to read (S8), so "none recorded" would be wrong.
+                    Text(
+                        text = LocationPrivacy.HIDDEN,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 } else {
                     Text(
                         text = "No GPS fix recorded for this consignment.",

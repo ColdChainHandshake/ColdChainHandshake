@@ -678,6 +678,17 @@ class HandoverScreenTest {
         assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
     }
 
+    // Gate 5 review S8: a receiver can no longer read where the courier has been, so the screen says that plainly rather
+    // than "no GPS fix recorded", which would be false.
+    @Test
+    fun aReceiverIsToldTheLocationIsNotTheirsToSee() {
+        server.gpsPoints += com.coldchain.handshake.repository.GpsPoint("G-1", "SHIP-1", 1.5, 2.5, 10f, now - minute)
+        showOnServer("receiver", MemberRole.RECEIVER, courierReleased = true)
+
+        await(com.coldchain.handshake.ui.screens.LocationPrivacy.HIDDEN)
+        assertTrue(compose.onAllNodes(hasText("No GPS fix recorded for this consignment.")).fetchSemanticsNodes().isEmpty())
+    }
+
     @Test
     fun theSenderCanOnlyWatch() {
         showOnServer("sender", MemberRole.SENDER)

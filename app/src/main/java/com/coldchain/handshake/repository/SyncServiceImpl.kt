@@ -64,6 +64,11 @@ class SyncServiceImpl(
 
     override fun getLastRejection(): Flow<String?> = _lastRejection.asStateFlow()
 
+    // Under the sync lock, so a point being sent right now is settled first, then deleted.
+    override suspend fun forgetSentLocation(shipmentId: String) {
+        syncMutex.withLock { gpsPointDao.deleteSettled(shipmentId) }
+    }
+
     override suspend fun syncPendingData(): Result<Unit> {
         // Prevent concurrent sync routines from processing overlapping batches
         if (!syncMutex.tryLock()) {

@@ -87,10 +87,11 @@ current list of what has run where.
   logger check is "not checked" and decides nothing.
 - **The old demo project.** The owner found it deleted on 26 Nov 2026 (no longer in their Supabase account, and its
   URL no longer resolves). Claude never contacted it, by rule, so this rests on the owner's check.
-- **Location privacy.** While a courier records, the phone uploads a precise fix every minute. Every member of the
-  shipment (sender, each courier, receiver) can read every point, with no time limit, and `append_gps_points` takes
-  any number of points with any values. Planned for Phase 6: a migration with range checks, a cap per call and a
-  retention rule, tested in pgTAP first (Gate 5 review S8). Until then, treat a shipment's members as people trusted
-  with the courier's route.
+- **Location privacy (S8, fixed 28 Nov).** While a courier records, the phone uploads a precise fix every minute.
+  Since `0005_location_privacy.sql` only the shipment's sender and the person whose phone sent a point can read it,
+  and nobody can 30 days after the trip ends; `append_gps_points` takes at most 500 points per call, each with values
+  a real fix can have; the courier's phone deletes the points it sent once custody moves on. Left: the sender sees the
+  whole route while the trip goes on, and the points stay in the table, unreadable, until the owner runs the purge
+  (HANDOFF). Proven in pgTAP (`0006_location_privacy.test.sql`) and applied to the dev project.
 - **Availability.** Nothing here resists denial of service or a Supabase outage beyond working offline and sending
   later.

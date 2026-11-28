@@ -320,19 +320,40 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         Unit
     }
 
+    /** Who sent each point, by its ID. A point a test adds to [gpsPoints] directly has no one: only the sender reads it. */
+    val gpsSentBy = mutableMapOf<String, String>()
+
     override suspend fun appendGpsPoints(shipmentId: String, deviceId: String, points: List<GpsPoint>) = call {
         if (custody[shipmentId]?.custodianId != currentUser) {
             refuse(RemoteRejection.NOT_ALLOWED, "Only the current custodian can report location.")
         }
-        gpsPoints += points.filter { point -> gpsPoints.none { it.id == point.id } }
+        // 0005_location_privacy (S8): at most 500 points, each one a real fix could have.
+        val from = (shipments[shipmentId]?.createdAtMs ?: 0L) - CLOCK_TOLERANCE_MS
+        val to = System.currentTimeMillis() + CLOCK_TOLERANCE_MS
+        if (points.size > 500 || points.any {
+                it.latitude !in -90.0..90.0 || it.longitude !in -180.0..180.0 ||
+                    !(it.accuracyMeters >= 0f && it.accuracyMeters <= 100_000f) || it.deviceTimestamp !in from..to
+            }
+        ) {
+            refuse(RemoteRejection.LOCATION_OUT_OF_RANGE, "A location point is out of range.")
+        }
+        points.filter { point -> gpsPoints.none { it.id == point.id } }.forEach {
+            gpsPoints += it
+            gpsSentBy[it.id] = currentUser
+        }
         Unit
     }
 
+    /** 0005_location_privacy (S8): the shipment's sender, and whoever's phone sent a point, can read it. */
     override suspend fun getLatestGpsPoint(shipmentId: String) = call {
-        gpsPoints.filter { it.shipmentId == shipmentId }.maxByOrNull { it.deviceTimestamp }
+        val isSender = shipments[shipmentId]?.senderId == currentUser
+        gpsPoints.filter { it.shipmentId == shipmentId && (isSender || gpsSentBy[it.id] == currentUser) }
+            .maxByOrNull { it.deviceTimestamp }
     }
 
     private companion object {
         const val CREATED_AT = 1_700_000_000_000L
+        /** `private.clock_tolerance_ms()`. */
+        const val CLOCK_TOLERANCE_MS = 300_000L
     }
 }
