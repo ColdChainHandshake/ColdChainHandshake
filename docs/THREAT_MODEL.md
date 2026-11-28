@@ -52,12 +52,15 @@ current list of what has run where.
 | A receiver records PASS over a breach, a gap or a failed check | Prevented: the app recomputes the verdict and a declared verdict can only be stricter | `HandoverDecisionTest`, `HandoverOrchestratorTest` (fakes) |
 | Missing readings pass as safe | Prevented: a silence longer than 3 logging intervals makes the verdict UNKNOWN, never PASS | `RegressionTest.finding6_*` (fakes); seen on the emulator rehearsal (real) |
 | A scanned QR code is trusted as the shipment | Prevented: a code is only ever an ID to look up | `ShipmentWorkflowTest` (fakes) |
+| A courier confirms early, stops recording and still gets a PASS | Prevented for the app as shipped: the courier keeps recording until custody moves and the receiver's verdict covers the readings up to their own confirmation | `HandoverWindowTest.aCourierWhoConfirmsEarlyAndStopsRecordingCannotGetAPass` (fakes) |
+| One reading made between the courier's last renewal and custody moving | Lost, by design: once custody moves the old custodian may no longer upload, and the next person carries the chain on from the head both confirmed. At most about a minute of simulated temperature at each handover; the receiver's own inspection covers that moment (Gate 5 review S11) | Reasoned from `confirm_handover` and `append_readings`; not tested |
 
 ### Against the readings themselves
 
 | Attack | Outcome | Shown by |
 |---|---|---|
 | The courier's phone invents readings | **Not prevented today.** The readings come from a simulator in the courier's own app (finding 5). Each upload is signed by the phone's Keystore key, which proves which phone sent it, not that the temperatures are true | `KeystoreDeviceSignerTest` (real: Galaxy S24, emulator) |
+| A modified courier app confirms, uploads readings dated ahead to cover the time until the receiver confirms, then stops | **Not prevented.** The server accepts a reading dated in the future and only marks it `clock_ahead`; the Handover screen shows the clock warning, but the verdict doesn't use it, so the receiver can see PASS. While readings are simulated on the courier's phone the courier can invent any reading anyway; with a signed logger this needs the logger's key. A fix would give no credit for time past a reading's server arrival (Gate 5 review S2) | Reasoned from `0002_trust_core.sql` and `BreachDetector`; not tested |
 | A logger's history is edited, cut short, replayed or signed with another key | Detected at handover once a logger is read: FAIL | `LoggerHandoverCheckTest` (fakes); not on a screen yet |
 | A logger presents the published test key | Refused everywhere in the app | `TestLoggerKeyRefusedTest`; `LoggerHandoverCheckTest` |
 | A logger overwrote records since custody started, or reported a sensor fault | Detected: UNKNOWN | `LoggerHandoverCheckTest` (fakes) |
@@ -77,7 +80,12 @@ current list of what has run where.
   key is hardware-backed) is not done.
 - **A lost or swapped logger.** A different logger's ID or key fails the handover check; a lost logger leaves the
   receiver with UNKNOWN.
-- **The old demo project.** Anyone with the original APK can still read and rewrite it until the owner runs
-  `docs/agent/lockdown_demo_project.sql` there (`docs/agent/HANDOFF.md`, item 1).
+- **The old demo project.** The owner found it deleted on 26 Nov 2026 (no longer in their Supabase account, and its
+  URL no longer resolves). Claude never contacted it, by rule, so this rests on the owner's check.
+- **Location privacy.** While a courier records, the phone uploads a precise fix every minute. Every member of the
+  shipment (sender, each courier, receiver) can read every point, with no time limit, and `append_gps_points` takes
+  any number of points with any values. Planned for Phase 6: a migration with range checks, a cap per call and a
+  retention rule, tested in pgTAP first (Gate 5 review S8). Until then, treat a shipment's members as people trusted
+  with the courier's route.
 - **Availability.** Nothing here resists denial of service or a Supabase outage beyond working offline and sending
   later.

@@ -11,7 +11,9 @@ don't block. `docs/agent/STATUS.md` says what is proven and on what.
   it ran in the background (no emulator was running; the S24 was connected). Claude Code says not to start it again
   without you. Every change since the last full proof (`67b034e`) passed its own targeted tests. `gate-5` needs that
   full proof and the reviewer's re-check, so it is **not tagged yet**. Reply "run the proof" (or run it yourself and
-  paste the last lines), and close other programs first if you can.
+  paste the last lines), and close other programs first if you can. Update 28 Nov, ~07:30: the reviewer's re-check
+  at `76a110b` says Gate 5 is met with reservations, the full proof outstanding. `gate-5` will be tagged on
+  `9d49a8d` (re-checked code plus wording, one guard test and docs), whatever lands on the branch after it.
 
 - Q1, write access to the dev project: done (24 Nov).
 - Q2, tag `gate-1`: settled, tagged on 24 Nov on the dev project's own advisors.

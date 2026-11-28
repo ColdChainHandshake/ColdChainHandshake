@@ -1,6 +1,9 @@
 # Progress
 
-**Next action (28 Nov, ~02:45): tag `gate-5` once the full proof passes at HEAD.** The reviewer's re-check at
+**Next action (28 Nov, ~02:45): tag `gate-5` on `9d49a8d` once the full proof passes there** (if Phase 4 commits
+land first, run the proof in a `git worktree` at `9d49a8d` and tag that commit; run it in the foreground in pieces:
+`:core-domain:test`, `testDebugUnitTest`, `testReleaseUnitTest`, `lintDebug assembleRelease assembleDebug`, with no
+emulator, Docker or other Gradle running). The reviewer's re-check at
 `76a110b` (`gate5_review.md` section 5) says Gate 5 is MET WITH RESERVATIONS, with the full proof outstanding. Claude
 Code stopped the last full proof for low memory and it may not be restarted without the owner (HANDOFF Q5). When
 allowed: run `./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug
