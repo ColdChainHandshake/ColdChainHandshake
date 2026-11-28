@@ -1,7 +1,24 @@
 # Progress
 
-**Gate 4 closing work (28 Nov, evening session): code `done`; next the S24 check (step e), the full proof, CI, the
-fresh re-check, then `gate-4`.** Commits:
+**Gate 4 re-check (28 Nov, evening): MET WITH RESERVATIONS** (`gate4_review.md`, "Re-check", committed `c5b63c3`).
+The tag was blocked only by R4-8 (no full proof at HEAD). R4-1 to R4-3 closed with tests that kill X3, X6 and X5
+(`9618514`), R4-4 to R4-7 recorded (DECISIONS). Full proof at `9618514`, in the foreground in four pieces, nothing
+else running:
+
+```text
+./gradlew :core-domain:test --rerun                     BUILD SUCCESSFUL in 14s     | tests 143 failures 0
+./gradlew testDebugUnitTest --rerun                     BUILD SUCCESSFUL in 2m 47s  | tests 629 failures 0
+./gradlew testReleaseUnitTest --rerun                   BUILD SUCCESSFUL in 2m      | tests 556 failures 0
+CCH_RELEASE_KEYS=… ./gradlew lintDebug assembleRelease assembleDebug   BUILD SUCCESSFUL in 3m 53s
+  | lint 0 errors, 12 warnings | checkReleaseKeepRules | apksigner verify OK; then ./gradlew --stop
+```
+
+Earlier, at `f306333`: the same four pieces (143, 626, 555; lint 0 errors) and CI green, run 46154688639 (android,
+firmware, database).
+
+The S24 local-mode check (step e) waits for the end of 6.2 (DECISIONS).
+
+**Gate 4 closing work (28 Nov, evening session): code `done`.** Commits:
 - `54bfeac`: one deadline per logger check (G4-7) and a key without a start is UNKNOWN (G4-8), each failed first; guard
   tests for forks (G4-3), the overflow guard (G4-10) and a malformed key (A3).
 - `5a3a11b`: MASTER 5.4 item 2 in debug local mode (`LocalLoggers`; the check under the tick lock); the chaos lab's
