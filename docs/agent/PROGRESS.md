@@ -1,5 +1,9 @@
 # Progress
 
+**`gate-4` tagged on `e179af3` (28 Nov, evening): met without hardware.** The re-check's "Re-check 2" (same reviewer,
+bounded) found R4-1 to R4-8 closed: X3, X5 and X6 killed by the new tests; targeted classes green at HEAD; CI run
+46158092337 on `e179af3` green (android, firmware, database). Next: Phase 6 (MASTER 5.6), starting with S8.
+
 **Gate 4 re-check (28 Nov, evening): MET WITH RESERVATIONS** (`gate4_review.md`, "Re-check", committed `c5b63c3`).
 The tag was blocked only by R4-8 (no full proof at HEAD). R4-1 to R4-3 closed with tests that kill X3, X6 and X5
 (`9618514`), R4-4 to R4-7 recorded (DECISIONS). Full proof at `9618514`, in the foreground in four pieces, nothing

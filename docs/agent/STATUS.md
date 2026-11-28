@@ -148,8 +148,9 @@ On a phone and an emulator: a Galaxy S24 (SM-S921E, Android 17) and a Pixel 7 em
 
 `gate-0`, `gate-1` (24 Nov, on the dev project's own advisors and a fresh clone's build), `gate-2` and `gate-3`
 (24 Nov, the two-device handover on the dev project) and `gate-5` (28 Nov, on `9f54987`: the reviewer's re-check
-met with reservations, and the full proof passed after four test races CI exposed were fixed) are tagged. Gate 4
-(Phase 4 with the firmware, closing as "met without hardware") and Gate 6 are next.
+met with reservations, and the full proof passed after four test races CI exposed were fixed) and `gate-4` (28 Nov,
+on `e179af3`: met without hardware, `HARDWARE = none` waiving only the real reading; full proof at `9618514`, CI run
+46158092337, `gate4_review.md` "Re-check 2") are tagged. Gate 6 is next.
 
 ## The 16 findings
 
