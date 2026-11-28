@@ -70,6 +70,7 @@ import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverVerdictEngine
 import com.coldchain.handshake.handover.TripWindow
+import com.coldchain.handshake.logger.LoggerCheckOutcome
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShipmentStatus
@@ -772,9 +773,24 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
             pharmacistSigned = pharmacistSigned,
             vvmStage = vvmStage,
             shakeTest = shakeTest,
-            historyAvailable = integrityEvaluation.state != IntegrityVerificationState.PENDING_SYNC
+            historyAvailable = integrityEvaluation.state != IntegrityVerificationState.PENDING_SYNC,
+            // The same check the confirmation records (ServerHandover.loggerCheck), so the screen shows what is sent.
+            loggerCheck = ui.loggerCheck?.outcome ?: LoggerCheckOutcome.NOT_CHECKED
         )
         val preliminaryVerdict = computedEvaluation.verdict
+
+        ui.loggerCheck?.takeIf { it.outcome != LoggerCheckOutcome.NOT_CHECKED }?.let { logger ->
+            Text(
+                text = "LOGGER: ${logger.outcome.name}",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (logger.outcome == LoggerCheckOutcome.PASSED) StatusGreen else StatusAmber
+            )
+            logger.reasons.forEach { reason ->
+                Text(text = reason, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
 
         val verdictColor = when {
             isPendingSync -> StatusAmber

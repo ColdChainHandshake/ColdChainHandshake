@@ -511,6 +511,20 @@ class HandoverScreenTest {
         await("Temperature Result: UNKNOWN (gap in the readings)")
     }
 
+    // 4.1: the screen shows the same logger check the confirmation records, with its reason (MASTER 5.4 item 4).
+    @Test
+    fun aLoggerOnRecordThatThisPhoneCannotReachIsShownAndHoldsTheVerdict() {
+        showOnServer("receiver", MemberRole.RECEIVER, courierReleased = true) {
+            server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(
+                loggerPublicKeyHex = "04" + "6b".repeat(64), loggerStartSeq = 0
+            )
+        }
+
+        await("The shipment's logger is on record, but this phone can't reach it, so it wasn't read.")
+        await("FINAL VERDICT: UNKNOWN")
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
     @Test
     fun theSenderCanOnlyWatch() {
         showOnServer("sender", MemberRole.SENDER)

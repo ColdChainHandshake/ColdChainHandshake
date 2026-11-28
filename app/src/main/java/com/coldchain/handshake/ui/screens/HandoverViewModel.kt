@@ -8,6 +8,7 @@ import com.coldchain.handshake.crypto.UploadAudit
 import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
+import com.coldchain.handshake.logger.LoggerCheckResult
 import com.coldchain.handshake.handover.HandoverResult
 import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.models.Alert
@@ -76,6 +77,8 @@ data class ShownHistory(
  * @property notice What the server said happened.
  * @property processing An action is running.
  * @property confirmedHead The head this person's confirmation is waiting on, while the other person hasn't confirmed.
+ * @property loggerCheck What reading the shipment's logger showed (`ServerHandover.loggerCheck`), the same outcome the
+ *   receiver's confirmation records; null before it is read.
  * @property checkedAt When this phone last fetched the shipment's history from the server, changed or not: the screen
  *   judges the record as of then, so silence since the newest reading counts even when nothing new arrives.
  */
@@ -93,7 +96,8 @@ data class HandoverUiState(
     val vvmStage: VvmStage = VvmStage.NOT_RECORDED,
     val shakeTest: ShakeTestResult = ShakeTestResult.NOT_DONE,
     val confirmedHead: String? = null,
-    val checkedAt: Long? = null
+    val checkedAt: Long? = null,
+    val loggerCheck: LoggerCheckResult? = null
 ) {
     /** A shipment on the server is only ever confirmed there, by someone signed in. */
     val onServer: Boolean get() = me != null && shipment?.genesisHash != null
@@ -380,7 +384,8 @@ class HandoverViewModel @Inject constructor(
         val custody = remote.getCustody(shipmentId).getOrNull()
         val members = remote.getMembers(shipmentId).getOrDefault(emptyList())
         val issues = remote.getBatches(shipmentId).getOrNull()?.let { UploadAudit.check(shipmentId, it, events) }
-        _state.update { it.copy(custody = custody, members = members, uploadIssues = issues) }
+        val logger = serverHandover.loggerCheck(shipmentId)
+        _state.update { it.copy(custody = custody, members = members, uploadIssues = issues, loggerCheck = logger) }
     }
 
     companion object {
