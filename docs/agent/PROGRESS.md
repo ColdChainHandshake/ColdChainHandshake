@@ -1,5 +1,17 @@
 # Progress
 
+**Phase 6 steps 2 and 3 (28 Nov, evening): `done`.** `a14ecc1`: R2 (failed first), mutant 28's screen test (kills it),
+`tools/device/rotation_check.sh` (C7, to be run in 6.2). 6.1: `docs/TEST_PYRAMID.md`, counts from this full proof at
+`a14ecc1`, in four pieces, nothing else running (Docker quit, no emulator):
+
+```text
+./gradlew :core-domain:test --rerun        BUILD SUCCESSFUL in 23s     | tests 143 failures 0
+./gradlew testDebugUnitTest --rerun        BUILD SUCCESSFUL in 2m 2s   | tests 635 failures 0
+./gradlew testReleaseUnitTest --rerun      BUILD SUCCESSFUL in 3m 34s  | tests 560 failures 0
+CCH_RELEASE_KEYS=… ./gradlew lintDebug assembleRelease assembleDebug   BUILD SUCCESSFUL in 11m 5s
+  | lint 0 errors, 12 warnings | checkReleaseKeepRules | apksigner verify OK; then ./gradlew --stop
+```
+
 **Phase 6 step 1, S8 location privacy (28 Nov, evening): `done`.** `6ebd3da` (SQL), `7e938d7` (app), DECISIONS 28 Nov.
 Local stack with only db, auth, rest and kong:
 
