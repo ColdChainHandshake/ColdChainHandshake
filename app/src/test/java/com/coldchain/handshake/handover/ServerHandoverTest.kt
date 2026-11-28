@@ -7,7 +7,11 @@ import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.local.RoomTransactionRunner
 import com.coldchain.handshake.models.HandoverVerdict
+import com.coldchain.handshake.logger.LoggerBatch
 import com.coldchain.handshake.logger.LoggerCheckOutcome
+import com.coldchain.handshake.logger.LoggerLink
+import com.coldchain.handshake.logger.LoggerStatus
+import com.coldchain.handshake.logger.VirtualLogger
 import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.ShipmentStatus
 import com.coldchain.handshake.models.SyncStatus
@@ -167,6 +171,115 @@ class ServerHandoverTest {
         assertEquals(HandoverVerdict.UNKNOWN, server.confirmations.last().details.verdict)
         assertTrue(ShipmentStatus.ACCEPTED != localStatus())
         assertEquals(HandoverState.TRANSFERRED, result.outcome.state)
+    }
+
+    // Gate 4 review (28 Nov): nothing gave the handover a logger to read, so a tampered or truncated logger history had
+    // never reached a recorded verdict. Here the receiver's phone reaches the shipment's logger (a virtual one, as in
+    // debug local mode), enrolled on the record, and what the logger shows decides what is recorded.
+    private val logger = VirtualLogger("LOG-1").apply { (1..10).forEach { record(t0 + it * minute, 500) } }
+
+    /** The courier's readings, made from the logger's records one to one: reading n is record n. */
+    private fun readingsFromTheLogger(edited: Int? = null) = HashChainService.buildChain(
+        (1..10).map {
+            val temperature = if (it == edited) 5.2 else 5.0
+            TemperatureEvent("TE-$it", "SHIP-1", "LOG-1", t0 + it * minute, temperature, "", "", SyncStatus.PENDING)
+        },
+        genesis
+    )
+
+    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+
+    private suspend fun receivedReaching(
+        link: LoggerLink,
+        readings: List<TemperatureEvent> = readingsFromTheLogger()
+    ): Result<HandoverResult> {
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(
+            loggerPublicKeyHex = hex(logger.publicKeyUncompressed), loggerStartSeq = 0
+        )
+        courierUploaded(readings)
+        courierReleases()
+        openAsReceiver()
+        val reaching = ServerHandover(
+            remote = server, orchestrator = orchestrator, shipments = shipments, handovers = handovers,
+            history = history, uploadPending = { sync.uploadReadings(it) }, deviceId = { "device-1" },
+            clock = { now }, loggerLink = { link }
+        )
+        return reaching.receive("SHIP-1", null, null, VvmStage.NOT_RECORDED, ShakeTestResult.NOT_DONE)
+    }
+
+    private fun recordedVerdict() = server.confirmations.last().details.verdict
+
+    @Test
+    fun anHonestLoggerHistoryLetsThePassBeRecorded() = runBlocking {
+        receivedReaching(logger).getOrThrow()
+
+        assertEquals(HandoverVerdict.PASS, recordedVerdict())
+        assertEquals(ShipmentStatus.ACCEPTED, localStatus())
+    }
+
+    @Test
+    fun aReadingThatDiffersFromTheLoggersRecordIsRecordedAsAFail() = runBlocking {
+        receivedReaching(logger, readings = readingsFromTheLogger(edited = 5)).getOrThrow()
+
+        assertEquals(HandoverVerdict.FAIL, recordedVerdict())
+        assertNotEquals(ShipmentStatus.ACCEPTED, localStatus())
+    }
+
+    @Test
+    fun aLoggerHistoryCutShortOfItsHeadIsRecordedAsAFail() = runBlocking {
+        val truncating = object : LoggerLink by logger {
+            override suspend fun status() = Result.success(LoggerStatus(1, 8))
+            override suspend fun readHistory(fromSeq: Long, maxRecords: Int) =
+                if (fromSeq > 8) Result.success(null)
+                else logger.readHistory(fromSeq, minOf(maxRecords, (9 - fromSeq).toInt()))
+        }
+
+        receivedReaching(truncating).getOrThrow()
+
+        assertEquals(HandoverVerdict.FAIL, recordedVerdict())
+    }
+
+    @Test
+    fun aReplayedLoggerHeadIsRecordedAsAFail() = runBlocking {
+        val oldHead = logger.challenge(ByteArray(16) { 7 }).getOrThrow()
+        val replaying = object : LoggerLink by logger {
+            override suspend fun challenge(nonce: ByteArray) = Result.success(oldHead)
+        }
+
+        receivedReaching(replaying).getOrThrow()
+
+        assertEquals(HandoverVerdict.FAIL, recordedVerdict())
+    }
+
+    // Gate 4 review, mutant M6: a logger that shows none of its history, claiming its head is where custody started.
+    @Test
+    fun aLoggerWithholdingItsWholeHistoryIsNotAPass() = runBlocking {
+        val withholding = object : LoggerLink by logger {
+            override suspend fun status() = Result.success(LoggerStatus(1, 0))
+            override suspend fun readHistory(fromSeq: Long, maxRecords: Int) = Result.success<LoggerBatch?>(null)
+        }
+
+        receivedReaching(withholding).getOrThrow()
+
+        assertNotEquals(HandoverVerdict.PASS, recordedVerdict())
+    }
+
+    // Gate 4 review, mutant A2: when the shipment's enrolment can't be read, the logger isn't "not checked".
+    @Test
+    fun anEnrolmentThatCannotBeReadIsUnknownNotNotChecked() = runBlocking {
+        courierUploaded(chain(10))
+        openAsReceiver()
+        server.failReads = null
+        val unreadable = object : com.coldchain.handshake.repository.ColdChainRemote by server {
+            override suspend fun getShipment(shipmentId: String) =
+                Result.failure<com.coldchain.handshake.repository.RemoteShipment?>(java.io.IOException("No signal"))
+        }
+        val handoverOffline = ServerHandover(
+            remote = unreadable, orchestrator = orchestrator, shipments = shipments, handovers = handovers,
+            history = history, uploadPending = { Result.success(Unit) }, deviceId = { "device-1" }, clock = { now }
+        )
+
+        assertEquals(LoggerCheckOutcome.UNKNOWN, handoverOffline.loggerCheck("SHIP-1").outcome)
     }
 
     @Test
