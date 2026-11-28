@@ -395,10 +395,14 @@ class HandoverViewModel @Inject constructor(
         }
     }
 
-    /** [userId]'s role on the shipment as the server has it; the screen's copy of the members is used without an answer. */
+    /**
+     * [userId]'s role on the shipment as the server has it, asked twice: right after a take-over a dropped read would
+     * otherwise leave a courier's phone not recording (Gate 5 re-check R2). The screen's copy is used without an answer.
+     */
     private suspend fun roleOnShipment(shipmentId: String, userId: String?): MemberRole? {
         if (userId == null) return null
-        val members = remote.getMembers(shipmentId).getOrNull() ?: _state.value.members
+        val members = (remote.getMembers(shipmentId).getOrNull() ?: remote.getMembers(shipmentId).getOrNull())
+            ?: _state.value.members
         return members.firstOrNull { it.userId == userId }?.role
     }
 

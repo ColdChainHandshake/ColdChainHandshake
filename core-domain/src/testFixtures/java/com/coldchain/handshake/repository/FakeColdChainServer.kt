@@ -134,7 +134,13 @@ class FakeColdChainServer(var currentUser: String = "courier") : ColdChainRemote
         Unit
     }
 
-    override suspend fun getMembers(shipmentId: String) = call { members[shipmentId].orEmpty().toList() }
+    /** When set, the next member read fails this way, as one dropped request would. */
+    var failNextMembers: Throwable? = null
+
+    override suspend fun getMembers(shipmentId: String) = call {
+        failNextMembers?.let { failNextMembers = null; throw it }
+        members[shipmentId].orEmpty().toList()
+    }
 
     override suspend fun dispatchShipment(shipmentId: String) = call {
         moveTo(shipmentId, ShipmentStatus.CREATED, ShipmentStatus.DISPATCHED)

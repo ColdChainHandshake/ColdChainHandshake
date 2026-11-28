@@ -154,6 +154,27 @@ class HandoverViewModelTest {
         assertEquals(1, backgroundStarts)
     }
 
+    // Gate 5 re-check R2: one dropped member read right after taking over, with no member list on screen yet, left
+    // courier B's phone recording nothing. The read is tried once more before deciding.
+    @Test
+    fun aCourierTakingOverStillRecordsWhenOneMemberReadFails() = runBlocking {
+        server.members.getValue("SHIP-1") += ShipmentMember("courier-b", MemberRole.COURIER, "Bea")
+        openOnServer("courier-b", MemberRole.COURIER)
+        server.currentUser = "courier"
+        server.confirmHandover(
+            HandoverConfirmation("SHIP-1", 1, "courier-phone", server.heads.getValue("SHIP-1").headHash, toUserId = "courier-b")
+        ).getOrThrow()
+        server.currentUser = "courier-b"
+        val vm = viewModel()
+        server.failNextMembers = java.io.IOException("No signal")
+
+        vm.record(HandoverVerdict.PASS, null).join()
+
+        assertEquals("courier-b", server.custody.getValue("SHIP-1").custodianId)
+        assertTrue("recording on courier B's phone", simulator.isRunning.value)
+        assertEquals(1, backgroundStarts)
+    }
+
     @Test
     fun aReceiverTakingOverRecordsNothing() = runBlocking {
         openOnServer("receiver", MemberRole.RECEIVER)

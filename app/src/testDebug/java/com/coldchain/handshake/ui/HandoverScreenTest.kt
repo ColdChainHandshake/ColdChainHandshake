@@ -678,6 +678,21 @@ class HandoverScreenTest {
         assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
     }
 
+    // Gate 5 re-check, mutant 28 (S3 on screen): the verdict is worked out again at each look at the server, so a courier
+    // falling silent turns PASS into UNKNOWN with no new reading arriving. The last reading is 6 s short of the product's
+    // longest allowed silence; the history polls every 3 s, then 6 s.
+    @Test
+    fun aCourierFallingSilentTurnsThePassIntoUnknownWithNoNewReading() {
+        val lastAt = System.currentTimeMillis() - ProductProfiles.DEFAULT.maxSilenceMs + 6_000
+        showOnServer("receiver", MemberRole.RECEIVER, uploaded = readings(lastAt = lastAt, genesisHash = genesis), courierReleased = true)
+
+        await("FINAL VERDICT: PASS")
+        compose.waitUntil(25_000) {
+            idleMain()
+            compose.onAllNodes(hasText("FINAL VERDICT: UNKNOWN")).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     // Gate 5 review S8: a receiver can no longer read where the courier has been, so the screen says that plainly rather
     // than "no GPS fix recorded", which would be false.
     @Test
