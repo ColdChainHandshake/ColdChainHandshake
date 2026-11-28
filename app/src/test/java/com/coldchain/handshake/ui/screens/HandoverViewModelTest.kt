@@ -276,6 +276,23 @@ class HandoverViewModelTest {
         Unit
     }
 
+    // Found by Gate 4's mutant run (28 Nov): a refresh or a confirmation was meant to read who holds the shipment and who
+    // is on it again, but only a new reading did, so Refresh showed the old members until the courier's next reading.
+    @Test
+    fun aRefreshReadsWhoIsOnTheShipmentAgainWithNoNewReading() = runBlocking {
+        openOnServer("receiver", MemberRole.RECEIVER)
+        // The whole history is here before the screen opens, so no reading arrives after it.
+        history.hydrateHistory("SHIP-1").getOrThrow()
+        val vm = viewModel()
+        visible.launch { vm.runWhileVisible() }
+        vm.awaitState { it.members.size == 3 && it.loggerCheck != null }
+
+        server.members.getValue("SHIP-1") += com.coldchain.handshake.repository.ShipmentMember("courier-b", MemberRole.COURIER, "Cody")
+        vm.refresh().join()
+
+        assertEquals(4, vm.awaitState { it.members.size == 4 }.members.size)
+    }
+
     // Gate 5 review S3 (28 Nov): the screen judged the record with a "now" read only when data changed, so a courier
     // going silent never turned PASS into UNKNOWN on screen. Each look at the server, changed or not, moves it on.
     @Test

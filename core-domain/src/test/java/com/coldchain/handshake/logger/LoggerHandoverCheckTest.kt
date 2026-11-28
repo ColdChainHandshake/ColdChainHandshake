@@ -265,6 +265,23 @@ class LoggerHandoverCheckTest {
         assertTrue(nonces.all { it.length == 32 })
     }
 
+    // Gate 4 review G4-2, mutant M6: a reused logger (records before custody started) that shows none of this trip,
+    // while the shipment has no readings yet. With no batch the head's hash has nothing to be compared with, so only
+    // its sequence shows the history was held back.
+    @Test
+    fun aLoggerThatWithholdsItsWholeHistoryFails() = runTest {
+        val logger = logger()
+        val withholding = object : LoggerLink by logger {
+            override suspend fun status() = Result.success(LoggerStatus(1, startSeq))
+            override suspend fun readHistory(fromSeq: Long, maxRecords: Int) = Result.success<LoggerBatch?>(null)
+        }
+
+        val result = check.check(withholding, loggerId, logger.publicKeyUncompressed, startSeq, emptyList())
+
+        assertEquals(FAILED, result.outcome)
+        assertTrue(result.issues.toString(), result.issues.any { it.type == LoggerIssueType.HEAD_MISMATCH })
+    }
+
     // Gate 4 review G4-7: each request has its own timeout, but a slow logger could answer each one just in time, up to
     // 64 pages. One deadline covers the whole check.
     @Test

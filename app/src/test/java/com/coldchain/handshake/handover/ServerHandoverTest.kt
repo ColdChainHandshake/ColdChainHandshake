@@ -325,6 +325,8 @@ class ServerHandoverTest {
             history = history, uploadPending = { sync.uploadReadings(it) }, deviceId = { "device-1" },
             clock = { now }, loggerLink = { logger }
         )
+        // Every reading held here, so taking 0 as the start would match the logger one to one and pass.
+        history.hydrateHistory("SHIP-1").getOrThrow()
 
         val result = reaching.loggerCheck("SHIP-1")
 

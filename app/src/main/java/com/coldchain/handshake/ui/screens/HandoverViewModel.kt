@@ -253,11 +253,13 @@ class HandoverViewModel @Inject constructor(
         // Who holds it and who is on it, again whenever the readings or a confirmation change.
         launch {
             val readingsHere = perShipment(emptyList(), telemetry::getTemperatures)
-            combine(_state.map { it.shipment?.id to it.onServer }.distinctUntilChanged(), readingsHere, serverRefresh) { key, events, _ ->
-                key to events
+            // The refresh count is part of the key: without it a confirmation or Refresh was filtered out as "nothing
+            // changed" and the view waited for the next reading (found by Gate 4's mutant run).
+            combine(_state.map { it.shipment?.id to it.onServer }.distinctUntilChanged(), readingsHere, serverRefresh) { key, events, tick ->
+                Triple(key, events, tick)
             }
-                .distinctUntilChanged { a, b -> a.first == b.first && a.second.size == b.second.size }
-                .collect { (key, events) -> if (key.second) loadServerView(key.first!!, events) }
+                .distinctUntilChanged { a, b -> a.first == b.first && a.second.size == b.second.size && a.third == b.third }
+                .collect { (key, events, _) -> if (key.second) loadServerView(key.first!!, events) }
         }
         launch {
             _state.map { it.shipment?.id to it.onServer }.distinctUntilChanged().collect { (id, onServer) ->
