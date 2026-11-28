@@ -44,7 +44,9 @@ class TemperatureSimulator(
     private val chaosEngineService: ChaosEngineService? = null,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val safetyEngine: SafetyEngine? = null,
-    private val wallClock: (() -> Long)? = null
+    private val wallClock: (() -> Long)? = null,
+    /** Debug local mode's virtual loggers; each local shipment's readings are also its logger's records. */
+    private val localLoggers: LocalLoggers? = null
 ) {
     private val scope = CoroutineScope(dispatcher)
     private var simulationJob: Job? = null
@@ -168,6 +170,12 @@ class TemperatureSimulator(
      * - Routes event strictly to [TelemetryRepository.saveTemperature].
      * - Triggers [SafetyEngine] to detect thermal breaches and apply quarantine.
      */
+    /**
+     * Runs [block] between two readings, never while one is being made. A reading is saved before its local logger
+     * records it, so a check reading both outside this could see a reading the logger hasn't made yet.
+     */
+    suspend fun <T> betweenReadings(block: suspend () -> T): T = tickMutex.withLock { block() }
+
     suspend fun tickOnce(simulatedStepDurationSeconds: Long = 60L): TemperatureEvent? {
         if (_isMonitorOnly.value) return null
         val shipment = _activeShipment.value ?: return null
@@ -220,6 +228,13 @@ class TemperatureSimulator(
             val saveResult = telemetryRepository.saveTemperature(hashedEvent)
 
             if (saveResult.isSuccess) {
+                // A shipment kept on this phone alone (debug local mode): its logger records the same measurement, one
+                // record per reading, started with the first. A server shipment has none (LocalLoggers).
+                if (shipment.genesisHash == null) {
+                    val logger = if (latestExisting == null) localLoggers?.startFor(shipment.id, shipment.loggerId)
+                    else localLoggers?.of(shipment.id)
+                    logger?.record(hashedEvent.timestamp, hashedEvent.tempCentiC)
+                }
                 _simulatedTimestamp.value = nextTimestamp
                 _latestTemperature.value = temp
                 stepCounter = currentStep + 1

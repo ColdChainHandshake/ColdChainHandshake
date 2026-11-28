@@ -12,6 +12,8 @@ import com.coldchain.handshake.models.ProductProfiles
 import com.coldchain.handshake.models.ShakeTestResult
 import com.coldchain.handshake.models.Shipment
 import com.coldchain.handshake.models.ShipmentStatus
+import com.coldchain.handshake.logger.LoggerCheckOutcome
+import com.coldchain.handshake.simulator.LocalLoggers
 import com.coldchain.handshake.recording.CourierRecorder
 import com.coldchain.handshake.recording.RecordingStore
 import com.coldchain.handshake.repository.HandoverConfirmation
@@ -84,7 +86,14 @@ class HandoverViewModelTest {
     )
     /** The simulator's own thread, so tearDown can wait for a reading being made before closing the database. */
     private val ticker = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val simulator = TemperatureSimulator(telemetry, dispatcher = ticker.asCoroutineDispatcher(), wallClock = System::currentTimeMillis)
+    /** Debug local mode's virtual loggers, one per shipment kept on this phone alone. */
+    private val localLoggers = LocalLoggers()
+    /** Set to make readings at chosen times; real time otherwise. */
+    private var fakeNow: Long? = null
+    private val simulator = TemperatureSimulator(
+        telemetry, dispatcher = ticker.asCoroutineDispatcher(), wallClock = { fakeNow ?: System.currentTimeMillis() },
+        localLoggers = localLoggers
+    )
     private val visible = CoroutineScope(Dispatchers.Default)
 
     @Before
@@ -118,7 +127,8 @@ class HandoverViewModelTest {
     private val recorder = CourierRecorder(simulator, recordingStore) { backgroundStarts++ }
 
     private fun viewModel(saved: SavedStateHandle = SavedStateHandle()) = HandoverViewModel(
-        account, simulator, history, telemetry, alerts, handovers, server, serverHandover, orchestrator, recorder, saved
+        account, simulator, history, telemetry, alerts, handovers, server, serverHandover, orchestrator, recorder,
+        localLoggers, saved
     ).also { created += it }
 
     // 5.3, multi-leg custody: a second courier takes over on their own phone, which records from then on. Courier A's
@@ -414,6 +424,77 @@ class HandoverViewModelTest {
         vm.record(HandoverVerdict.FAIL, "Seal broken").join()
 
         assertTrue(vm.state.value.notice.orEmpty(), vm.state.value.notice.orEmpty().startsWith("No connection"))
+    }
+
+    // 4.1, MASTER 5.4 item 2 (Gate 4 review): in debug local mode one phone plays every part, so the handover reads the
+    // shipment's virtual logger, which recorded what the simulator measured, and its check reaches what is recorded.
+    private fun localTripOfTen(): Shipment {
+        val local = Shipment("SHIP-L", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.ARRIVED, ProductProfiles.DEFAULT.id, now - 11 * minute)
+        runBlocking {
+            shipments.adoptRemoteShipment(local).getOrThrow()
+            simulator.attachShipment(local)
+            (1..10).forEach { fakeNow = now - (11 - it) * minute; simulator.tickOnce() }
+        }
+        fakeNow = null
+        return local
+    }
+
+    /** Rewrites the stored readings from [from] on, temperature and hashes, as a rewritten history would be. */
+    private fun rewriteFrom(from: Long, temperature: Double) = runBlocking {
+        val held = telemetry.getTemperatures("SHIP-L").first().sortedBy { it.seq }
+        val rewritten = HashChainService.buildChain(
+            held.map { if (it.seq >= from) it.copy(temperature = temperature) else it },
+            HashChainService.UNBOUND_GENESIS
+        )
+        rewritten.filter { it.seq >= from }.forEach {
+            db.openHelper.writableDatabase.execSQL(
+                "UPDATE temperature_events SET temperature = ?, previousHash = ?, currentHash = ? WHERE id = ?",
+                arrayOf<Any>(it.temperature, it.previousHash, it.currentHash, it.id)
+            )
+        }
+        db.invalidationTracker.refreshVersionsAsync()
+    }
+
+    @Test
+    fun aLocalTripIsCheckedAgainstItsVirtualLoggerAndCanPass() = runBlocking {
+        localTripOfTen()
+        val vm = viewModel()
+        visible.launch { vm.runWhileVisible() }
+        assertEquals(LoggerCheckOutcome.PASSED, vm.awaitState { it.loggerCheck != null }.loggerCheck?.outcome)
+        vm.record(HandoverVerdict.PASS, null).join()
+
+        assertEquals(LoggerCheckOutcome.PASSED, vm.state.value.loggerCheck?.outcome)
+        assertEquals(vm.state.value.error.orEmpty(), HandoverVerdict.PASS, vm.state.value.result?.handover?.verdict)
+    }
+
+    @Test
+    fun aRewrittenLocalHistoryThatStillChainsIsCaughtByTheLoggerAndRecordedAsAFail() = runBlocking {
+        localTripOfTen()
+        rewriteFrom(5, 4.0)
+        val vm = viewModel()
+        visible.launch { vm.runWhileVisible() }
+
+        // The chain on this phone still adds up; only the logger disagrees, and a PASS isn't recorded over it.
+        vm.record(HandoverVerdict.PASS, null).join()
+        assertEquals(LoggerCheckOutcome.FAILED, vm.state.value.loggerCheck?.outcome)
+        assertEquals(null, vm.state.value.result)
+        assertTrue(vm.state.value.error.orEmpty(), vm.state.value.error.orEmpty().contains("found FAIL"))
+
+        // The logger's finding is reason enough for the FAIL.
+        vm.record(HandoverVerdict.FAIL, null).join()
+        assertEquals(vm.state.value.error.orEmpty(), HandoverVerdict.FAIL, vm.state.value.result?.handover?.verdict)
+    }
+
+    @Test
+    fun aLocalShipmentWithNoLoggerHereIsNotChecked() = runBlocking {
+        val local = Shipment("SHIP-L", "QR", "LOG-1", "A", "B", "W-1", ShipmentStatus.ARRIVED, ProductProfiles.DEFAULT.id, now - 11 * minute)
+        shipments.adoptRemoteShipment(local).getOrThrow()
+        simulator.attachShipment(local)
+        val vm = viewModel()
+
+        vm.record(HandoverVerdict.FAIL, "Seal broken").join()
+
+        assertEquals(LoggerCheckOutcome.NOT_CHECKED, vm.state.value.loggerCheck?.outcome)
     }
 
     @Test

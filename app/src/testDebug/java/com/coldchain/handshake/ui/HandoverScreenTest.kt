@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityOptionsCompat
 import com.coldchain.handshake.repository.ShipmentMember
+import com.coldchain.handshake.logger.LoggerInfo
 import com.coldchain.handshake.logger.LoggerLink
 import com.coldchain.handshake.logger.VirtualLogger
 import com.coldchain.handshake.repository.CustodyState
@@ -31,6 +32,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.coldchain.handshake.crypto.DeviceSigner
 import com.coldchain.handshake.crypto.HashChainService
+import com.coldchain.handshake.crypto.ShipmentIntegrityEvaluator
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.models.HandoverVerdict
 import com.coldchain.handshake.models.ProductProfiles
@@ -57,6 +59,7 @@ import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.repository.AccountRepository
 import com.coldchain.handshake.repository.ShipmentHistorySyncCoordinator
 import com.coldchain.handshake.safety.SafetyEngine
+import com.coldchain.handshake.simulator.LocalLoggers
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.repository.SyncServiceImpl
 import com.coldchain.handshake.repository.ShipmentRepositoryImpl
@@ -64,6 +67,7 @@ import com.coldchain.handshake.repository.ShipmentWorkflow
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
 import com.coldchain.handshake.repository.UserProfile
 import com.coldchain.handshake.ui.screens.HandoverScreen
+import com.coldchain.handshake.ui.screens.LOGGER_CHECK_WAITING
 import android.os.Looper
 import androidx.lifecycle.SavedStateHandle
 import org.robolectric.Shadows.shadowOf
@@ -124,11 +128,14 @@ class HandoverScreenTest {
     private val safetyEngine = SafetyEngine(alerts, shipments)
     /** The simulator's own thread, so tearDown can wait for a reading being made before closing the database. */
     private val ticker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    /** Debug local mode's virtual loggers, as the app's module provides them. */
+    private val localLoggers = LocalLoggers()
     private val simulator = TemperatureSimulator(
         telemetryRepository = telemetry,
         chaosEngineService = DebugTools.createChaosService(),
         safetyEngine = safetyEngine,
-        dispatcher = ticker.asCoroutineDispatcher()
+        dispatcher = ticker.asCoroutineDispatcher(),
+        localLoggers = localLoggers
     )
     // In one transaction, as the app's module builds it: without it the handover row shows before the shipment's
     // final status, and a check between the two read INSPECTED (seen once in a full run on 26 Nov).
@@ -181,6 +188,7 @@ class HandoverScreenTest {
         serverHandover,
         orchestrator,
         CourierRecorder(simulator, RecordingStore.inMemory()) {},
+        localLoggers,
         SavedStateHandle()
     ).also { viewModels += it }
 
@@ -546,6 +554,88 @@ class HandoverScreenTest {
             )
         }
 
+        await("LOGGER: FAILED")
+        await("FINAL VERDICT: FAIL")
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
+    private fun enrol(logger: VirtualLogger) {
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(
+            loggerPublicKeyHex = logger.publicKeyUncompressed.joinToString("") { "%02x".format(it) },
+            loggerStartSeq = 0
+        )
+    }
+
+    // Gate 4 review: the verdict fell back to "not checked" before the logger check came back, so it could show PASS
+    // over an enrolled logger for a moment. Until the check is back, nothing is judged or offered.
+    @Test
+    fun beforeTheLoggerCheckComesBackNothingIsJudgedOrOffered() {
+        val logger = VirtualLogger("LOG-1")
+        reachableLogger = object : LoggerLink by logger {
+            override suspend fun info(): Result<LoggerInfo> = kotlinx.coroutines.awaitCancellation()
+        }
+        showOnServer("receiver", MemberRole.RECEIVER, courierReleased = true) { enrol(logger) }
+
+        await(LOGGER_CHECK_WAITING)
+        await("Waiting for the Logger Check...").assertIsNotEnabled()
+        assertTrue(compose.onAllNodes(hasText("FINAL VERDICT: PASS")).fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())
+    }
+
+    // Gate 4 review G4-7: the screen read the logger again on every look at the server. It reads it once per head; a
+    // confirmation, which refreshes the rest of the screen, doesn't read it again.
+    @Test
+    fun theScreenReadsTheLoggerOncePerHeadNotOnEachRefresh() {
+        val uploaded = readings(genesisHash = genesis)
+        val logger = VirtualLogger("LOG-1").apply { uploaded.forEach { record(it.timestamp, it.tempCentiC) } }
+        var reads = 0
+        reachableLogger = object : LoggerLink by logger {
+            override suspend fun info(): Result<LoggerInfo> { reads++; return logger.info() }
+        }
+        showOnServer("courier", MemberRole.COURIER, uploaded = uploaded) { enrol(logger) }
+        // Read before the history reached this phone, then again once it had: two heads.
+        await("LOGGER: PASSED")
+        val readsAtTheHead = reads
+
+        await("Confirm Handover").performClick()
+        await(HandoverViewModel.RELEASED_NOTICE)
+        idleMain()
+
+        assertEquals(readsAtTheHead, reads)
+    }
+
+    /**
+     * Debug local mode (4.1, MASTER 5.4 item 2): the simulator makes the readings, so the shipment's virtual logger
+     * on this phone recorded them too. [beforeShowing] runs once they are stored.
+     */
+    private fun recordLocallyAndShow(beforeShowing: suspend () -> Unit = {}) {
+        runBlocking {
+            shipments.adoptRemoteShipment(localShipment).getOrThrow()
+            simulator.attachShipment(localShipment, startTimestamp = now - 11 * minute)
+            repeat(10) { simulator.tickOnce() }
+            beforeShowing()
+        }
+        simulator.attachShipmentForMonitoring(localShipment)
+        val viewModel = screenViewModel()
+        compose.setContent { if (showing) HandoverScreen(viewModel = viewModel) }
+    }
+
+    @Test
+    fun anHonestLocalTripShowsTheLoggerCheckPassed() {
+        recordLocallyAndShow()
+
+        await("LOGGER: PASSED")
+        await("Record PASS handover")
+    }
+
+    @Test
+    fun aChaosLabRewriteThatKeepsTheChainAddingUpIsCaughtByTheLoggerOnScreen() {
+        recordLocallyAndShow {
+            assertEquals(5, DebugTools.rewriteHistoryFrom(db, "SHIP-1", fromSeq = 6, temperature = 4.0))
+        }
+
+        // The record on this phone still adds up: only the logger knows what was measured.
+        await(ShipmentIntegrityEvaluator.RECORD_UNBROKEN)
         await("LOGGER: FAILED")
         await("FINAL VERDICT: FAIL")
         assertTrue(compose.onAllNodes(hasText("Record PASS handover")).fetchSemanticsNodes().isEmpty())

@@ -285,6 +285,43 @@ fun ChaosScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Scenario 4b: a rewrite that keeps the chain adding up, which only the logger catches (4.1)
+        ChaosCard(
+            title = "Scenario 4b: Rewrite the history and recompute the chain",
+            description = "Sets the last five readings on this phone to 4.0 °C and recomputes every hash after them, so the " +
+                "record on this phone still adds up. In debug local mode the shipment's virtual logger keeps what was " +
+                "measured, so the logger check at handover fails.",
+            icon = Icons.Default.BugReport,
+            iconTint = StatusRed,
+            isActive = false,
+            buttonText = "Rewrite last five readings",
+            buttonColor = StatusRed,
+            onAction = {
+                coroutineScope.launch {
+                    if (shipmentId.isNotBlank()) {
+                        val database = DatabaseProvider.getDatabase(context)
+                        val newest = database.temperatureEventDao().getTemperaturesDirect(shipmentId).maxOfOrNull { it.seq } ?: 0L
+                        val rewritten = DebugTools.rewriteHistoryFrom(database, shipmentId, maxOf(1L, newest - 4), 4.0)
+                        if (rewritten > 0) {
+                            actionFeedback = "Rewrote $rewritten readings to 4.0 °C and recomputed the chain. Open Handover to see the logger check."
+                            DebugTools.logChaosEvent(
+                                context = context,
+                                shipmentId = shipmentId,
+                                scenarioType = "REWRITE_HISTORY",
+                                message = "$rewritten readings rewritten to 4.0 °C, chain recomputed"
+                            )
+                        } else {
+                            actionFeedback = "No readings to rewrite. Run the simulator first."
+                        }
+                    } else {
+                        actionFeedback = "Please dispatch and run a shipment first."
+                    }
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         // Scenario 5: RESET ALL
         Button(
             onClick = {

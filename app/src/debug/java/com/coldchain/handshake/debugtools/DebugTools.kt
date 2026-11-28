@@ -5,7 +5,9 @@ import androidx.compose.runtime.Composable
 import com.coldchain.handshake.data.local.ColdChainDatabase
 import com.coldchain.handshake.data.local.DatabaseProvider
 import com.coldchain.handshake.data.local.dao.ChaosEventDao
+import com.coldchain.handshake.crypto.HashChainService
 import com.coldchain.handshake.data.local.entities.ChaosEventEntity
+import com.coldchain.handshake.data.local.entities.toDomain
 import com.coldchain.handshake.data.network.ChaosAwareNetworkMonitor
 import com.coldchain.handshake.data.network.NetworkMonitor
 import com.coldchain.handshake.models.SyncStatus
@@ -54,6 +56,35 @@ object DebugTools {
         )
         database.invalidationTracker.refreshVersionsAsync()
         true
+    }
+
+    /**
+     * Rewrites every stored reading from [fromSeq] on to [temperature] and recomputes the hashes, so the chain on this
+     * phone still adds up: the rewrite a holder of the readings could make. Only an independent record catches it, here
+     * the shipment's logger in debug local mode (4.1). Raw SQL, so that no production DAO can do this.
+     *
+     * @return how many readings were rewritten.
+     */
+    suspend fun rewriteHistoryFrom(
+        database: ColdChainDatabase,
+        shipmentId: String,
+        fromSeq: Long,
+        temperature: Double
+    ): Int = withContext(Dispatchers.IO) {
+        val held = database.temperatureEventDao().getTemperaturesDirect(shipmentId).map { it.toDomain() }
+        if (held.none { it.seq >= fromSeq }) return@withContext 0
+        val rewritten = HashChainService.buildChain(
+            held.map { if (it.seq >= fromSeq) it.copy(temperature = temperature) else it },
+            held.first().previousHash
+        ).filter { it.seq >= fromSeq }
+        rewritten.forEach {
+            database.openHelper.writableDatabase.execSQL(
+                "UPDATE temperature_events SET temperature = ?, previousHash = ?, currentHash = ? WHERE id = ?",
+                arrayOf<Any>(it.temperature, it.previousHash, it.currentHash, it.id)
+            )
+        }
+        database.invalidationTracker.refreshVersionsAsync()
+        rewritten.size
     }
 
     suspend fun logChaosEvent(

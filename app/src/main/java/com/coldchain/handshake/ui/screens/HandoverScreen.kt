@@ -96,6 +96,9 @@ import kotlinx.coroutines.flow.firstOrNull
  * Read-only audit snapshot; contains NO live telemetry or continuous GPS controls.
  */
 
+/** Shown until the shipment's logger check has come back, in place of a verdict. */
+const val LOGGER_CHECK_WAITING = "Waiting for the logger check before the record can be judged"
+
 @Composable
 fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel = hiltViewModel()) {
     val scrollState = rememberScrollState()
@@ -764,7 +767,9 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
         Spacer(modifier = Modifier.height(16.dp))
 
         // 9. FINAL VERDICT & EXECUTE CUSTODY HANDOVER
-        val isPendingSync = isSyncing
+        // A logger check not back yet is not "not checked": nothing is judged, or offered, until it is (Gate 4 review).
+        val isLoggerPending = ui.loggerCheck == null
+        val isPendingSync = isSyncing || isLoggerPending
         val isVerified = integrityEvaluation.state == IntegrityVerificationState.VERIFIED
         val computedEvaluation = HandoverVerdictEngine.evaluate(
             temperature = breachEvaluation.verdict,
@@ -775,7 +780,7 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
             shakeTest = shakeTest,
             historyAvailable = integrityEvaluation.state != IntegrityVerificationState.PENDING_SYNC,
             // The same check the confirmation records (ServerHandover.loggerCheck), so the screen shows what is sent.
-            loggerCheck = ui.loggerCheck?.outcome ?: LoggerCheckOutcome.NOT_CHECKED
+            loggerCheck = ui.loggerCheck?.outcome ?: LoggerCheckOutcome.UNKNOWN
         )
         val preliminaryVerdict = computedEvaluation.verdict
 
@@ -809,7 +814,8 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
             else -> "FINAL VERDICT: ${preliminaryVerdict.name}"
         }
         val verdictSubtitle = when {
-            isPendingSync -> "Waiting for every reading before the record can be checked"
+            isSyncing -> "Waiting for every reading before the record can be checked"
+            isLoggerPending -> LOGGER_CHECK_WAITING
             preliminaryVerdict == HandoverVerdict.PASS -> "Eligible for Acceptance"
             preliminaryVerdict == HandoverVerdict.UNKNOWN -> "The readings have a gap, so the shipment is held"
             integrityEvaluation.state == IntegrityVerificationState.TAMPER_DETECTED ->
@@ -869,7 +875,8 @@ fun HandoverScreen(modifier: Modifier = Modifier, viewModel: HandoverViewModel =
             enabled = !isProcessing && !isPendingSync && handoverResult == null && storedHandover == null,
             waitingLabel = when {
                 isProcessing -> "Evaluating & Recording Handover..."
-                isPendingSync -> "Waiting for Complete History..."
+                isSyncing -> "Waiting for Complete History..."
+                isLoggerPending -> "Waiting for the Logger Check..."
                 handoverResult != null || storedHandover != null -> "Handover Recorded"
                 else -> null
             },

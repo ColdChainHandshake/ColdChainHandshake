@@ -9,6 +9,8 @@ import com.coldchain.handshake.crypto.UploadIssue
 import com.coldchain.handshake.handover.HandoverOrchestrator
 import com.coldchain.handshake.handover.HandoverOrchestratorResult
 import com.coldchain.handshake.logger.LoggerCheckResult
+import com.coldchain.handshake.logger.LoggerHandoverCheck
+import com.coldchain.handshake.simulator.LocalLoggers
 import com.coldchain.handshake.handover.HandoverResult
 import com.coldchain.handshake.handover.ServerHandover
 import com.coldchain.handshake.models.Alert
@@ -52,6 +54,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -122,8 +125,21 @@ class HandoverViewModel @Inject constructor(
     private val serverHandover: ServerHandover,
     private val orchestrator: HandoverOrchestrator,
     private val recorder: CourierRecorder,
+    private val localLoggers: LocalLoggers,
     private val saved: SavedStateHandle
 ) : ViewModel() {
+
+    private val localLoggerCheck = LoggerHandoverCheck()
+
+    /**
+     * Debug local mode: the shipment's virtual logger on this phone, read as a receiver reads a logger, against its own
+     * key (here the phone that recorded is the phone that receives). No logger here (a restart) is NOT_CHECKED.
+     */
+    private suspend fun localLoggerCheck(shipment: Shipment): LoggerCheckResult = simulator.betweenReadings {
+        val logger = localLoggers.of(shipment.id)
+        val readings = telemetry.getTemperatures(shipment.id).first().sortedBy { it.seq }
+        localLoggerCheck.check(logger, shipment.loggerId, localLoggers.enrolledKey(shipment.id), 0L, readings)
+    }
 
     private val _state = MutableStateFlow(
         freshFor(simulator.activeShipment.value).copy(me = account.state.value as? AccountState.Ready)
@@ -205,6 +221,13 @@ class HandoverViewModel @Inject constructor(
                     val (id, onServer) = opened ?: return@collectLatest
                     if (!onServer) {
                         history.markReady(id)
+                        // Debug local mode: the check against this phone's virtual logger, again as readings change.
+                        telemetry.getTemperatures(id).collect {
+                            simulator.activeShipment.value?.takeIf { it.id == id }?.let { shipment ->
+                                val logger = localLoggerCheck(shipment)
+                                _state.update { it.copy(loggerCheck = logger) }
+                            }
+                        }
                         return@collectLatest
                     }
                     val backoff = PollBackoff()
@@ -292,6 +315,7 @@ class HandoverViewModel @Inject constructor(
 
     fun refresh(): Job = viewModelScope.launch {
         val shipment = _state.value.shipment ?: return@launch
+        loggerChecked = null
         serverHandover.refresh(shipment.id).onFailure { e -> _state.update { it.copy(error = e.message) } }
         serverRefresh.update { it + 1 }
     }
@@ -334,6 +358,9 @@ class HandoverViewModel @Inject constructor(
                 }
                 .onFailure { e -> _state.update { it.copy(error = e.message) } }
         } else {
+            // The same check the screen shows is what the handover records.
+            val logger = localLoggerCheck(shipment)
+            _state.update { it.copy(loggerCheck = logger) }
             orchestrator.processHandover(
                 shipmentId = shipment.id,
                 workerSigned = true,
@@ -342,7 +369,8 @@ class HandoverViewModel @Inject constructor(
                 reason = reason,
                 vvmStage = current.vvmStage,
                 shakeTest = current.shakeTest,
-                historySynced = syncState.value == HistorySyncState.HISTORY_READY
+                historySynced = syncState.value == HistorySyncState.HISTORY_READY,
+                loggerCheck = logger.outcome
             )
                 .onSuccess { res ->
                     _state.update { it.copy(result = res) }
@@ -384,9 +412,18 @@ class HandoverViewModel @Inject constructor(
         val custody = remote.getCustody(shipmentId).getOrNull()
         val members = remote.getMembers(shipmentId).getOrDefault(emptyList())
         val issues = remote.getBatches(shipmentId).getOrNull()?.let { UploadAudit.check(shipmentId, it, events) }
-        val logger = serverHandover.loggerCheck(shipmentId)
-        _state.update { it.copy(custody = custody, members = members, uploadIssues = issues, loggerCheck = logger) }
+        _state.update { it.copy(custody = custody, members = members, uploadIssues = issues) }
+        // The logger is read again only for a new head or when the person asks (Gate 4 review G4-7): a real one is a
+        // Bluetooth exchange, not something to repeat on each look at the server. Recording reads it afresh anyway.
+        val head = shipmentId to events.maxByOrNull { it.seq }?.currentHash
+        val logger = loggerChecked?.takeIf { it.first == head }?.second
+            ?: serverHandover.loggerCheck(shipmentId).also { loggerChecked = head to it }
+        _state.update { if (it.shipment?.id == shipmentId) it.copy(loggerCheck = logger) else it }
     }
+
+    /** The last logger check on a server shipment and the shipment and newest reading it was made against. */
+    @Volatile
+    private var loggerChecked: Pair<Pair<String, String?>, LoggerCheckResult>? = null
 
     companion object {
         /** How long a new server head waits for the readings saved with it to reach the screen. */

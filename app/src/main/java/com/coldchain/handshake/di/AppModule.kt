@@ -49,6 +49,7 @@ import com.coldchain.handshake.repository.TelemetryRepository
 import com.coldchain.handshake.repository.TelemetryRepositoryImpl
 import com.coldchain.handshake.safety.SafetyEngine
 import com.coldchain.handshake.crypto.DeviceSigner
+import com.coldchain.handshake.simulator.LocalLoggers
 import com.coldchain.handshake.simulator.TemperatureSimulator
 import com.coldchain.handshake.ui.navigation.SessionGate
 import com.coldchain.handshake.util.DeviceIdProvider
@@ -130,12 +131,14 @@ object AppModule {
     fun temperatureSimulator(
         telemetry: TelemetryRepository,
         chaos: ChaosEngineService,
-        safetyEngine: SafetyEngine
+        safetyEngine: SafetyEngine,
+        localLoggers: LocalLoggers
     ): TemperatureSimulator = TemperatureSimulator(
         telemetryRepository = telemetry,
         chaosEngineService = chaos,
         safetyEngine = safetyEngine,
-        wallClock = System::currentTimeMillis
+        wallClock = System::currentTimeMillis,
+        localLoggers = localLoggers
     )
 
     @Provides @Singleton
