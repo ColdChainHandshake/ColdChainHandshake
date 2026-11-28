@@ -734,11 +734,13 @@ select throws_ok(
 
 -- Alerts and location -----------------------------------------------------------------------------
 
+-- Dated now: since 0005 a point dated before the shipment existed is refused (S8).
 select lives_ok(
   format(
     'select public.append_gps_points(%L, %L, %L::jsonb)',
     'SHIP-3', :device_courier::uuid,
-    '[{"id":"cccccccc-0000-0000-0000-000000000001","lat":1.5,"lon":2.5,"accuracy_m":3.5,"device_ts":1700000000000}]'
+    format('[{"id":"cccccccc-0000-0000-0000-000000000001","lat":1.5,"lon":2.5,"accuracy_m":3.5,"device_ts":%s}]',
+           (extract(epoch from now()) * 1000)::bigint)
   ),
   'the custodian can report location'
 );
@@ -746,7 +748,8 @@ select lives_ok(
   format(
     'select public.append_gps_points(%L, %L, %L::jsonb)',
     'SHIP-3', :device_courier::uuid,
-    '[{"id":"cccccccc-0000-0000-0000-000000000001","lat":1.5,"lon":2.5,"accuracy_m":3.5,"device_ts":1700000000000}]'
+    format('[{"id":"cccccccc-0000-0000-0000-000000000001","lat":1.5,"lon":2.5,"accuracy_m":3.5,"device_ts":%s}]',
+           (extract(epoch from now()) * 1000)::bigint)
   ),
   'sending the same location twice is harmless'
 );

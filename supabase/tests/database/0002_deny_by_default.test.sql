@@ -100,7 +100,9 @@ select bag_eq(
        ('acknowledge_alert(text)'),
        ('append_gps_points(text,uuid,jsonb)'),
        ('private.is_member(text)'),
-       ('private.shares_shipment(uuid)') $$,
+       ('private.shares_shipment(uuid)'),
+       -- S8 (0005): who may read a location point, used by gps_points' read policy
+       ('private.can_see_location(text,uuid)') $$,
   'authenticated can execute exactly the allow-listed functions'
 );
 
