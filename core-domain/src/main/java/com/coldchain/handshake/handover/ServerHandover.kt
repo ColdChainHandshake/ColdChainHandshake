@@ -63,11 +63,20 @@ class ServerHandover(
         val found = remote.getShipment(shipmentId).getOrElse {
             return LoggerCheckResult(LoggerCheckOutcome.UNKNOWN, listOf("The shipment's logger enrolment couldn't be read."))
         } ?: return LoggerCheckResult(LoggerCheckOutcome.UNKNOWN, listOf("No shipment with that code."))
+        val enrolledKey = found.enrolledLoggerKey
+        // With a key but no start, which record is reading 1 isn't known: guessing 0 would compare a reused logger's
+        // older records with this trip's readings (Gate 4 review G4-8).
+        val startSeq = found.loggerStartSeq ?: if (enrolledKey != null) {
+            return LoggerCheckResult(
+                LoggerCheckOutcome.UNKNOWN,
+                listOf("The shipment's logger is on record without the record its trip started at, so it can't be matched to the readings.")
+            )
+        } else 0L
         return loggerHandoverCheck.check(
             link = loggerLink(shipmentId),
             loggerId = found.loggerId,
-            enrolledKey = found.enrolledLoggerKey,
-            startSeq = found.loggerStartSeq ?: 0L,
+            enrolledKey = enrolledKey,
+            startSeq = startSeq,
             readings = history.heldReadings(shipmentId)
         )
     }

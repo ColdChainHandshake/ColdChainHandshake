@@ -5,6 +5,7 @@ import com.coldchain.handshake.logger.LoggerCheckOutcome.NOT_CHECKED
 import com.coldchain.handshake.logger.LoggerCheckOutcome.PASSED
 import com.coldchain.handshake.logger.LoggerCheckOutcome.UNKNOWN
 import com.coldchain.handshake.models.TemperatureEvent
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.SecureRandom
 
 /**
@@ -45,11 +46,13 @@ data class LoggerCheckResult(
  * @param newNonce A fresh 16-byte nonce for each check.
  * @param pageSize Records asked for per request.
  * @param maxPages A bound on requests, so a logger that never stops answering can't hold the check forever.
+ * @param deadlineMs A bound on the whole check, so a logger answering slowly can't either.
  */
 class LoggerHandoverCheck(
     private val newNonce: () -> ByteArray = { ByteArray(NONCE_SIZE).also(SecureRandom()::nextBytes) },
     private val pageSize: Int = DEFAULT_PAGE_SIZE,
-    private val maxPages: Int = DEFAULT_MAX_PAGES
+    private val maxPages: Int = DEFAULT_MAX_PAGES,
+    private val deadlineMs: Long = DEFAULT_DEADLINE_MS
 ) {
 
     /**
@@ -59,6 +62,18 @@ class LoggerHandoverCheck(
      * @param readings The shipment's readings as this phone holds them.
      */
     suspend fun check(
+        link: LoggerLink?,
+        loggerId: String,
+        enrolledKey: ByteArray?,
+        startSeq: Long,
+        readings: List<TemperatureEvent>
+    ): LoggerCheckResult =
+        // Each request has its own timeout, but a logger answering each just in time could hold the check for every
+        // page in turn (Gate 4 review G4-7), so one deadline covers the whole of it.
+        withTimeoutOrNull(deadlineMs) { checkWithin(link, loggerId, enrolledKey, startSeq, readings) }
+            ?: result(UNKNOWN, "The logger didn't finish answering within ${deadlineMs / 1000} s, so the check stopped.")
+
+    private suspend fun checkWithin(
         link: LoggerLink?,
         loggerId: String,
         enrolledKey: ByteArray?,
@@ -158,6 +173,8 @@ class LoggerHandoverCheck(
         const val NONCE_SIZE = 16
         const val DEFAULT_PAGE_SIZE = 500
         const val DEFAULT_MAX_PAGES = 64
+        /** The whole check, every page and the head together. */
+        const val DEFAULT_DEADLINE_MS = 60_000L
         private const val SHOWN_ID_LENGTH = 40
     }
 }

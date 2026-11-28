@@ -282,6 +282,56 @@ class ServerHandoverTest {
         assertEquals(LoggerCheckOutcome.UNKNOWN, handoverOffline.loggerCheck("SHIP-1").outcome)
     }
 
+    // Gate 4 review, mutant A3 and G4-5: a key on record that can't be read is still a logger on record, so it isn't
+    // "none enrolled". The server's CHECK refuses such a key today; this guards the phone's side.
+    @Test
+    fun aMalformedKeyOnRecordIsUnknownNotNotChecked() = runBlocking {
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(loggerPublicKeyHex = "04zz", loggerStartSeq = 0)
+        courierUploaded(chain(10))
+        courierReleases()
+        openAsReceiver()
+
+        assertEquals(LoggerCheckOutcome.UNKNOWN, handover.loggerCheck("SHIP-1").outcome)
+        assertTrue(receive(HandoverVerdict.PASS).isFailure)
+    }
+
+    @Test
+    fun aMalformedKeyOnRecordWithTheLoggerInReachIsNotAPass() = runBlocking {
+        val reaching = ServerHandover(
+            remote = server, orchestrator = orchestrator, shipments = shipments, handovers = handovers,
+            history = history, uploadPending = { sync.uploadReadings(it) }, deviceId = { "device-1" },
+            clock = { now }, loggerLink = { logger }
+        )
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(loggerPublicKeyHex = "not hex", loggerStartSeq = 0)
+        courierUploaded(readingsFromTheLogger())
+        courierReleases()
+        openAsReceiver()
+
+        assertTrue(reaching.loggerCheck("SHIP-1").outcome in setOf(LoggerCheckOutcome.UNKNOWN, LoggerCheckOutcome.FAILED))
+    }
+
+    // Gate 4 review G4-8: a key with no start sequence can't say which record is reading 1. Taking 0 would compare a
+    // reused logger's older records with this trip's readings, so the check doesn't guess.
+    @Test
+    fun aKeyOnRecordWithoutItsStartSequenceIsUnknown() = runBlocking {
+        server.shipments["SHIP-1"] = server.shipments.getValue("SHIP-1").copy(
+            loggerPublicKeyHex = hex(logger.publicKeyUncompressed), loggerStartSeq = null
+        )
+        courierUploaded(readingsFromTheLogger())
+        courierReleases()
+        openAsReceiver()
+        val reaching = ServerHandover(
+            remote = server, orchestrator = orchestrator, shipments = shipments, handovers = handovers,
+            history = history, uploadPending = { sync.uploadReadings(it) }, deviceId = { "device-1" },
+            clock = { now }, loggerLink = { logger }
+        )
+
+        val result = reaching.loggerCheck("SHIP-1")
+
+        assertEquals(LoggerCheckOutcome.UNKNOWN, result.outcome)
+        assertTrue(result.reasons.single(), result.reasons.single().contains("start"))
+    }
+
     @Test
     fun withNoLoggerEnrolledTheLoggerIsNotCheckedAndThePassStands() = runBlocking {
         courierUploaded(chain(10))

@@ -265,5 +265,27 @@ class LoggerHandoverCheckTest {
         assertTrue(nonces.all { it.length == 32 })
     }
 
+    // Gate 4 review G4-7: each request has its own timeout, but a slow logger could answer each one just in time, up to
+    // 64 pages. One deadline covers the whole check.
+    @Test
+    fun aLoggerTooSlowToFinishIsStoppedByOneDeadlineAndIsUnknown() = runTest {
+        val logger = logger()
+        val slow = object : LoggerLink by logger {
+            override suspend fun readHistory(fromSeq: Long, maxRecords: Int): Result<LoggerBatch?> {
+                kotlinx.coroutines.delay(20_000)
+                return logger.readHistory(fromSeq, 1)
+            }
+        }
+        val started = testScheduler.currentTime
+
+        val result = LoggerHandoverCheck(deadlineMs = 60_000).check(
+            slow, loggerId, logger.publicKeyUncompressed, startSeq, readingsOf(logger)
+        )
+
+        assertEquals(UNKNOWN, result.outcome)
+        assertEquals(60_000L, testScheduler.currentTime - started)
+        assertTrue(result.reasons.single(), result.reasons.single().contains("60 s"))
+    }
+
     private fun logger(id: String) = VirtualLogger(id)
 }
