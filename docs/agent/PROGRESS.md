@@ -1,5 +1,14 @@
 # Progress
 
+**Next action (28 Nov, ~02:45): tag `gate-5` once the full proof passes at HEAD.** The reviewer's re-check at
+`76a110b` (`gate5_review.md` section 5) says Gate 5 is MET WITH RESERVATIONS, with the full proof outstanding. Claude
+Code stopped the last full proof for low memory and it may not be restarted without the owner (HANDOFF Q5). When
+allowed: run `./gradlew :core-domain:test testDebugUnitTest testReleaseUnitTest lintDebug assembleRelease assembleDebug
+--continue` (with `CCH_RELEASE_KEYS`) in the foreground, nothing else running, record it here, tag `gate-5`, then
+Phase 4 (4.3 test-first in SQL, `05b342e`-compatible; 4.1), Gate 4 "met without hardware", Phase 6, Gate 6. Re-check
+leftovers kept for Phase 6: a screen test for S3 (mutant 28), mutant 26 (the 30 s retry, a second safety net), R2
+to R4 (fail safe or display only), C7 (only S1 is scripted).
+
 **Update (28 Nov, 01:45):** done since the review, each test-first and committed: S1 (`2e73ea1`: reproduced with the
 real client, an offline restart turned the courier SignedOut or left Loading), S6 with mutants 20 and 23 (`3caf5f3`),
 mutant 10 (`3382063`), C8 and S4b (`a405bb4`), S4 (`d18c53b`), S7 (`0a1d3e4`), S3 (`bd0f1ea`), S12 (`001b0bb`),
