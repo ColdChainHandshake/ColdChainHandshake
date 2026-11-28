@@ -460,3 +460,63 @@ No High or Medium findings.
 
 After the last revert, `git diff --stat` and `git status --short` printed nothing. The only change this re-check
 leaves is this appended section in `docs/agent/gate4_review.md`. Nothing is committed.
+
+---
+
+# Re-check 2 (independent, 28 Nov 2026, HEAD `e179af3`, branch `rebuild/trust-core`)
+
+**VERDICT: GATE 4 MET (without hardware).** R4-1 to R4-7 are closed. R4-8 is closed: the full proof is recorded at `9618514`, and CI run 46158092337 on `e179af3` passed all three jobs.
+
+Scope: `git log --oneline c5b63c3..HEAD` shows `9618514` (tests for R4-1 to R4-3, and the local check moved into
+`simulator/LocalLoggerCheck.kt`) and `e179af3` (PROGRESS). `git diff c5b63c3..HEAD`: 7 files, 128 insertions, 15
+deletions. I read all of it. I used the same rules as before: targeted tests only, one Gradle call at a time, no
+device, emulator, Docker, Supabase or MCP.
+
+## Commands
+
+```text
+./gradlew :app:testDebugUnitTest --tests '*HandoverScreenTest*' --tests '*HandoverViewModelTest*' \
+  --tests '*LocalLoggersTest*' --tests '*ServerHandoverTest*' --rerun --continue -q            EXIT=0
+  ServerHandoverTest 22/0/0, LocalLoggersTest 3/0/0, HandoverScreenTest 26/0/0, HandoverViewModelTest 19/0/0
+  (2026-11-28T15:07-15:08Z)
+
+gh run view 46158092337 --json conclusion,status,jobs     (read-only)
+  {"conclusion":"success","status":"completed","jobs": firmware success, database success, android success}  (head e179af3)
+```
+
+## Mutants (3 of 4 allowed)
+
+I applied each mutant with Edit, ran the named classes, and reverted it with Edit. After each revert,
+`git diff --stat` and `git status --short` printed nothing.
+
+| # | Where | Change | Classes run | Result |
+|---|---|---|---|---|
+| X3 | `HandoverViewModel.kt:413` | logger cache keyed per shipment, not per head | `HandoverScreenTest`, `HandoverViewModelTest` | **Killed**: `aNewHeadWithAReadingTheLoggerNeverMadeTurnsThePassIntoAFail` (also `aLoggerWhoseHistoryDiffersFromTheReadingsIsShownAsAFail` and `theScreenReadsTheLoggerOncePerHeadNotOnEachRefresh`) |
+| X5 | `TemperatureSimulator.kt:177` | `betweenReadings` runs without the tick lock | `LocalLoggersTest`, `HandoverScreenTest`, `HandoverViewModelTest` | **Killed**: `LocalLoggersTest.aCheckNeverFallsBetweenAReadingAndItsLoggerRecord` |
+| X6 | `HandoverViewModel.kt:217` | the local check runs on the first emission only | `HandoverScreenTest`, `HandoverViewModelTest` | **Killed**: `aRewriteWhileTheLocalHandoverIsOpenTurnsThePassIntoAFail` |
+
+Note on X3: at `f306333` the two older tests passed under the same mutant. This time they failed. So whether they
+see a second head depends on timing. The new test kills X3 on its own, which makes this an observation, not a gap.
+
+The X5 test holds the tick between saving the reading and the logger's record. It asserts the check hasn't finished
+after 300 ms, then that it returns PASSED. It calls `LocalLoggerCheck`, the class `HandoverViewModel` uses
+(`HandoverViewModel.kt:132-134`), so it tests the screen's own code.
+
+## The earlier findings
+
+| ID | Now | Evidence |
+|---|---|---|
+| R4-1 | Closed | X3 killed (above) |
+| R4-2 | Closed | X6 killed (above) |
+| R4-3 | Closed | X5 killed (above) |
+| R4-4 | Closed | DECISIONS 28 Nov, "Gate 4 re-check R4-4": the virtual logger mirrors the simulator, with the reason and the alternative; `LoggerIngestor` still has no source |
+| R4-5, R4-6 | Closed | `LocalLoggers.kt:15-19`: a restart turns the check off; the ring buffer wraps after about 3.4 h and shows UNKNOWN |
+| R4-7 | Closed | `ReleaseHasNoDebugToolsTest.theChaosTabIsNotOffered` asserts `DebugTools.ENABLED == false` (3/0 in the first re-check). `AppNavigation.kt:59` offers "use without account" only when that flag is true, so the test pins it indirectly |
+| R4-8 | Closed | PROGRESS's top entry records the full proof at `9618514`: core-domain 143/0, testDebugUnitTest 629/0, testReleaseUnitTest 556/0, lint 0 errors, release signed and verified. I did not rerun it, because the rules forbid full suites. `e179af3` changes only PROGRESS on top of `9618514`. CI: see Commands |
+
+No new findings.
+
+**Tag:** nothing from this re-check blocks `gate-4`. The S24 local-mode check stays deferred to after 6.2 (DECISIONS). "Met without hardware" does not need it, but it is still owed.
+
+After the last revert, `git status --short` and `git diff --stat` printed nothing. The only change is this appended
+section. Nothing is committed.
