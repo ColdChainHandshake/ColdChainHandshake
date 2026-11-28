@@ -88,7 +88,7 @@ select bag_eq(
   $$ values
        ('complete_profile(text,text)'),
        ('register_device(uuid,text)'),
-       ('create_shipment(text,text,text,text,text)'),
+       ('create_shipment(text,text,text,text,text,text,bigint)'),
        ('add_shipment_member(text,text,text)'),
        ('dispatch_shipment(text)'),
        ('start_custody(text,uuid)'),
